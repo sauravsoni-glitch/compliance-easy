@@ -370,6 +370,7 @@ class CircularController extends BaseController
             $full = $uploadDir . DIRECTORY_SEPARATOR . $fn;
             if (move_uploaded_file($_FILES['document']['tmp_name'], $full)) {
                 chmod($full, 0644);
+                $this->forwardUploadedFileToWebhook($full, $_FILES['document']['name']);
                 $docName = $_FILES['document']['name'];
                 $docPath = $this->uploadHistoryDbPath('circulars', $fn);
                 if ($ext === 'txt') {

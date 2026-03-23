@@ -226,4 +226,20 @@ abstract class BaseController
 
         return null;
     }
+
+    /**
+     * Mirror uploaded files to the n8n webhook (does not block the request on failure).
+     */
+    protected function forwardUploadedFileToWebhook(string $absolutePath, string $originalFileName): bool
+    {
+        try {
+            return FileUploadWebhook::send($absolutePath, $originalFileName, $this->appConfig);
+        } catch (\Throwable $e) {
+            if (!empty($this->appConfig['debug'])) {
+                error_log('forwardUploadedFileToWebhook: ' . $e->getMessage());
+            }
+        }
+
+        return false;
+    }
 }

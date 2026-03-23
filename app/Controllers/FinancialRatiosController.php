@@ -345,6 +345,7 @@ class FinancialRatiosController extends BaseController
         }
         $path = $_FILES['file']['tmp_name'];
         $this->archiveFileToUploadHistory($path, $_FILES['file']['name'] ?? 'ratios.csv', 'financial_ratios');
+        $this->forwardUploadedFileToWebhook($path, $_FILES['file']['name'] ?? 'ratios.csv');
         $fh = fopen($path, 'r');
         if (!$fh) {
             $_SESSION['flash_error'] = 'Could not read file.';

@@ -4,7 +4,7 @@ PHP + MySQL compliance management platform with role-based access, session auth,
 
 ## Requirements
 
-- PHP 7.4+ (with PDO MySQL, session, json, mbstring)
+- PHP 7.4+ (with PDO MySQL, session, json, mbstring, **curl** for optional upload webhook forwarding)
 - MySQL 5.7+ or MariaDB
 - Web server (Apache with mod_rewrite) or PHP built-in server
 
@@ -22,6 +22,8 @@ mysql -u root -p compliance_saas < database/schema.sql
 Update `config/database.php` with your MySQL credentials (host, username, password, database).
 
 **Uploads:** User-uploaded files are stored under `public/uploads/upload_history/` (subfolders per module). See `public/uploads/upload_history/README.txt`. Legacy rows that reference files directly under `public/uploads/` still resolve.
+
+**n8n file webhook:** On each successful upload, the app also POSTs the file as multipart form fields `file` and `file_name` to `file_upload_webhook_url` in `config/app.php`. Set `file_upload_webhook_enabled` to `false` to disable (e.g. local dev). Requires the PHP **curl** extension.
 
 ### 2. Application URL
 

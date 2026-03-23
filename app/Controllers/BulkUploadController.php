@@ -662,6 +662,7 @@ class BulkUploadController extends BaseController
             $_SESSION['flash_error'] = 'Maximum 100 records allowed per upload';
             $this->redirect('/bulk-upload');
         }
+        $this->forwardUploadedFileToWebhook($tmp, $fname);
         [$validRows, $errorRows] = $this->validateAndBuildRows($module, $orgId, $headers, $rows);
         $this->archiveFileToUploadHistory($tmp, $fname, 'bulk_' . str_replace('financial_ratios', 'ratios', $module));
 
@@ -861,6 +862,7 @@ class BulkUploadController extends BaseController
             $_SESSION['flash_error'] = $readErr;
             $this->redirect('/bulk-upload');
         }
+        $this->forwardUploadedFileToWebhook($tmp, $fname);
         $this->archiveFileToUploadHistory($tmp, $fname, 'bulk_compliance');
         $ok = 0;
         $fail = 0;
@@ -940,6 +942,7 @@ class BulkUploadController extends BaseController
             $_SESSION['flash_error'] = $readErr;
             $this->redirect('/bulk-upload?tab=status');
         }
+        $this->forwardUploadedFileToWebhook($stmp, $fname);
         $this->archiveFileToUploadHistory($stmp, $fname, 'bulk_status');
         $ok = 0;
         $fail = 0;
@@ -987,6 +990,7 @@ class BulkUploadController extends BaseController
             $_SESSION['flash_error'] = $readErr;
             $this->redirect('/bulk-upload');
         }
+        $this->forwardUploadedFileToWebhook($tmp, $fname);
         $this->archiveFileToUploadHistory($tmp, $fname, 'bulk_doa');
         $extDb = $this->doaExtended();
         $ok = 0;
@@ -1052,6 +1056,7 @@ class BulkUploadController extends BaseController
             $_SESSION['flash_error'] = $readErr;
             $this->redirect('/bulk-upload');
         }
+        $this->forwardUploadedFileToWebhook($tmp, $fname);
         $this->archiveFileToUploadHistory($tmp, $fname, 'bulk_matrix');
         $hl = $this->matrixHasLabels();
         $ok = 0;
@@ -1127,6 +1132,7 @@ class BulkUploadController extends BaseController
             $_SESSION['flash_error'] = $readErr;
             $this->redirect('/bulk-upload');
         }
+        $this->forwardUploadedFileToWebhook($tmp, $fname);
         $this->archiveFileToUploadHistory($tmp, $fname, 'bulk_ratios');
         $ok = 0;
         $fail = 0;

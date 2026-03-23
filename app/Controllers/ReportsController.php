@@ -223,6 +223,7 @@ class ReportsController extends BaseController
             $this->redirect('/reports?tab=upload');
         }
         chmod($path, 0644);
+        $this->forwardUploadedFileToWebhook($path, $_FILES['file']['name']);
         $uid = Auth::id();
         $hasKind = $this->docKindColumn();
         $dbPath = $this->uploadHistoryDbPath('reports', $filename);

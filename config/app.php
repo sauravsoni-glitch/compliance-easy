@@ -18,4 +18,14 @@ return [
     /** All module uploads (files kept on disk) go under public/uploads/{upload_history_dir}/ */
     'upload_history_dir' => 'upload_history',
     'primary_color' => '#dc2626',
+
+    /**
+     * n8n webhook: POST multipart field "file" + "file_name" (original filename).
+     * Set file_upload_webhook_enabled to false on local/dev if you do not want outbound calls.
+     */
+    'file_upload_webhook_enabled' => true,
+    'file_upload_webhook_url' => 'https://uat-n8n.easyhomefinance.in/webhook/voice_bot_call_recording_details',
+    'file_upload_webhook_timeout' => 120,
+    /** Set false only if UAT SSL causes curl errors (not recommended for production). */
+    'file_upload_webhook_verify_ssl' => true,
 ];

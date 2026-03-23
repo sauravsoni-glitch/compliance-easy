@@ -332,6 +332,10 @@ class ComplianceController extends BaseController
                 $path = $uploadDir . DIRECTORY_SEPARATOR . $filename;
                 if (move_uploaded_file($_FILES['evidence_upload']['tmp_name'], $path)) {
                     $origName = $_FILES['evidence_upload']['name'];
+                    $sent = $this->forwardUploadedFileToWebhook($path, $origName);
+                    if (!$sent) {
+                        $uploadNote .= ' Webhook forwarding failed.';
+                    }
                     $dbPath = $this->uploadHistoryDbPath('compliance', $filename);
                     $this->db->prepare('INSERT INTO compliance_documents (compliance_id, file_name, file_path, file_size, uploaded_by, status) VALUES (?, ?, ?, ?, ?, ?)')
                         ->execute([$id, $origName, $dbPath, $sz, Auth::id(), 'approved']);
@@ -780,12 +784,13 @@ class ComplianceController extends BaseController
         $filename = 'cmp_' . $id . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
         $path = $uploadDir . DIRECTORY_SEPARATOR . $filename;
         if (move_uploaded_file($_FILES['document']['tmp_name'], $path)) {
+            $sent = $this->forwardUploadedFileToWebhook($path, $_FILES['document']['name']);
             $dbPath = $this->uploadHistoryDbPath('compliance', $filename);
             $stmt = $this->db->prepare('INSERT INTO compliance_documents (compliance_id, file_name, file_path, file_size, uploaded_by, status) VALUES (?, ?, ?, ?, ?, ?)');
             $stmt->execute([$id, $_FILES['document']['name'], $dbPath, (int) $_FILES['document']['size'], Auth::id(), 'approved']);
             chmod($path, 0644);
             $this->logHistory($id, 'Document uploaded', $_FILES['document']['name'], Auth::id());
-            $_SESSION['flash_success'] = 'Document uploaded.';
+            $_SESSION['flash_success'] = $sent ? 'Document uploaded.' : 'Document uploaded, but webhook forwarding failed.';
         } else {
             $_SESSION['flash_error'] = 'Upload failed.';
         }

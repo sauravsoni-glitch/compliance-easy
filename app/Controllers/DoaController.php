@@ -406,6 +406,7 @@ class DoaController extends BaseController
             $_SESSION['flash_error'] = 'Upload CSV (.csv) only.';
             $this->redirect('/doa');
         }
+        $this->forwardUploadedFileToWebhook($_FILES['file']['tmp_name'], $_FILES['file']['name'] ?? 'doa_bulk.csv');
         $fh = fopen($_FILES['file']['tmp_name'], 'r');
         if (!$fh) {
             $_SESSION['flash_error'] = 'Could not read file.';

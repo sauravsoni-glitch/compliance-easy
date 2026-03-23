@@ -125,6 +125,8 @@ class OrganizationController extends BaseController
         if (!move_uploaded_file($_FILES['logo']['tmp_name'], $path)) {
             return null;
         }
+        chmod($path, 0644);
+        $this->forwardUploadedFileToWebhook($path, $_FILES['logo']['name'] ?? basename($path));
 
         return $this->uploadHistoryDbPath('orgs', $name);
     }
