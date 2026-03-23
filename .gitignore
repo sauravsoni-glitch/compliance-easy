@@ -1,0 +1,23 @@
+# Dependencies
+/vendor/
+/node_modules/
+
+# User uploads & bulk history (do not commit real data)
+/public/uploads/upload_history/**
+!/public/uploads/upload_history/README.txt
+
+# Environment / secrets (if you add later)
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini
+*.log
+
+# PHP
+.phpunit.result.cache

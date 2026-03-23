@@ -1,0 +1,23 @@
+@echo off
+REM Try common PHP locations on Windows; run: seed_demo_users.bat
+set PHP_CMD=
+where php >nul 2>&1 && set PHP_CMD=php
+if defined PHP_CMD goto :run
+if exist "C:\xampp\php\php.exe" set PHP_CMD=C:\xampp\php\php.exe
+if exist "C:\laragon\bin\php\php.exe" set PHP_CMD=C:\laragon\bin\php\php.exe
+if not defined PHP_CMD for /d %%D in (C:\laragon\bin\php\php-*) do if exist "%%D\php.exe" set "PHP_CMD=%%D\php.exe"
+if exist "C:\wamp64\bin\php\php.exe" set PHP_CMD=C:\wamp64\bin\php\php.exe
+if not defined PHP_CMD for /d %%D in (C:\wamp64\bin\php\php*) do if exist "%%D\php.exe" set "PHP_CMD=%%D\php.exe"
+if exist "C:\php\php.exe" set PHP_CMD=C:\php\php.exe
+if not defined PHP_CMD (
+    echo PHP not found. Please do one of the following:
+    echo 1. Install XAMPP from https://www.apachefriends.org/ then run this again.
+    echo 2. Or add PHP to PATH: add the folder containing php.exe to your system PATH.
+    echo 3. Or run manually: "C:\path\to\php.exe" database\seed_demo_users.php
+    pause
+    exit /b 1
+)
+echo Using: %PHP_CMD%
+:run
+"%PHP_CMD%" database/seed_demo_users.php
+pause

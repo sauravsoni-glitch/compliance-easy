@@ -1,0 +1,4 @@
+Department,Level,Role,ApprovalType,MinAmount,MaxAmount,Conditions,Status
+Finance,1,Finance Manager,Expense Approval,0,1000000,,active
+Finance,2,Finance Head,Expense Approval,0,2500000,,active
+HR & Admin,1,HR Executive,Expense Approval,0,200000,,temporary
