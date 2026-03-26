@@ -1,13 +1,21 @@
 <?php
 /**
- * If the app is NOT at the domain root (e.g. http://localhost/compliance/public/),
- * set url to that full base (no trailing slash). Example:
- *   'url' => 'http://localhost/compliance/public',
- * Otherwise links like /compliance open the wrong URL. PHP built-in server: http://localhost:8000
+ * Public base URL (no trailing slash). Used for links, redirects, and asset basePath.
+ *
+ * Production: https://compliance.easyhomefinance.in
+ * Local dev:  set env APP_URL=http://localhost:8000 (or http://localhost/compliance/public if in a subfolder).
+ *
+ * If the app is NOT at the domain root, include the path after the host, e.g.
+ *   APP_URL=http://localhost/compliance/public
  */
+$appBaseUrl = getenv('APP_URL');
+if ($appBaseUrl === false || trim((string) $appBaseUrl) === '') {
+    $appBaseUrl = 'https://compliance.easyhomefinance.in';
+}
+
 return [
     'name'       => 'Easy Home Finance - Compliance',
-    'url'        => 'http://localhost:8000',
+    'url'        => rtrim((string) $appBaseUrl, '/'),
     'timezone'   => 'Asia/Kolkata',
     'debug'      => true,
     'session'    => [

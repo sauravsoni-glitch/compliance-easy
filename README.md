@@ -27,13 +27,11 @@ Update `config/database.php` with your MySQL credentials (host, username, passwo
 
 ### 2. Application URL
 
-Set the base URL in `config/app.php` (used for links and assets):
+The public base URL is resolved from the **`APP_URL`** environment variable, or defaults to **`https://compliance.easyhomefinance.in`** in `config/app.php` (used for links and assets).
 
-- **Apache (e.g. XAMPP):** If the app is in `htdocs/compliance`, set:
-  - `'url' => 'http://localhost/compliance/public'`
-- **PHP built-in server:** Run from project root:
-  - `php -S localhost:8000 -t public`
-  - Then set `'url' => 'http://localhost:8000'`
+- **Production:** Set `APP_URL=https://compliance.easyhomefinance.in` (or rely on the default in `config/app.php`).
+- **Local (PHP built-in server):** `APP_URL=http://localhost:8000` before starting the server, or adjust the default in `config/app.php`.
+- **Apache subfolder (e.g. XAMPP):** e.g. `APP_URL=http://localhost/compliance/public`
 
 ### 3. Run with PHP built-in server
 
