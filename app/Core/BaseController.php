@@ -190,7 +190,7 @@ abstract class BaseController
             return null;
         }
         $dbPath = str_replace('\\', '/', $dbPath);
-        if (str_contains($dbPath, '..')) {
+        if (strpos($dbPath, '..') !== false) {
             return null;
         }
         $base = rtrim($this->appConfig['upload_path'] ?? (dirname(__DIR__, 2) . '/public/uploads'), '/\\');

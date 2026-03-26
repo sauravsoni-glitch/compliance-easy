@@ -129,7 +129,7 @@ class BulkUploadController extends BaseController
         if (str_ends_with($email, '@example.com') || str_ends_with($email, '@example.org')) {
             return true;
         }
-        if (str_ends_with($email, '@test.com') || str_contains($email, '@localhost')) {
+        if ((strlen($email) >= 9 && substr($email, -9) === '@test.com') || strpos($email, '@localhost') !== false) {
             return true;
         }
 
@@ -300,8 +300,8 @@ class BulkUploadController extends BaseController
 
     private function fieldAliases(string $module): array
     {
-        return match ($module) {
-            'compliance' => [
+        if ($module === 'compliance') {
+            return [
                 'title' => ['title', 'compliancetitle', 'compliancename', 'name', 'subject', 'item', 'description', 'task', 'report', 'heading', 'compliance', 'activity'],
                 'authority' => ['authority', 'authorityname', 'regulator', 'regulatorybody'],
                 'department' => ['department', 'dept', 'departmentname', 'businessunit', 'busunit', 'unit', 'branch', 'division', 'vertical', 'segment', 'function', 'costcenter', 'costcentre', 'orgunit', 'entity', 'region', 'team', 'group'],
@@ -312,8 +312,10 @@ class BulkUploadController extends BaseController
                 'maker_email' => ['makeremail', 'owneremail', 'maker'],
                 'reviewer_email' => ['revieweremail', 'reviewer'],
                 'approver_email' => ['approveremail', 'approver'],
-            ],
-            'doa' => [
+            ];
+        }
+        if ($module === 'doa') {
+            return [
                 'department' => ['department', 'dept'],
                 'level' => ['level', 'levelorder'],
                 'role' => ['role', 'designation'],
@@ -322,8 +324,10 @@ class BulkUploadController extends BaseController
                 'max_amount' => ['maxamount', 'maximumamount', 'max'],
                 'conditions' => ['conditions', 'condition', 'remarks'],
                 'status' => ['status'],
-            ],
-            'authority_matrix' => [
+            ];
+        }
+        if ($module === 'authority_matrix') {
+            return [
                 'compliance_area' => ['compliancearea', 'area', 'compliance', 'compliancename', 'title', 'name', 'subject'],
                 'department' => ['department', 'dept', 'departmentname', 'businessunit', 'unit', 'branch', 'division'],
                 'frequency' => ['frequency', 'freq'],
@@ -336,17 +340,20 @@ class BulkUploadController extends BaseController
                 'reviewer_label' => ['reviewerlabel'],
                 'approver_label' => ['approverlabel'],
                 'status' => ['status'],
-            ],
-            'financial_ratios' => [
+            ];
+        }
+        if ($module === 'financial_ratios') {
+            return [
                 'ratio_name' => ['rationame', 'name'],
                 'category_slug' => ['categoryslug', 'category', 'slug'],
                 'regulatory_limit' => ['regulatorylimit', 'limit'],
                 'current_value' => ['currentvalue', 'value'],
                 'status' => ['status'],
                 'date' => ['date', 'updatedat'],
-            ],
-            default => [],
-        };
+            ];
+        }
+
+        return [];
     }
 
     private function mapColumns(string $module, array $headers): array
@@ -375,28 +382,32 @@ class BulkUploadController extends BaseController
      */
     private function applyPositionalColumnFallback(string $module, array $map, int $colCount): array
     {
-        $orders = match ($module) {
-            'compliance' => [
+        if ($module === 'compliance') {
+            $orders = [
                 'title' => 0, 'authority' => 1, 'department' => 2, 'frequency' => 3,
                 'due_date' => 4, 'risk' => 5, 'priority' => 6,
                 'maker_email' => 7, 'reviewer_email' => 8, 'approver_email' => 9,
-            ],
-            'doa' => [
+            ];
+        } elseif ($module === 'doa') {
+            $orders = [
                 'department' => 0, 'level' => 1, 'role' => 2, 'approval_type' => 3,
                 'min_amount' => 4, 'max_amount' => 5, 'conditions' => 6, 'status' => 7,
-            ],
-            'authority_matrix' => [
+            ];
+        } elseif ($module === 'authority_matrix') {
+            $orders = [
                 'compliance_area' => 0, 'department' => 1, 'frequency' => 2,
                 'workflow_level' => 3, 'risk' => 4, 'escalation_days' => 5,
                 'maker_email' => 6, 'reviewer_email' => 7, 'approver_email' => 8,
                 'reviewer_label' => 9, 'approver_label' => 10, 'status' => 11,
-            ],
-            'financial_ratios' => [
+            ];
+        } elseif ($module === 'financial_ratios') {
+            $orders = [
                 'ratio_name' => 0, 'category_slug' => 1, 'regulatory_limit' => 2,
                 'current_value' => 3, 'status' => 4, 'date' => 5,
-            ],
-            default => [],
-        };
+            ];
+        } else {
+            $orders = [];
+        }
         foreach ($orders as $field => $idx) {
             if (($map[$field] ?? null) === null && $idx < $colCount) {
                 $map[$field] = $idx;
@@ -718,11 +729,12 @@ class BulkUploadController extends BaseController
 
         $total = $ok + $fail;
         $status = $fail && $ok ? 'partial' : ($fail && !$ok ? 'failed' : 'completed');
-        $kind = match ($module) {
-            'authority_matrix' => 'authority_matrix',
-            'financial_ratios' => 'financial_ratios',
-            default => $module,
-        };
+        $kind = $module;
+        if ($module === 'authority_matrix') {
+            $kind = 'authority_matrix';
+        } elseif ($module === 'financial_ratios') {
+            $kind = 'financial_ratios';
+        }
         $notes = 'Rows skipped (validation): ' . count($errorRows);
         $this->writeLog($orgId, $kind, $fname, $total, $ok, $fail, $status, $notes);
         $_SESSION['flash_success'] = "Upload finished: {$ok} imported, {$fail} skipped or failed.";

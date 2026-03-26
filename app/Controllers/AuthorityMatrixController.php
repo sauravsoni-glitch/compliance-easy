@@ -100,10 +100,10 @@ class AuthorityMatrixController extends BaseController
     private function workflowDepthForRow(array $it): int
     {
         $wl = strtolower(trim((string) ($it['workflow_level'] ?? '')));
-        if ($wl !== '' && str_contains($wl, 'multi')) {
+        if ($wl !== '' && strpos($wl, 'multi') !== false) {
             return 4;
         }
-        if ($wl !== '' && str_contains($wl, 'single')) {
+        if ($wl !== '' && strpos($wl, 'single') !== false) {
             return 2;
         }
         if (!empty($it['reviewer_id'])) {
