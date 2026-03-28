@@ -7,6 +7,7 @@ PHP + MySQL compliance management platform with role-based access, session auth,
 - PHP 7.4+ (with PDO MySQL, session, json, mbstring, **curl** for optional upload webhook forwarding)
 - MySQL 5.7+ or MariaDB
 - Web server (Apache with mod_rewrite) or PHP built-in server
+- **Composer** (for PHPMailer — run `composer install` in the project root after clone)
 
 ## Setup
 
@@ -21,19 +22,51 @@ mysql -u root -p compliance_saas < database/schema.sql
 
 Update `config/database.php` with your MySQL credentials (host, username, password, database).
 
+**PHP dependencies (invite emails):**
+
+```bash
+composer install
+```
+
 **Uploads:** User-uploaded files are stored under `public/uploads/upload_history/` (subfolders per module). See `public/uploads/upload_history/README.txt`. Legacy rows that reference files directly under `public/uploads/` still resolve.
 
 **n8n file webhook:** On each successful upload, the app also POSTs the file as multipart form fields `file` and `file_name` to `file_upload_webhook_url` in `config/app.php`. Set `file_upload_webhook_enabled` to `false` to disable (e.g. local dev). Requires the PHP **curl** extension.
 
+**Invite emails (Gmail SMTP):** After `composer install`, set environment variables on the server (or in your PHP-FPM/Apache pool). See `config/mail.php` for the full list. Typical Gmail setup:
+
+- `MAIL_ENABLED=1`
+- `MAIL_HOST=smtp.gmail.com`
+- `MAIL_PORT=587`
+- `MAIL_ENCRYPTION=tls`
+- `MAIL_USERNAME=youraddress@gmail.com`
+- `MAIL_PASSWORD=` your **Gmail App Password** (16 characters, with 2-Step Verification enabled)
+- `MAIL_FROM=youraddress@gmail.com` (usually same as `MAIL_USERNAME`)
+- `MAIL_FROM_NAME=Easy Home Finance`
+
+For local testing without env vars, copy `config/mail.local.example.php` to `config/mail.local.php` (gitignored) and edit; those values override `config/mail.php`.
+
+If `MAIL_ENABLED` is not set, invites are still saved and the join link is shown in the success message (no email sent).
+
 ### 2. Application URL
 
-The public base URL is resolved from the **`APP_URL`** environment variable, or defaults to **`https://compliance.easyhomefinance.in`** in `config/app.php` (used for links and assets).
+The public base URL is resolved from the **`APP_URL`** environment variable, or falls back to the default in `config/app.php` (used for links and assets).
 
-- **Production:** Set `APP_URL=https://compliance.easyhomefinance.in` (or rely on the default in `config/app.php`).
-- **Local (PHP built-in server):** `APP_URL=http://localhost:8000` before starting the server, or adjust the default in `config/app.php`.
+- **Production:** set `APP_URL=https://compliance.easyhomefinance.in` on the server.
+- **Local (PHP built-in server):** default is often `http://localhost:8000`, or set `APP_URL` before starting PHP.
 - **Apache subfolder (e.g. XAMPP):** e.g. `APP_URL=http://localhost/compliance/public`
 
 ### 3. Run with PHP built-in server
+
+**Windows PowerShell:** from the project folder you must use `.\` (current directory is not on the command search path):
+
+```powershell
+cd c:\Users\Saurav.Soni\Desktop\compliance
+.\start-server.ps1
+```
+
+Same idea for the batch file: `.\start-server.bat`.
+
+**Any shell** (sets `APP_URL` for local links if you use the scripts above; otherwise set it yourself):
 
 ```bash
 cd c:\Users\Saurav.Soni\Desktop\compliance

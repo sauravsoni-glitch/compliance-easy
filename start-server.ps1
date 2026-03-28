@@ -1,4 +1,5 @@
 # Starts the app at http://localhost:8000 (matches config/app.php)
+# Run from project folder:  .\start-server.ps1   (.\ required in PowerShell)
 Set-Location $PSScriptRoot
 
 $phpExe = $null
@@ -13,6 +14,7 @@ if (-not $phpExe) {
     exit 1
 }
 
+$env:APP_URL = 'http://localhost:8000'
 Write-Host 'Open: http://localhost:8000' -ForegroundColor Green
 Write-Host 'Press Ctrl+C to stop.' -ForegroundColor Yellow
 & $phpExe -S localhost:8000 -t public

@@ -7,6 +7,84 @@ use App\Core\Database;
 
 class AuthController extends BaseController
 {
+    private function dashboardPathForRole(string $roleSlug): string
+    {
+        if ($roleSlug === 'admin') {
+            return '/dashboard/admin';
+        }
+        if ($roleSlug === 'maker') {
+            return '/dashboard/maker';
+        }
+        if ($roleSlug === 'reviewer') {
+            return '/dashboard/reviewer';
+        }
+        if ($roleSlug === 'approver') {
+            return '/dashboard/approver';
+        }
+
+        return '/dashboard';
+    }
+
+    /** True when migration 012 columns exist on organization_invites. */
+    private function inviteHasProfileColumns(): bool
+    {
+        static $x;
+        if ($x === null) {
+            try {
+                $this->db->query('SELECT full_name FROM organization_invites LIMIT 1');
+                $x = true;
+            } catch (\Throwable $e) {
+                $x = false;
+            }
+        }
+
+        return $x;
+    }
+
+    private function inviteByToken(string $token): ?array
+    {
+        $token = trim($token);
+        if ($token === '' || !preg_match('/^[a-f0-9]{16,128}$/i', $token)) {
+            return null;
+        }
+        if ($this->inviteHasProfileColumns()) {
+            $sql = "SELECT i.id, i.organization_id, i.full_name, i.department, i.email, i.token, i.role_id, i.expires_at, i.accepted_at,
+                    r.slug AS role_slug, r.name AS role_name
+             FROM organization_invites i
+             LEFT JOIN roles r ON r.id = i.role_id
+             WHERE i.token = ?
+             LIMIT 1";
+        } else {
+            $sql = "SELECT i.id, i.organization_id, NULL AS full_name, NULL AS department, i.email, i.token, i.role_id, i.expires_at, i.accepted_at,
+                    r.slug AS role_slug, r.name AS role_name
+             FROM organization_invites i
+             LEFT JOIN roles r ON r.id = i.role_id
+             WHERE i.token = ?
+             LIMIT 1";
+        }
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$token]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    private function pendingInviteByToken(string $token): ?array
+    {
+        $invite = $this->inviteByToken($token);
+        if (!$invite) {
+            return null;
+        }
+        if (!empty($invite['accepted_at'])) {
+            return null;
+        }
+        if (strtotime((string) ($invite['expires_at'] ?? '')) <= time()) {
+            return null;
+        }
+
+        return $invite;
+    }
+
     public function loginPage(): void
     {
         if (Auth::check()) {
@@ -54,7 +132,7 @@ class AuthController extends BaseController
         } catch (\Throwable $e) {
             // column may not exist until migration
         }
-        $this->redirect('/dashboard');
+        $this->redirect($this->dashboardPathForRole((string) ($user['role_slug'] ?? '')));
     }
 
     public function logout(): void
@@ -138,6 +216,108 @@ class AuthController extends BaseController
         $stmt->execute([$orgId, $roleId ?: 2, $fullName, $email, $hashed, 'active']);
         unset($_SESSION['signup_organization_id'], $_SESSION['signup_email']);
         $_SESSION['signup_success'] = 'Account created successfully! Your 14-day free trial has started. Please sign in.';
+        $this->redirect('/login');
+    }
+
+    public function inviteAcceptPage(): void
+    {
+        if (Auth::check()) {
+            $this->redirect('/dashboard');
+        }
+        $basePath = $this->appConfig['url'] ?? '';
+        $token = trim((string) ($_GET['token'] ?? ''));
+        $error = $_SESSION['invite_error'] ?? null;
+        $success = $_SESSION['invite_success'] ?? null;
+        unset($_SESSION['invite_error'], $_SESSION['invite_success']);
+
+        $invite = $this->inviteByToken($token);
+        if ($invite && !empty($invite['accepted_at'])) {
+            $_SESSION['login_success'] = 'Your account is already active. Please login.';
+            $this->redirect('/login');
+        }
+        if (!$invite || strtotime((string) ($invite['expires_at'] ?? '')) <= time()) {
+            $this->view('auth/create-account', [
+                'pageTitle' => 'Invite Invalid',
+                'basePath' => $basePath,
+                'inviteInvalid' => true,
+                'inviteError' => 'Invalid or expired invitation link.',
+                'error' => $error,
+                'success' => $success,
+            ], false);
+
+            return;
+        }
+
+        $this->view('auth/create-account', [
+            'pageTitle' => 'Create Your Account',
+            'basePath' => $basePath,
+            'inviteMode' => true,
+            'inviteToken' => $token,
+            'inviteEmail' => (string) ($invite['email'] ?? ''),
+            'inviteName' => (string) ($invite['full_name'] ?? ''),
+            'inviteDepartment' => (string) ($invite['department'] ?? ''),
+            'inviteRoleName' => (string) ($invite['role_name'] ?? ucfirst((string) ($invite['role_slug'] ?? 'User'))),
+            'error' => $error,
+            'success' => $success,
+        ], false);
+    }
+
+    public function inviteAcceptCreateAccount(): void
+    {
+        Auth::init();
+        $token = trim((string) ($_POST['token'] ?? ''));
+        $fullName = trim((string) ($_POST['full_name'] ?? ''));
+        $password = (string) ($_POST['password'] ?? '');
+        $confirm = (string) ($_POST['confirm_password'] ?? '');
+
+        $invite = $this->pendingInviteByToken($token);
+        if (!$invite) {
+            $_SESSION['invite_error'] = 'Invalid or expired invitation link.';
+            $this->redirect('/invite/accept?token=' . urlencode($token));
+        }
+        if ($fullName === '' || $password === '' || $confirm === '') {
+            $_SESSION['invite_error'] = 'All fields are required.';
+            $this->redirect('/invite/accept?token=' . urlencode($token));
+        }
+        if (strlen($password) < 8) {
+            $_SESSION['invite_error'] = 'Password must be at least 8 characters.';
+            $this->redirect('/invite/accept?token=' . urlencode($token));
+        }
+        if ($password !== $confirm) {
+            $_SESSION['invite_error'] = 'Passwords do not match.';
+            $this->redirect('/invite/accept?token=' . urlencode($token));
+        }
+
+        $email = strtolower(trim((string) ($invite['email'] ?? '')));
+        $orgId = (int) ($invite['organization_id'] ?? 0);
+        $roleId = (int) ($invite['role_id'] ?? 0);
+        $dept = trim((string) ($invite['department'] ?? ''));
+
+        $exists = $this->db->prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1');
+        $exists->execute([$email]);
+        if ($exists->fetchColumn()) {
+            $this->db->prepare('UPDATE organization_invites SET accepted_at = COALESCE(accepted_at, NOW()) WHERE id = ?')->execute([(int) $invite['id']]);
+            $_SESSION['login_success'] = 'Your account is already active. Please login.';
+            $this->redirect('/login');
+        }
+
+        $hashed = password_hash($password, PASSWORD_BCRYPT);
+        $this->db->beginTransaction();
+        try {
+            $this->db->prepare('INSERT INTO users (organization_id, role_id, full_name, email, department, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$orgId, $roleId, $fullName, $email, $dept !== '' ? $dept : null, $hashed, 'active']);
+            $this->db->prepare('UPDATE organization_invites SET accepted_at = NOW() WHERE id = ? AND accepted_at IS NULL')
+                ->execute([(int) $invite['id']]);
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            $_SESSION['invite_error'] = 'Could not create account. Please try again.';
+            $this->redirect('/invite/accept?token=' . urlencode($token));
+        }
+
+        $_SESSION['login_success'] = 'Account created successfully. Please login to continue.';
         $this->redirect('/login');
     }
 }

@@ -46,6 +46,8 @@ a:hover {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    transition: width 0.22s ease;
+    overflow-x: hidden;
 }
 .sidebar-header {
     padding: 1rem 1.25rem;
@@ -66,7 +68,24 @@ a:hover {
     border: none;
     color: var(--sidebar-text);
     cursor: pointer;
-    padding: 0.25rem;
+    padding: 0.35rem;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+.sidebar-toggle:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+.sidebar-toggle:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+.sidebar-toggle i {
+    display: inline-block;
+    transition: transform 0.22s ease;
+}
+.sidebar.collapsed .sidebar-toggle i {
+    transform: rotate(180deg);
 }
 .sidebar-nav {
     flex: 1;
@@ -180,6 +199,45 @@ a:hover {
 .nav-sub-item.active i { color: var(--primary); }
 .sidebar.collapsed .nav-sub { display: none !important; }
 .sidebar.collapsed .nav-group-chevron { display: none; }
+
+/* Icon-only rail when folded (search stylesheet for this comment to confirm latest CSS loaded) */
+.sidebar.collapsed {
+    width: 72px;
+}
+.sidebar.collapsed .sidebar-header {
+    padding: 1rem 0.5rem;
+    justify-content: center;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+.sidebar.collapsed .logo {
+    display: none;
+}
+.sidebar.collapsed .nav-section-title {
+    display: none;
+}
+.sidebar.collapsed .nav-item {
+    justify-content: center;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    border-left-width: 0;
+    gap: 0;
+}
+.sidebar.collapsed .nav-item span {
+    display: none;
+}
+.sidebar.collapsed .nav-item.active {
+    border-left-width: 0;
+}
+.sidebar.collapsed .sidebar-footer {
+    padding: 1rem 0.5rem;
+}
+.sidebar.collapsed .user-info {
+    justify-content: center;
+}
+.sidebar.collapsed .user-info > div:not(.user-avatar) {
+    display: none;
+}
 
 .sidebar-footer {
     padding: 1rem 1.25rem;

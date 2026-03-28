@@ -13,25 +13,43 @@
             <a href="<?= $basePath ?? '' ?>/" class="logo">easy</a>
         </div>
 
-        <?php if (!empty($cardVerified)): ?>
+        <?php if (!empty($cardVerified) && empty($inviteMode)): ?>
         <div class="alert alert-success alert-with-icon">
             <i class="fas fa-check-circle"></i>
             <span>Card verified successfully! <?= htmlspecialchars($planName ?? 'Professional Plan') ?> selected. Create your account to start your free trial.</span>
         </div>
         <?php endif; ?>
 
+        <?php if (!empty($inviteInvalid)): ?>
+        <h1>Invite Link Invalid</h1>
+        <p class="subtitle"><?= htmlspecialchars($inviteError ?? 'Invalid or expired invitation link.') ?></p>
+        <a href="<?= $basePath ?? '' ?>/organization/invite" class="btn btn-secondary btn-block">Request New Invite</a>
+        <?php else: ?>
         <h1>Create Your Account</h1>
-        <p class="subtitle">Set up your login credentials to access the compliance dashboard.</p>
+        <p class="subtitle">Complete your setup to access system.</p>
+        <?php endif; ?>
 
         <?php if (!empty($error)): ?>
         <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
         <?php endif; ?>
+        <?php if (!empty($success)): ?>
+        <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
+        <?php endif; ?>
 
-        <form method="post" action="<?= $basePath ?? '' ?>/create-account" class="auth-form">
+        <?php if (empty($inviteInvalid)): ?>
+        <form method="post" action="<?= $basePath ?? '' ?><?= !empty($inviteMode) ? '/invite/accept' : '/create-account' ?>" class="auth-form">
+            <?php if (!empty($inviteMode)): ?>
+                <input type="hidden" name="token" value="<?= htmlspecialchars($inviteToken ?? '') ?>">
+                <div class="form-group form-group-icon">
+                    <label class="form-label" for="email">Email</label>
+                    <span class="input-icon"><i class="fas fa-envelope"></i></span>
+                    <input type="email" id="email" class="form-control" value="<?= htmlspecialchars($inviteEmail ?? '') ?>" readonly>
+                </div>
+            <?php endif; ?>
             <div class="form-group form-group-icon">
                 <label class="form-label" for="full_name">Full Name</label>
                 <span class="input-icon"><i class="fas fa-user"></i></span>
-                <input type="text" id="full_name" name="full_name" class="form-control" placeholder="Enter your full name" value="<?= htmlspecialchars($_POST['full_name'] ?? '') ?>" required>
+                <input type="text" id="full_name" name="full_name" class="form-control" placeholder="Enter your full name" value="<?= htmlspecialchars($_POST['full_name'] ?? ($inviteName ?? '')) ?>" required>
             </div>
             <div class="form-group form-group-icon">
                 <label class="form-label" for="password">Create Password</label>
@@ -44,8 +62,12 @@
                 <span class="input-icon"><i class="fas fa-lock"></i></span>
                 <input type="password" id="confirm_password" name="confirm_password" class="form-control" placeholder="Re-enter your password" required>
             </div>
+            <?php if (!empty($inviteMode)): ?>
+            <p class="text-sm text-muted mb-2">Role: <?= htmlspecialchars($inviteRoleName ?? 'User') ?><?= !empty($inviteDepartment) ? ' | Department: ' . htmlspecialchars($inviteDepartment) : '' ?></p>
+            <?php endif; ?>
             <button type="submit" class="btn btn-primary btn-block btn-lg">Create Account</button>
         </form>
+        <?php endif; ?>
 
         <div class="auth-links">
             Already have an account? <a href="<?= $basePath ?? '' ?>/login">Sign In</a>

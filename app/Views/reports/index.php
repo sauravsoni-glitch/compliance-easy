@@ -49,6 +49,23 @@ function rpt_risk_class(string $r): string {
     }
     return 'rpt-pill rpt-pill-low';
 }
+function rpt_file_icon(string $fileName): string {
+    $ext = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+    if (in_array($ext, ['xlsx', 'xls'], true)) {
+        return '<i class="far fa-file-excel text-success rpt-doc-ico"></i> ';
+    }
+    if ($ext === 'pdf') {
+        return '<i class="far fa-file-pdf text-danger rpt-doc-ico"></i> ';
+    }
+    if (in_array($ext, ['png', 'jpg', 'jpeg', 'gif', 'webp'], true)) {
+        return '<i class="far fa-file-image text-primary rpt-doc-ico"></i> ';
+    }
+    if (in_array($ext, ['doc', 'docx'], true)) {
+        return '<i class="far fa-file-word text-info rpt-doc-ico"></i> ';
+    }
+
+    return '<i class="far fa-file-alt text-secondary rpt-doc-ico"></i> ';
+}
 function rpt_doc_status(string $st, int $id): string {
     if ($st === 'approved') {
         return '<span class="rpt-pill rpt-pill-approved">Approved</span>';
@@ -205,7 +222,7 @@ $sb = $statusBuckets ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 
                         }
                     ?>
                     <tr>
-                        <td><i class="far fa-file-pdf text-danger rpt-doc-ico"></i> <?= htmlspecialchars($d['file_name']) ?></td>
+                        <td><?= rpt_file_icon($d['file_name'] ?? '') ?><?= htmlspecialchars($d['file_name']) ?></td>
                         <td><span class="rpt-fw-pill"><?= htmlspecialchars($fwl) ?></span></td>
                         <td><?= htmlspecialchars($type) ?></td>
                         <td><?= rpt_doc_status($d['doc_status'] ?? 'pending', (int)$d['id']) ?></td>
@@ -299,10 +316,10 @@ $sb = $statusBuckets ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 
             <div class="form-group">
                 <label class="form-label">Upload File <span class="text-danger">*</span></label>
                 <div class="rpt-dropzone" id="rpt-dropzone">
-                    <input type="file" name="file" id="rpt-file" class="rpt-file-input" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" required>
+                    <input type="file" name="file" id="rpt-file" class="rpt-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
                     <i class="fas fa-cloud-upload-alt rpt-drop-ico"></i>
                     <p class="mb-1"><strong>Click to upload</strong> or drag and drop</p>
-                    <p class="text-muted text-sm mb-0">PDF, DOC, PNG, JPG (MAX. 10MB)</p>
+                    <p class="text-muted text-sm mb-0">PDF, Word, Excel (XLS, XLSX), PNG, JPG — max 10MB</p>
                     <span class="rpt-file-name" id="rpt-file-name"></span>
                 </div>
             </div>

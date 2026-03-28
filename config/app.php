@@ -2,15 +2,16 @@
 /**
  * Public base URL (no trailing slash). Used for links, redirects, and asset basePath.
  *
- * Production: https://compliance.easyhomefinance.in
- * Local dev:  set env APP_URL=http://localhost:8000 (or http://localhost/compliance/public if in a subfolder).
+ * Default below is localhost for local checks. Production: set env
+ *   APP_URL=https://compliance.easyhomefinance.in
+ * Subfolder Apache: APP_URL=http://localhost/compliance/public
  *
  * If the app is NOT at the domain root, include the path after the host, e.g.
  *   APP_URL=http://localhost/compliance/public
  */
 $appBaseUrl = getenv('APP_URL');
 if ($appBaseUrl === false || trim((string) $appBaseUrl) === '') {
-    $appBaseUrl = 'https://compliance.easyhomefinance.in';
+    $appBaseUrl = 'http://localhost:8000';
 }
 
 return [

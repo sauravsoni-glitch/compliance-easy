@@ -48,7 +48,12 @@ abstract class BaseController
             $root = dirname(__DIR__, 2);
             $cssT = @filemtime($root . '/public/assets/css/app.css') ?: 0;
             $jsT = @filemtime($root . '/public/assets/js/app.js') ?: 0;
-            $assetVersion = max($cssT, $jsT, 1) ?: time();
+            // When debug is on, bust browser cache every request so CSS/JS edits show immediately.
+            if (!empty($this->appConfig['debug'])) {
+                $assetVersion = (string) time();
+            } else {
+                $assetVersion = (string) (max($cssT, $jsT, 1) ?: time());
+            }
             require $root . '/app/Views/layouts/main.php';
         } else {
             require $path;

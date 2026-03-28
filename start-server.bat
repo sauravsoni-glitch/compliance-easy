@@ -1,6 +1,10 @@
 @echo off
+REM In PowerShell run:  .\start-server.bat   (.\ is required — not just start-server.bat)
 title Compliance app - PHP server
 cd /d "%~dp0"
+
+REM So links and form actions use localhost (config/app.php reads APP_URL)
+set "APP_URL=http://localhost:8000"
 
 REM Try XAMPP (common on Windows), then PHP on PATH
 if exist "C:\xampp\php\php.exe" (

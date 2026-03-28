@@ -2,6 +2,10 @@
 /vendor/
 /node_modules/
 
+# Composer (keep composer.json + composer.lock in git)
+composer.phar
+composer-setup.php
+
 # User uploads & bulk history (do not commit real data)
 /public/uploads/upload_history/**
 !/public/uploads/upload_history/README.txt
@@ -10,6 +14,7 @@
 .env
 .env.*
 !.env.example
+config/mail.local.php
 
 # IDE / OS
 .idea/

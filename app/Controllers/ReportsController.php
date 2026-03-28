@@ -205,10 +205,10 @@ class ReportsController extends BaseController
             $_SESSION['flash_error'] = 'Please select a file.';
             $this->redirect('/reports?tab=upload');
         }
-        $allowed = ['pdf', 'doc', 'docx', 'png', 'jpg', 'jpeg'];
+        $allowed = ['pdf', 'doc', 'docx', 'png', 'jpg', 'jpeg', 'xls', 'xlsx'];
         $ext = strtolower(pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION));
         if (!in_array($ext, $allowed, true)) {
-            $_SESSION['flash_error'] = 'Allowed types: PDF, DOC, PNG, JPG.';
+            $_SESSION['flash_error'] = 'Allowed types: PDF, DOC, Excel (XLS/XLSX), PNG, JPG.';
             $this->redirect('/reports?tab=upload');
         }
         if ($_FILES['file']['size'] > 10 * 1024 * 1024) {

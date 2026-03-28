@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\BaseController;
+use App\Core\Mailer;
 
 class OrganizationController extends BaseController
 {
@@ -19,6 +20,71 @@ class OrganizationController extends BaseController
         }
 
         return $x;
+    }
+
+    private function mailConfig(): array
+    {
+        $path = dirname(__DIR__, 2) . '/config/mail.php';
+
+        return is_file($path) ? (require $path) : ['enabled' => false];
+    }
+
+    private function finalizeInviteNotification(
+        string $toEmail,
+        string $toName,
+        string $department,
+        string $roleLabel,
+        string $inviteLink
+    ): void {
+        $cfg = $this->mailConfig();
+        if (!empty($cfg['enabled'])) {
+            [$sent, $err] = Mailer::sendWorkspaceInvite(
+                $this->appConfig,
+                $toEmail,
+                $toName,
+                $inviteLink,
+                $roleLabel,
+                $department
+            );
+            if ($sent) {
+                $_SESSION['flash_success'] = 'Invitation email sent to ' . $toEmail . '.';
+
+                return;
+            }
+            $_SESSION['flash_error'] = 'Invitation saved, but email could not be sent'
+                . ($err ? ': ' . $err : '')
+                . '. Share this link manually: ' . $inviteLink;
+
+            return;
+        }
+        $_SESSION['flash_success'] = 'Invitation saved. Join link: ' . $inviteLink;
+    }
+
+    private function roleDisplayName(string $roleSlug): string
+    {
+        $stmt = $this->db->prepare('SELECT name FROM roles WHERE slug = ? LIMIT 1');
+        $stmt->execute([$roleSlug]);
+        $n = $stmt->fetchColumn();
+
+        return $n ? (string) $n : ucfirst($roleSlug);
+    }
+
+    private function loadPendingInviteForEmail(int $inviteId, int $orgId): ?array
+    {
+        if ($this->inviteHasExtraColumns()) {
+            $sql = 'SELECT i.email, i.full_name, i.department, r.slug AS role_slug, r.name AS role_name
+                FROM organization_invites i INNER JOIN roles r ON r.id = i.role_id
+                WHERE i.id = ? AND i.organization_id = ? AND i.accepted_at IS NULL LIMIT 1';
+        } else {
+            $sql = 'SELECT i.email, NULL AS full_name, NULL AS department, r.slug AS role_slug, r.name AS role_name
+                FROM organization_invites i INNER JOIN roles r ON r.id = i.role_id
+                WHERE i.id = ? AND i.organization_id = ? AND i.accepted_at IS NULL LIMIT 1';
+        }
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$inviteId, $orgId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return $row ?: null;
     }
 
     private function inviteHasExtraColumns(): bool
@@ -345,7 +411,7 @@ class OrganizationController extends BaseController
 
         $this->db->prepare('DELETE FROM organization_invites WHERE organization_id = ? AND LOWER(email) = LOWER(?) AND accepted_at IS NULL')->execute([$orgId, $mail]);
         $token = bin2hex(random_bytes(16));
-        $exp = date('Y-m-d H:i:s', strtotime('+14 days'));
+        $exp = date('Y-m-d H:i:s', strtotime('+24 hours'));
         $roleId = $this->roleIdForSlug($roleSlug);
         $hasExtra = $this->inviteHasExtraColumns();
         try {
@@ -356,7 +422,9 @@ class OrganizationController extends BaseController
                 $this->db->prepare('INSERT INTO organization_invites (organization_id, email, token, role_id, expires_at, created_by) VALUES (?,?,?,?,?,?)')
                     ->execute([$orgId, $mail, $token, $roleId, $exp, Auth::id()]);
             }
-            $_SESSION['flash_success'] = 'Invitation sent successfully.';
+            $base = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
+            $link = $base . '/invite/accept?token=' . urlencode($token);
+            $this->finalizeInviteNotification($mail, $fname, $dept, $this->roleDisplayName($roleSlug), $link);
         } catch (\Throwable $e) {
             $_SESSION['flash_error'] = 'Could not send invitation. Try again.';
         }
@@ -394,8 +462,23 @@ class OrganizationController extends BaseController
         }
         $token = bin2hex(random_bytes(16));
         $this->db->prepare('UPDATE organization_invites SET token = ?, expires_at = ? WHERE id = ? AND organization_id = ?')
-            ->execute([$token, date('Y-m-d H:i:s', strtotime('+14 days')), $id, $orgId]);
-        $_SESSION['flash_success'] = 'Invitation resent.';
+            ->execute([$token, date('Y-m-d H:i:s', strtotime('+24 hours')), $id, $orgId]);
+        $base = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
+        $link = $base . '/invite/accept?token=' . urlencode($token);
+        $row = $this->loadPendingInviteForEmail($id, $orgId);
+        if ($row) {
+            $slug = strtolower((string) ($row['role_slug'] ?? 'maker'));
+            $label = !empty($row['role_name']) ? (string) $row['role_name'] : $this->roleDisplayName($slug);
+            $this->finalizeInviteNotification(
+                (string) $row['email'],
+                (string) ($row['full_name'] ?? ''),
+                (string) ($row['department'] ?? ''),
+                $label,
+                $link
+            );
+        } else {
+            $_SESSION['flash_success'] = 'Invitation updated. Join link: ' . $link;
+        }
         $this->redirect('/organization');
     }
 
