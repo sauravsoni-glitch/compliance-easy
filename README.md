@@ -32,7 +32,9 @@ composer install
 
 **n8n file webhook:** On each successful upload, the app also POSTs the file as multipart form fields `file` and `file_name` to `file_upload_webhook_url` in `config/app.php`. Set `file_upload_webhook_enabled` to `false` to disable (e.g. local dev). Requires the PHP **curl** extension.
 
-**Invite emails (Gmail SMTP):** After `composer install`, set environment variables on the server (or in your PHP-FPM/Apache pool). See `config/mail.php` for the full list. Typical Gmail setup:
+**Invite emails (SMTP or Mailgun):** After `composer install`, set environment variables on the server (or in your PHP-FPM/Apache pool). See `config/mail.php` for the full list.
+
+Typical Gmail SMTP setup:
 
 - `MAIL_ENABLED=1`
 - `MAIL_HOST=smtp.gmail.com`
@@ -42,6 +44,16 @@ composer install
 - `MAIL_PASSWORD=` your **Gmail App Password** (16 characters, with 2-Step Verification enabled)
 - `MAIL_FROM=youraddress@gmail.com` (usually same as `MAIL_USERNAME`)
 - `MAIL_FROM_NAME=Easy Home Finance`
+
+Mailgun API setup:
+
+- `MAIL_ENABLED=1`
+- `MAIL_PROVIDER=mailgun` (or `auto` to try Mailgun then fallback to SMTP)
+- `MAIL_FROM=no-reply@your-mailgun-domain`
+- `MAIL_FROM_NAME=Easy Home Finance`
+- `MAILGUN_DOMAIN=mg.yourdomain.com`
+- `MAILGUN_API_KEY=key-xxxxxxxxxxxxxxxx`
+- `MAILGUN_ENDPOINT=https://api.mailgun.net`
 
 For local testing without env vars, copy `config/mail.local.example.php` to `config/mail.local.php` (gitignored) and edit; those values override `config/mail.php`.
 
