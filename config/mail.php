@@ -1,19 +1,13 @@
 <?php
 
 /**
- * Outbound email (SMTP or Mailgun HTTP API).
+ * Outbound email (Mailgun HTTP API).
  *
- * Set these on the server (recommended) — do not commit real passwords:
+ * Set these on the server (recommended):
  *   MAIL_ENABLED=1
- *   MAIL_PROVIDER=smtp            (smtp | mailgun | auto)
- *   MAIL_HOST=smtp.gmail.com
- *   MAIL_PORT=587
- *   MAIL_ENCRYPTION=tls          (tls for 587, or ssl for 465)
- *   MAIL_USERNAME=you@gmail.com
- *   MAIL_PASSWORD=xxxx xxxx xxxx xxxx   (Gmail App Password)
- *   MAIL_FROM=you@gmail.com
+ *   MAIL_PROVIDER=mailgun
  *   MAIL_FROM_NAME=Easy Home Finance
- *   MAILGUN_DOMAIN=mg.example.com
+ *   MAILGUN_DOMAIN=www.ehfletters.com
  *   MAILGUN_API_KEY=key-xxxxxxxxxxxxxxxx
  *   MAILGUN_ENDPOINT=https://api.mailgun.net
  *
@@ -25,17 +19,12 @@
  */
 $config = [
     'enabled' => filter_var(getenv('MAIL_ENABLED') ?: '0', FILTER_VALIDATE_BOOLEAN),
-    'provider' => strtolower((string) (getenv('MAIL_PROVIDER') ?: 'smtp')),
-    'host' => getenv('MAIL_HOST') ?: 'smtp.gmail.com',
-    'port' => (int) (getenv('MAIL_PORT') !== false && getenv('MAIL_PORT') !== '' ? getenv('MAIL_PORT') : '587'),
-    'encryption' => strtolower((string) (getenv('MAIL_ENCRYPTION') ?: 'tls')),
-    'username' => (string) (getenv('MAIL_USERNAME') ?: ''),
-    'password' => (string) (getenv('MAIL_PASSWORD') ?: ''),
-    'from_email' => (string) (getenv('MAIL_FROM') ?: ''),
+    'provider' => strtolower((string) (getenv('MAIL_PROVIDER') ?: 'mailgun')),
     'from_name' => (string) (getenv('MAIL_FROM_NAME') ?: 'Easy Home Finance'),
-    'mailgun_domain' => (string) (getenv('MAILGUN_DOMAIN') ?: ''),
-    'mailgun_api_key' => (string) (getenv('MAILGUN_API_KEY') ?: ''),
+    'mailgun_domain' => (string) (getenv('MAILGUN_DOMAIN') ?: 'www.ehfletters.com'),
+    'mailgun_api_key' => (string) (getenv('MAILGUN_API_KEY') ?: 'key-c53cc2d1ab915b375367e68d5cbd7cee'),
     'mailgun_endpoint' => rtrim((string) (getenv('MAILGUN_ENDPOINT') ?: 'https://api.mailgun.net'), '/'),
+    'mailgun_log_path' => (string) (getenv('MAILGUN_LOG_PATH') ?: dirname(__DIR__) . '/storage/logs/mailgun.log'),
 ];
 
 $localPath = __DIR__ . '/mail.local.php';

@@ -2,9 +2,6 @@
 
 namespace App\Core;
 
-use PHPMailer\PHPMailer\Exception as PhpMailerException;
-use PHPMailer\PHPMailer\PHPMailer;
-
 final class Mailer
 {
     private static function config(): array
@@ -29,28 +26,10 @@ final class Mailer
         if (empty($cfg['enabled'])) {
             return [false, null];
         }
-        $from = trim((string) ($cfg['from_email'] ?? ''));
-        if ($from === '') {
-            return [false, 'MAIL_FROM must be set'];
-        }
 
         $subject = 'You have been invited to Easy Home Finance';
         [$htmlBody, $altBody] = self::inviteBody($toName, $inviteLink, $roleLabel, $department);
-        $provider = strtolower((string) ($cfg['provider'] ?? 'smtp'));
-
-        if ($provider === 'mailgun') {
-            return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody);
-        }
-        if ($provider === 'auto') {
-            [$ok, $err] = self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody);
-            if ($ok) {
-                return [true, null];
-            }
-
-            return self::sendViaSmtp($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, $err);
-        }
-
-        return self::sendViaSmtp($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, null);
+        return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody);
     }
 
     /**
@@ -79,67 +58,6 @@ final class Mailer
     /**
      * @return array{0:bool,1:?string}
      */
-    private static function sendViaSmtp(
-        array $cfg,
-        array $appConfig,
-        string $toEmail,
-        string $toName,
-        string $subject,
-        string $htmlBody,
-        string $altBody,
-        ?string $mailgunError
-    ): array {
-        if (!class_exists(PHPMailer::class)) {
-            return [false, 'PHPMailer not installed. Run: composer install'];
-        }
-        $from = trim((string) ($cfg['from_email'] ?? ''));
-        $user = trim((string) ($cfg['username'] ?? ''));
-        $pass = preg_replace('/\s+/', '', (string) ($cfg['password'] ?? ''));
-        if ($from === '' || $user === '' || $pass === '') {
-            if ($mailgunError !== null) {
-                return [false, 'Mailgun failed and SMTP credentials are missing. Mailgun error: ' . $mailgunError];
-            }
-
-            return [false, 'MAIL_FROM, MAIL_USERNAME, and MAIL_PASSWORD must be set'];
-        }
-
-        $mail = new PHPMailer(true);
-        try {
-            $mail->isSMTP();
-            $mail->Host = (string) ($cfg['host'] ?? 'smtp.gmail.com');
-            $mail->SMTPAuth = true;
-            $mail->Username = $user;
-            $mail->Password = $pass;
-            $enc = (string) ($cfg['encryption'] ?? 'tls');
-            if ($enc === 'ssl') {
-                $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
-            } else {
-                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            }
-            $mail->Port = (int) ($cfg['port'] ?? 587);
-            $mail->CharSet = 'UTF-8';
-            $mail->setFrom($from, (string) ($cfg['from_name'] ?? 'Easy Home Finance'));
-            $mail->addAddress($toEmail, $toName !== '' ? $toName : $toEmail);
-            $mail->isHTML(true);
-            $mail->Subject = $subject;
-            $mail->Body = $htmlBody;
-            $mail->AltBody = $altBody;
-            $mail->send();
-
-            return [true, null];
-        } catch (PhpMailerException $e) {
-            $msg = $mail->ErrorInfo ?: $e->getMessage();
-            if (!empty($appConfig['debug'])) {
-                error_log('Mailer::sendWorkspaceInvite: ' . $msg);
-            }
-
-            return [false, $msg];
-        }
-    }
-
-    /**
-     * @return array{0:bool,1:?string}
-     */
     private static function sendViaMailgun(
         array $cfg,
         array $appConfig,
@@ -150,14 +68,26 @@ final class Mailer
         string $altBody
     ): array {
         if (!function_exists('curl_init')) {
+            self::logMailgun($cfg, [
+                'ok' => false,
+                'error' => 'Mailgun requires PHP curl extension',
+            ]);
             return [false, 'Mailgun requires PHP curl extension'];
         }
         $domain = trim((string) ($cfg['mailgun_domain'] ?? ''));
         $apiKey = trim((string) ($cfg['mailgun_api_key'] ?? ''));
         $endpoint = rtrim((string) ($cfg['mailgun_endpoint'] ?? 'https://api.mailgun.net'), '/');
-        $fromEmail = trim((string) ($cfg['from_email'] ?? ''));
+        $authUser = Auth::user();
+        $fromEmail = trim((string) ($authUser['email'] ?? ''));
         if ($domain === '' || $apiKey === '' || $fromEmail === '') {
-            return [false, 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and MAIL_FROM must be set'];
+            self::logMailgun($cfg, [
+                'ok' => false,
+                'error' => 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and logged-in user email must be set',
+                'from' => $fromEmail,
+                'to' => $toEmail,
+                'subject' => $subject,
+            ]);
+            return [false, 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and logged-in user email must be set'];
         }
 
         $to = $toName !== '' ? $toName . ' <' . $toEmail . '>' : $toEmail;
@@ -167,6 +97,14 @@ final class Mailer
 
         $ch = curl_init($url);
         if ($ch === false) {
+            self::logMailgun($cfg, [
+                'ok' => false,
+                'error' => 'Could not initialize Mailgun request',
+                'from' => $from,
+                'to' => $to,
+                'subject' => $subject,
+                'url' => $url,
+            ]);
             return [false, 'Could not initialize Mailgun request'];
         }
         curl_setopt_array($ch, [
@@ -188,6 +126,15 @@ final class Mailer
         curl_close($ch);
 
         if ($raw === false) {
+            self::logMailgun($cfg, [
+                'ok' => false,
+                'error' => 'Mailgun request failed: ' . $curlErr,
+                'from' => $from,
+                'to' => $to,
+                'subject' => $subject,
+                'url' => $url,
+                'http_status' => $status,
+            ]);
             return [false, 'Mailgun request failed: ' . $curlErr];
         }
         if ($status < 200 || $status >= 300) {
@@ -195,10 +142,50 @@ final class Mailer
             if (strlen($body) > 350) {
                 $body = substr($body, 0, 350) . '...';
             }
+            self::logMailgun($cfg, [
+                'ok' => false,
+                'error' => 'Mailgun HTTP ' . $status,
+                'from' => $from,
+                'to' => $to,
+                'subject' => $subject,
+                'url' => $url,
+                'http_status' => $status,
+                'response' => $body,
+            ]);
 
             return [false, 'Mailgun HTTP ' . $status . ': ' . $body];
         }
 
+        self::logMailgun($cfg, [
+            'ok' => true,
+            'from' => $from,
+            'to' => $to,
+            'subject' => $subject,
+            'url' => $url,
+            'http_status' => $status,
+            'response' => trim((string) $raw),
+        ]);
+
         return [true, null];
+    }
+
+    private static function logMailgun(array $cfg, array $event): void
+    {
+        $path = (string) ($cfg['mailgun_log_path'] ?? '');
+        if ($path === '') {
+            $path = dirname(__DIR__, 2) . '/storage/logs/mailgun.log';
+        }
+
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+
+        $line = [
+            'ts' => date('c'),
+            'event' => 'mailgun_send',
+        ] + $event;
+
+        @file_put_contents($path, json_encode($line, JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND);
     }
 }
