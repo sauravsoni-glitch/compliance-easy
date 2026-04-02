@@ -2,7 +2,10 @@
 namespace App\Controllers;
 
 use App\Core\Auth;
+use App\Core\AutomationLog;
 use App\Core\BaseController;
+use App\Core\EmailTemplateVars;
+use App\Core\Mailer;
 
 class SettingsController extends BaseController
 {
@@ -46,30 +49,25 @@ class SettingsController extends BaseController
     private function defaultEscalation(): array
     {
         return [
-            'enable_dept' => true,
             'accelerated_high_risk' => true,
+            'global_levels' => [
+                ['d' => 0, 'to' => 'Owner (Maker)', 'tpl' => 'Escalation Level 1 - Overdue'],
+                ['d' => 3, 'to' => 'Reviewer', 'tpl' => 'Escalation Level 2 - Manager Alert'],
+                ['d' => 7, 'to' => 'Approver', 'tpl' => 'High Risk Escalation'],
+                ['d' => 14, 'to' => 'Approver', 'tpl' => 'High Risk Escalation'],
+            ],
             'depts' => [
                 'finance' => [
                     'name' => 'Finance',
-                    'use_global' => false,
+                    'use_global' => true,
                     'active' => true,
-                    'levels' => [
-                        ['d' => 0, 'to' => 'Owner (Maker)', 'tpl' => 'Escalation Level 1'],
-                        ['d' => 3, 'to' => 'Finance Approver', 'tpl' => 'Escalation Level 2'],
-                        ['d' => 7, 'to' => 'Finance Head', 'tpl' => 'Escalation Level 2'],
-                        ['d' => 14, 'to' => 'Compliance Admin', 'tpl' => 'High Risk Escalation'],
-                    ],
+                    'levels' => [],
                 ],
                 'compliance' => [
                     'name' => 'Compliance',
-                    'use_global' => false,
+                    'use_global' => true,
                     'active' => true,
-                    'levels' => [
-                        ['d' => 0, 'to' => 'Owner (Maker)', 'tpl' => 'Escalation Level 1'],
-                        ['d' => 2, 'to' => 'Department Checker', 'tpl' => 'Escalation Level 2'],
-                        ['d' => 5, 'to' => 'Department Approver', 'tpl' => 'High Risk Escalation'],
-                        ['d' => 10, 'to' => 'Compliance Admin', 'tpl' => 'High Risk Escalation'],
-                    ],
+                    'levels' => [],
                 ],
                 'legal' => ['name' => 'Legal', 'use_global' => true, 'active' => true, 'levels' => []],
                 'operations' => ['name' => 'Operations', 'use_global' => true, 'active' => true, 'levels' => []],
@@ -189,6 +187,17 @@ class SettingsController extends BaseController
                     'subject' => 'Rejected: {{Compliance_Title}}',
                     'body' => "Dear {{Owner_Name}},\nYour submission for {{Compliance_Title}} was rejected. Please review comments.",
                 ],
+                [
+                    'id' => 't8',
+                    'name' => 'Compliance Created — Owner / Reviewer / Approver',
+                    'type' => 'Creation',
+                    'default' => true,
+                    'enabled' => true,
+                    'applicable' => 'Creation',
+                    'dept' => 'All Departments',
+                    'subject' => 'New compliance created: {{Compliance_ID}}',
+                    'body' => "Hello — a new compliance item was created. The full structured summary is in the email below.\n\nQuick ref — ID: {{Compliance_ID}} · Due: {{Due_Date}} · Dept: {{Department}}",
+                ],
             ],
             'selected' => 't1',
         ];
@@ -196,16 +205,231 @@ class SettingsController extends BaseController
 
     private function defaultLogs(): array
     {
-        return [
-            'entries' => [
-                ['cid' => 'CMP-808', 'title' => 'GST Return Filing - February 2026', 'dept' => 'Finance', 'rtype' => 'First', 'to' => 'Priya Sharma', 'cc' => '', 'dt' => '2026-02-13 14:30', 'ok' => true],
-                ['cid' => 'CMP-808', 'title' => 'GST Return Filing - February 2026', 'dept' => 'Finance', 'rtype' => 'Second', 'to' => 'Priya Sharma', 'cc' => 'Amit Patel', 'dt' => '2026-02-17 14:30', 'ok' => true],
-                ['cid' => 'CMP-001', 'title' => 'KYC/AML Policy Update - RBI Master Direction', 'dept' => 'Compliance', 'rtype' => 'First', 'to' => 'Priya Sharma', 'cc' => '', 'dt' => '2026-02-07 14:30', 'ok' => true],
-                ['cid' => 'CMP-809', 'title' => 'TDS Payment - Q4 FY2025-26', 'dept' => 'Finance', 'rtype' => 'Final', 'to' => 'Vikram Singh', 'cc' => 'Priya Sharma, Saurav Soni', 'dt' => '2026-02-06 14:30', 'ok' => true],
-                ['cid' => 'CMP-001', 'title' => 'KYC/AML Policy Update - RBI Master Direction', 'dept' => 'Compliance', 'rtype' => 'Second', 'to' => 'Priya Sharma', 'cc' => 'Rajesh Kumar', 'dt' => '2025-02-11 14:30', 'ok' => false],
-                ['cid' => 'CMP-086', 'title' => 'Grievance Redressal Mechanism - Review', 'dept' => 'Operations', 'rtype' => 'First', 'to' => 'Vikram Singh', 'cc' => '', 'dt' => '2026-02-10 14:30', 'ok' => true],
-            ],
+        return ['entries' => []];
+    }
+
+    private function findTemplate(array $templates, string $name, string $typeFallback): ?array
+    {
+        $list = $templates['list'] ?? [];
+        foreach ($list as $t) {
+            if (!is_array($t)) {
+                continue;
+            }
+            if (!empty($t['enabled']) && strcasecmp((string) ($t['name'] ?? ''), $name) === 0) {
+                return $t;
+            }
+        }
+        foreach ($list as $t) {
+            if (!is_array($t)) {
+                continue;
+            }
+            if (!empty($t['enabled']) && strcasecmp((string) ($t['type'] ?? ''), $typeFallback) === 0) {
+                return $t;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string, string|int|float> $extra merged into base vars
+     * @return array<string, string>
+     */
+    private function complianceTemplateVars(array $row, \DateTimeImmutable $today, array $extra = []): array
+    {
+        $dueRaw = (string) ($row['due_date'] ?? '');
+        $due = $dueRaw !== '' ? new \DateTimeImmutable($dueRaw) : null;
+        $daysToDue = $due ? (int) $today->diff($due)->format('%r%a') : 0;
+        $daysOverdue = max(0, -$daysToDue);
+        $expRaw = (string) ($row['expected_date'] ?? '');
+        $expStr = $expRaw !== '' ? (new \DateTimeImmutable($expRaw))->format('M j, Y') : '';
+
+        $base = [
+            'Compliance_ID' => (string) ($row['compliance_code'] ?? ''),
+            'Compliance_Title' => (string) ($row['title'] ?? ''),
+            'Department' => (string) ($row['department'] ?? ''),
+            'Due_Date' => $due ? $due->format('M j, Y') : '—',
+            'Expected_Date' => $expStr !== '' ? $expStr : '—',
+            'Days_Remaining' => (string) max(0, $daysToDue),
+            'Days_Overdue' => (string) $daysOverdue,
+            'Risk_Level' => (string) ($row['risk_level'] ?? ''),
+            'Owner_Name' => (string) ($row['owner_name'] ?? ''),
+            'Reviewer_Name' => (string) ($row['reviewer_name'] ?? ''),
+            'Approver_Name' => (string) ($row['approver_name'] ?? ''),
         ];
+
+        $merged = array_merge($base, $extra);
+        foreach ($merged as $k => $v) {
+            $merged[$k] = (string) $v;
+        }
+
+        return $merged;
+    }
+
+    private function roleRecipients(array $row, string $target): array
+    {
+        $t = strtolower(trim($target));
+        if ($t === '') {
+            $t = 'owner';
+        }
+        if (strpos($t, 'owner') !== false || strpos($t, 'maker') !== false) {
+            return [['email' => (string) ($row['owner_email'] ?? ''), 'name' => (string) ($row['owner_name'] ?? '')]];
+        }
+        if (strpos($t, 'review') !== false || strpos($t, 'checker') !== false || strpos($t, 'manager') !== false) {
+            return [['email' => (string) ($row['reviewer_email'] ?? ''), 'name' => (string) ($row['reviewer_name'] ?? '')]];
+        }
+        return [['email' => (string) ($row['approver_email'] ?? ''), 'name' => (string) ($row['approver_name'] ?? '')]];
+    }
+
+    private function activeComplianceRows(int $orgId): array
+    {
+        $sql = "SELECT c.id, c.compliance_code, c.title, c.department, c.due_date, c.expected_date, c.risk_level, c.status,
+                o.full_name AS owner_name, o.email AS owner_email,
+                r.full_name AS reviewer_name, r.email AS reviewer_email,
+                a.full_name AS approver_name, a.email AS approver_email
+            FROM compliances c
+            LEFT JOIN users o ON o.id = c.owner_id
+            LEFT JOIN users r ON r.id = c.reviewer_id
+            LEFT JOIN users a ON a.id = c.approver_id
+            WHERE c.organization_id = ?
+              AND c.due_date IS NOT NULL
+              AND c.status NOT IN ('approved','completed','rejected')";
+        try {
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([$orgId]);
+
+            return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        } catch (\Throwable $e) {
+            $sqlNoExp = str_replace('c.expected_date, ', '', $sql);
+            $stmt = $this->db->prepare($sqlNoExp);
+            $stmt->execute([$orgId]);
+            $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            foreach ($rows as &$r) {
+                $r['expected_date'] = null;
+            }
+            unset($r);
+
+            return $rows;
+        }
+    }
+
+    private function runAutomationNow(int $orgId, array $pre, array $esc, array $templates): array
+    {
+        $rows = $this->activeComplianceRows($orgId);
+        $sent = 0;
+        $failed = 0;
+        $entries = [];
+        $today = new \DateTimeImmutable('today');
+
+        $remTpl = $this->findTemplate($templates, 'Reminder - Upcoming Due Date', 'Reminder');
+        $escLevels = $esc['global_levels'] ?? [];
+        if (!is_array($escLevels) || $escLevels === []) {
+            $escLevels = $this->defaultEscalation()['global_levels'];
+        }
+        $accel = !empty($esc['accelerated_high_risk']);
+        $first = (int) ($pre['first'] ?? 7);
+        $second = (int) ($pre['second'] ?? 3);
+        $final = (int) ($pre['final'] ?? 1);
+
+        foreach ($rows as $row) {
+            $dueRaw = (string) ($row['due_date'] ?? '');
+            if ($dueRaw === '') {
+                continue;
+            }
+            $due = new \DateTimeImmutable($dueRaw);
+            $daysToDue = (int) $today->diff($due)->format('%r%a');
+            $daysOverdue = max(0, -$daysToDue);
+
+            $vars = $this->complianceTemplateVars($row, $today);
+
+            if (!empty($pre['enabled']) && in_array($daysToDue, [$first, $second, $final], true)) {
+                if ($daysToDue === $final) {
+                    $rtype = 'Final';
+                } elseif ($daysToDue === $second) {
+                    $rtype = 'Second';
+                } else {
+                    $rtype = 'First';
+                }
+                $ccList = [];
+                $ccNames = [];
+                if ($rtype === 'Second') {
+                    if (!empty($row['reviewer_email'])) {
+                        $ccList[] = ['email' => (string) $row['reviewer_email'], 'name' => (string) ($row['reviewer_name'] ?? '')];
+                        $ccNames[] = (string) ($row['reviewer_name'] ?? '');
+                    }
+                } elseif ($rtype === 'Final') {
+                    if (!empty($row['reviewer_email'])) {
+                        $ccList[] = ['email' => (string) $row['reviewer_email'], 'name' => (string) ($row['reviewer_name'] ?? '')];
+                        $ccNames[] = (string) ($row['reviewer_name'] ?? '');
+                    }
+                    if (!empty($row['approver_email'])
+                        && strtolower(trim((string) $row['approver_email'])) !== strtolower(trim((string) ($row['reviewer_email'] ?? '')))) {
+                        $ccList[] = ['email' => (string) $row['approver_email'], 'name' => (string) ($row['approver_name'] ?? '')];
+                        $ccNames[] = (string) ($row['approver_name'] ?? '');
+                    }
+                }
+                $recipients = [['email' => (string) ($row['owner_email'] ?? ''), 'name' => (string) ($row['owner_name'] ?? '')]];
+                $subjectTpl = (string) ($remTpl['subject'] ?? ($pre['subject'] ?? 'Reminder: {{Compliance_Title}} due on {{Due_Date}}'));
+                $bodyTpl = (string) ($remTpl['body'] ?? ($pre['body'] ?? ''));
+                $subject = EmailTemplateVars::replace($subjectTpl, $vars);
+                $body = EmailTemplateVars::replace($bodyTpl, $vars);
+                $mail = Mailer::sendNotificationToRecipients($this->appConfig, $recipients, $subject, $body, $ccList);
+                $sent += $mail['ok'];
+                $failed += $mail['fail'];
+                $anyOk = $mail['ok'] > 0;
+                $entries[] = [
+                    'cid' => (string) ($row['compliance_code'] ?? ''),
+                    'title' => (string) ($row['title'] ?? ''),
+                    'dept' => (string) ($row['department'] ?? ''),
+                    'rtype' => $rtype,
+                    'to' => (string) ($row['owner_name'] ?? ''),
+                    'cc' => $ccNames !== [] ? implode(', ', array_filter($ccNames)) : '',
+                    'dt' => date('Y-m-d H:i'),
+                    'ok' => $anyOk,
+                ];
+            }
+
+            if ($daysOverdue <= 0) {
+                continue;
+            }
+            foreach ($escLevels as $idx => $level) {
+                if (!is_array($level)) {
+                    continue;
+                }
+                $triggerAfter = max(0, (int) ($level['d'] ?? 0));
+                if ($accel && in_array(strtolower((string) ($row['risk_level'] ?? '')), ['high', 'critical'], true)) {
+                    $triggerAfter = (int) floor($triggerAfter / 2);
+                }
+                if ($daysOverdue !== $triggerAfter) {
+                    continue;
+                }
+                $target = (string) ($level['to'] ?? 'Owner (Maker)');
+                $tplName = (string) ($level['tpl'] ?? '');
+                $tpl = $this->findTemplate($templates, $tplName, 'Escalation');
+                $recipients = $this->roleRecipients($row, $target);
+                $escVars = $this->complianceTemplateVars($row, $today, ['Escalation_Level' => (string) ($idx + 1)]);
+                $subjectTpl = (string) ($tpl['subject'] ?? ('Escalation L' . ($idx + 1) . ': {{Compliance_Title}}'));
+                $bodyTpl = (string) ($tpl['body'] ?? 'Escalation for {{Compliance_ID}}');
+                $subject = EmailTemplateVars::replace($subjectTpl, $escVars);
+                $body = EmailTemplateVars::replace($bodyTpl, $escVars);
+                $mail = Mailer::sendNotificationToRecipients($this->appConfig, $recipients, $subject, $body);
+                $sent += $mail['ok'];
+                $failed += $mail['fail'];
+                $anyOk = $mail['ok'] > 0;
+                $entries[] = [
+                    'cid' => (string) ($row['compliance_code'] ?? ''),
+                    'title' => (string) ($row['title'] ?? ''),
+                    'dept' => (string) ($row['department'] ?? ''),
+                    'rtype' => 'Escalation L' . ($idx + 1),
+                    'to' => (string) ($recipients[0]['name'] ?? ''),
+                    'cc' => '',
+                    'dt' => date('Y-m-d H:i'),
+                    'ok' => $anyOk,
+                ];
+                break;
+            }
+        }
+
+        return ['sent' => $sent, 'failed' => $failed, 'entries' => $entries];
     }
 
     public function index(): void
@@ -230,8 +454,8 @@ class SettingsController extends BaseController
         $preDue = $this->getJson($orgId, self::KEYS['pre_due'], $this->defaultPreDue());
         $templates = $this->getJson($orgId, self::KEYS['templates'], $this->defaultTemplates());
         $logs = $this->getJson($orgId, self::KEYS['logs'], $this->defaultLogs());
-        if (empty($logs['entries'])) {
-            $logs = $this->defaultLogs();
+        if (!isset($logs['entries']) || !is_array($logs['entries'])) {
+            $logs = ['entries' => []];
         }
 
         $selTpl = preg_replace('/[^a-z0-9_\-]/i', '', $_GET['sel'] ?? '');
@@ -369,9 +593,26 @@ class SettingsController extends BaseController
         if (!is_array($esc)) {
             $esc = [];
         }
+        $globalLevels = [];
+        $postGlobal = $_POST['global_levels'] ?? [];
+        if (is_array($postGlobal)) {
+            foreach ($postGlobal as $L) {
+                if (!is_array($L)) {
+                    continue;
+                }
+                $globalLevels[] = [
+                    'd' => max(0, (int) ($L['d'] ?? 0)),
+                    'to' => trim((string) ($L['to'] ?? '')),
+                    'tpl' => trim((string) ($L['tpl'] ?? '')),
+                ];
+            }
+        }
+        if ($globalLevels === []) {
+            $globalLevels = $base['global_levels'];
+        }
         $out = [
-            'enable_dept' => !empty($_POST['enable_dept']),
             'accelerated_high_risk' => !empty($_POST['accelerated_high_risk']),
+            'global_levels' => $globalLevels,
             'depts' => [],
         ];
         foreach ($base['depts'] as $slug => $def) {
@@ -390,16 +631,11 @@ class SettingsController extends BaseController
                     ];
                 }
             }
-            if ($useGlobal) {
-                $levels = [];
-            } elseif (empty($levels)) {
-                $levels = $def['levels'] ?? [];
-            }
             $out['depts'][$slug] = [
                 'name' => $def['name'],
                 'use_global' => $useGlobal,
                 'active' => true,
-                'levels' => $levels,
+                'levels' => [],
             ];
         }
         $this->setJson($orgId, self::KEYS['escalation'], $out);
@@ -442,20 +678,11 @@ class SettingsController extends BaseController
         if ($action === 'test') {
             $_SESSION['flash_success'] = 'Test email queued (demo — configure SMTP to send real mail).';
         } elseif ($action === 'trigger') {
-            $_SESSION['flash_success'] = 'Manual trigger recorded (demo).';
-            $logs = $this->getJson($orgId, self::KEYS['logs'], $this->defaultLogs());
-            array_unshift($logs['entries'], [
-                'cid' => 'CMP-MANUAL',
-                'title' => 'Manual pre-due run',
-                'dept' => '—',
-                'rtype' => 'First',
-                'to' => Auth::user()['full_name'] ?? 'Admin',
-                'cc' => '',
-                'dt' => date('Y-m-d H:i'),
-                'ok' => true,
-            ]);
-            $logs['entries'] = array_slice($logs['entries'], 0, 50);
-            $this->setJson($orgId, self::KEYS['logs'], $logs);
+            $esc = $this->getJson($orgId, self::KEYS['escalation'], $this->defaultEscalation());
+            $tpl = $this->getJson($orgId, self::KEYS['templates'], $this->defaultTemplates());
+            $result = $this->runAutomationNow($orgId, $pre, $esc, $tpl);
+            $_SESSION['flash_success'] = 'Manual trigger completed. Sent: ' . (int) $result['sent'] . ', failed: ' . (int) $result['failed'] . '.';
+            AutomationLog::appendEntries($this->db, $orgId, $result['entries']);
         } else {
             $_SESSION['flash_success'] = 'Pre-due reminder configuration saved.';
         }

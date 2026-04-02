@@ -16,7 +16,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
 <div class="alert alert-danger"><?= htmlspecialchars($flashError) ?></div>
 <?php endif; ?>
 
-<div class="card">
+<div class="card create-compact-wrap">
     <form method="post" action="<?= $basePath ?>/compliances/create" enctype="multipart/form-data" id="form-create-compliance">
         <div class="card create-section-card">
             <h3 class="card-title">Basic Information</h3>
@@ -40,10 +40,17 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 </div>
                 <div class="form-group">
                     <label class="form-label">Applicable Department *</label>
-                    <input type="text" name="department" class="form-control" list="dept-suggestions" placeholder="Select or type department" value="<?= htmlspecialchars($_POST['department'] ?? '') ?>" required>
-                    <datalist id="dept-suggestions">
-                        <option value="Legal"><option value="Finance"><option value="Operations"><option value="Risk"><option value="IT">
-                    </datalist>
+                    <select name="department" class="form-control" required>
+                        <option value="">Select applicable department</option>
+                        <?php $departmentPost = (string)($_POST['department'] ?? ''); ?>
+                        <option value="Legal" <?= $departmentPost === 'Legal' ? 'selected' : '' ?>>Legal</option>
+                        <option value="Finance" <?= $departmentPost === 'Finance' ? 'selected' : '' ?>>Finance</option>
+                        <option value="Operations" <?= $departmentPost === 'Operations' ? 'selected' : '' ?>>Operations</option>
+                        <option value="Risk" <?= $departmentPost === 'Risk' ? 'selected' : '' ?>>Risk</option>
+                        <option value="IT" <?= $departmentPost === 'IT' ? 'selected' : '' ?>>IT</option>
+                        <option value="Compliance" <?= $departmentPost === 'Compliance' ? 'selected' : '' ?>>Compliance</option>
+                        <option value="HR" <?= $departmentPost === 'HR' ? 'selected' : '' ?>>HR</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Risk Level *</label>

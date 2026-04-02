@@ -2,14 +2,33 @@
 namespace App\Controllers;
 
 use App\Core\Auth;
+use App\Core\AutomationLog;
 use App\Core\BaseController;
+use App\Core\ComplianceCreatedMailReport;
+use App\Core\EmailTemplateVars;
+use App\Core\Mailer;
 
 class ComplianceController extends BaseController
 {
     private function getAuthorityOptions(): array
     {
-        $stmt = $this->db->query('SELECT id, name FROM authorities ORDER BY name');
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $stmt = $this->db->query('SELECT id, name FROM authorities ORDER BY id ASC');
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $seen = [];
+        $out = [];
+        foreach ($rows as $r) {
+            $key = mb_strtolower(trim((string)($r['name'] ?? '')));
+            if ($key === '' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = $r;
+        }
+        usort($out, static function (array $a, array $b): int {
+            return strcasecmp((string)$a['name'], (string)$b['name']);
+        });
+
+        return $out;
     }
 
     private function getUserOptions(): array
@@ -17,6 +36,179 @@ class ComplianceController extends BaseController
         $stmt = $this->db->prepare('SELECT id, full_name FROM users WHERE organization_id = ? AND status = ? ORDER BY full_name');
         $stmt->execute([Auth::organizationId(), 'active']);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Subject/body for "compliance created" workflow mail. Template id t8 in Settings → Notification templates.
+     *
+     * @return array{send: bool, subject: string, body: string}
+     */
+    private function complianceCreatedMailTemplate(int $orgId): array
+    {
+        $defaults = [
+            'subject' => 'New compliance created: {{Compliance_ID}}',
+            'body' => "Hello — a new compliance item was created. The full structured summary is in the email below.",
+        ];
+        $out = ['send' => true, 'subject' => $defaults['subject'], 'body' => $defaults['body']];
+        try {
+            $stmt = $this->db->prepare('SELECT value FROM settings WHERE organization_id = ? AND key_name = ?');
+            $stmt->execute([$orgId, 'ui_email_templates']);
+            $v = $stmt->fetchColumn();
+            if ($v === false || $v === null || $v === '') {
+                return $out;
+            }
+            $d = json_decode((string) $v, true);
+            if (!is_array($d) || empty($d['list']) || !is_array($d['list'])) {
+                return $out;
+            }
+            foreach ($d['list'] as $item) {
+                if (!is_array($item) || ($item['id'] ?? '') !== 't8') {
+                    continue;
+                }
+                if (array_key_exists('enabled', $item) && !$item['enabled']) {
+                    $out['send'] = false;
+
+                    return $out;
+                }
+                $sub = trim((string) ($item['subject'] ?? ''));
+                $bod = trim((string) ($item['body'] ?? ''));
+                if ($sub !== '') {
+                    $out['subject'] = $sub;
+                }
+                if ($bod !== '') {
+                    $out['body'] = $bod;
+                }
+
+                return $out;
+            }
+        } catch (\Throwable $e) {
+            // keep defaults
+        }
+
+        return $out;
+    }
+
+    /**
+     * Mailgun: notify owner, reviewer, and approver (distinct emails) after create.
+     * HTML body is a structured summary; plain part includes intro + full text report.
+     */
+    private function notifyComplianceWorkflowCreated(
+        int $orgId,
+        int $complianceId,
+        int $ownerId,
+        ?int $reviewerId,
+        ?int $approverId,
+        string $complianceCode,
+        string $title,
+        ?string $dueDateRaw,
+        string $department
+    ): void {
+        $tpl = $this->complianceCreatedMailTemplate($orgId);
+        if (!$tpl['send']) {
+            return;
+        }
+        $ids = array_values(array_unique(array_filter([
+            $ownerId,
+            $reviewerId ? (int) $reviewerId : 0,
+            $approverId ? (int) $approverId : 0,
+        ], static function ($v) {
+            return (int) $v > 0;
+        })));
+        if ($ids === []) {
+            return;
+        }
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $sql = "SELECT email, full_name FROM users WHERE organization_id = ? AND id IN ($ph) AND email IS NOT NULL AND TRIM(email) <> ''";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute(array_merge([$orgId], $ids));
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $recipients = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            $email = trim((string) ($row['email'] ?? ''));
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+            $key = strtolower($email);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $recipients[] = ['email' => $email, 'name' => (string) ($row['full_name'] ?? '')];
+        }
+        if ($recipients === []) {
+            return;
+        }
+        $dueFmt = $dueDateRaw ? date('M j, Y', strtotime($dueDateRaw)) : '—';
+        $creationFmt = date('M j, Y g:i A');
+        $vars = [
+            'Compliance_ID' => $complianceCode,
+            'Compliance_Title' => $title,
+            'Department' => $department,
+            'Due_Date' => $dueFmt,
+            'Creation_Date' => $creationFmt,
+        ];
+        $subject = EmailTemplateVars::replace($tpl['subject'], $vars);
+        $intro = trim(EmailTemplateVars::replace($tpl['body'], $vars));
+        if ($intro === '') {
+            $intro = 'A new compliance item has been created and you are on the workflow.';
+        }
+
+        $row = $this->loadComplianceRowForCreatedMail($complianceId, $orgId);
+        if ($row === null) {
+            $plain = $intro . "\n\n" . "ID: {$complianceCode}\nTitle: {$title}\nDepartment: {$department}\nDue: {$dueFmt}\nCreated: {$creationFmt}";
+            $send = Mailer::sendComplianceCreatedToRecipients($this->appConfig, $recipients, $subject, $plain);
+        } else {
+            $snapshot = ComplianceCreatedMailReport::fromDatabaseRow($row);
+            $plain = $intro . "\n\n" . ComplianceCreatedMailReport::buildPlainText($snapshot);
+            $html = ComplianceCreatedMailReport::buildHtmlEmail($snapshot);
+            $send = Mailer::sendComplianceCreatedToRecipients(
+                $this->appConfig,
+                $recipients,
+                $subject,
+                $plain,
+                $html
+            );
+        }
+        $logRows = [];
+        foreach ($send['results'] as $r) {
+            $logRows[] = [
+                'cid' => $complianceCode,
+                'title' => $title,
+                'dept' => $department,
+                'rtype' => 'Creation',
+                'to' => (string) ($r['name'] ?? ''),
+                'cc' => '',
+                'dt' => date('Y-m-d H:i'),
+                'ok' => !empty($r['ok']),
+            ];
+        }
+        AutomationLog::appendEntries($this->db, $orgId, $logRows);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function loadComplianceRowForCreatedMail(int $complianceId, int $orgId): ?array
+    {
+        try {
+            $stmt = $this->db->prepare('
+                SELECT c.*, a.name AS authority_name,
+                    ou.full_name AS owner_name, rv.full_name AS reviewer_name, ap.full_name AS approver_name
+                FROM compliances c
+                LEFT JOIN authorities a ON a.id = c.authority_id
+                LEFT JOIN users ou ON ou.id = c.owner_id
+                LEFT JOIN users rv ON rv.id = c.reviewer_id
+                LEFT JOIN users ap ON ap.id = c.approver_id
+                WHERE c.id = ? AND c.organization_id = ?
+            ');
+            $stmt->execute([$complianceId, $orgId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+            return $row ?: null;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     private function logHistory(int $complianceId, string $action, string $description, ?int $userId = null, ?string $comment = null): void
@@ -346,6 +538,8 @@ class ComplianceController extends BaseController
         }
 
         $this->logHistory($id, 'Compliance Created', 'Compliance item created', Auth::id());
+
+        $this->notifyComplianceWorkflowCreated($orgId, $id, $ownerId, $reviewerId ?: null, $approverId ?: null, $code, $title, $dueDate, $department);
 
         $_SESSION['flash_success'] = 'Compliance saved. ID ' . $code . '. Assigned to maker; visible on dashboard and calendar.' . $uploadNote;
         $this->redirect('/compliance/view/' . $id);

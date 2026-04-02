@@ -221,11 +221,16 @@ class AuthController extends BaseController
 
     public function inviteAcceptPage(): void
     {
-        if (Auth::check()) {
+        $token = trim((string) ($_GET['token'] ?? ''));
+        if (Auth::check() && $token === '') {
             $this->redirect('/dashboard');
         }
+        if (Auth::check() && $token !== '') {
+            // Allow invite onboarding even if another user is currently signed in on same browser.
+            Auth::logout();
+            Auth::init();
+        }
         $basePath = $this->appConfig['url'] ?? '';
-        $token = trim((string) ($_GET['token'] ?? ''));
         $error = $_SESSION['invite_error'] ?? null;
         $success = $_SESSION['invite_success'] ?? null;
         unset($_SESSION['invite_error'], $_SESSION['invite_success']);
@@ -275,8 +280,8 @@ class AuthController extends BaseController
             $_SESSION['invite_error'] = 'Invalid or expired invitation link.';
             $this->redirect('/invite/accept?token=' . urlencode($token));
         }
-        if ($fullName === '' || $password === '' || $confirm === '') {
-            $_SESSION['invite_error'] = 'All fields are required.';
+        if ($password === '' || $confirm === '') {
+            $_SESSION['invite_error'] = 'Password and confirm password are required.';
             $this->redirect('/invite/accept?token=' . urlencode($token));
         }
         if (strlen($password) < 8) {
@@ -287,11 +292,12 @@ class AuthController extends BaseController
             $_SESSION['invite_error'] = 'Passwords do not match.';
             $this->redirect('/invite/accept?token=' . urlencode($token));
         }
-
         $email = strtolower(trim((string) ($invite['email'] ?? '')));
         $orgId = (int) ($invite['organization_id'] ?? 0);
         $roleId = (int) ($invite['role_id'] ?? 0);
         $dept = trim((string) ($invite['department'] ?? ''));
+        $nameFromInvite = trim((string) ($invite['full_name'] ?? ''));
+        $nameForUser = $nameFromInvite !== '' ? $nameFromInvite : ($fullName !== '' ? $fullName : $email);
 
         $exists = $this->db->prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1');
         $exists->execute([$email]);
@@ -305,7 +311,7 @@ class AuthController extends BaseController
         $this->db->beginTransaction();
         try {
             $this->db->prepare('INSERT INTO users (organization_id, role_id, full_name, email, department, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                ->execute([$orgId, $roleId, $fullName, $email, $dept !== '' ? $dept : null, $hashed, 'active']);
+                ->execute([$orgId, $roleId, $nameForUser, $email, $dept !== '' ? $dept : null, $hashed, 'active']);
             $this->db->prepare('UPDATE organization_invites SET accepted_at = NOW() WHERE id = ? AND accepted_at IS NULL')
                 ->execute([(int) $invite['id']]);
             $this->db->commit();

@@ -9,4 +9,6 @@ ALTER TABLE `compliances`
 ALTER TABLE `compliance_history`
   ADD COLUMN `comment` text DEFAULT NULL AFTER `description`;
 
-INSERT IGNORE INTO `authorities` (`name`) VALUES ('Audit');
+INSERT INTO `authorities` (`name`)
+SELECT tmp.name FROM (SELECT 'Audit' AS name) AS tmp
+WHERE NOT EXISTS (SELECT 1 FROM `authorities` a WHERE a.name = tmp.name LIMIT 1);

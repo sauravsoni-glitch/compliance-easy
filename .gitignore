@@ -16,6 +16,12 @@ composer-setup.php
 !.env.example
 config/mail.local.php
 
+# Local data / tooling (never commit)
+.mysql-data/
+.mysql-my.ini
+.tools/
+venv/
+
 # IDE / OS
 .idea/
 .vscode/

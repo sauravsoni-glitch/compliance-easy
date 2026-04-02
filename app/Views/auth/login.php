@@ -48,14 +48,6 @@
                 <a href="<?= $basePath ?? '' ?>/pricing">View Pricing</a>
             </div>
         </form>
-
-        <p class="auth-cta-text">To create an account, start by choosing a plan.</p>
-        <a href="<?= $basePath ?? '' ?>/pricing" class="btn btn-primary btn-block">View Plans & Sign Up</a>
-
-        <div class="auth-links">
-            New to ComplianceHub? <a href="<?= $basePath ?? '' ?>/pricing">Sign Up</a><br>
-            <a href="<?= $basePath ?? '' ?>/pricing">View Pricing Plans</a>
-        </div>
     </div>
     <footer class="auth-footer">
         © <?= date('Y') ?> Easy Home Finance. All rights reserved.

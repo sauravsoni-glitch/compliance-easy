@@ -77,7 +77,7 @@ function rpt_doc_status(string $st, int $id): string {
         ? '<span class="rpt-pill rpt-pill-uploaded">Uploaded</span>'
         : '<span class="rpt-pill rpt-pill-review">Under Review</span>';
 }
-$fw = $frameworkCounts ?? ['RBI' => 0, 'NHB' => 0, 'Internal' => 0];
+$frameworkChart = $frameworkChart ?? ['labels' => ['RBI', 'NHB', 'Internal Policy'], 'data' => [0, 0, 0]];
 $sb = $statusBuckets ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0];
 ?>
 <div class="rpt-page">
@@ -160,14 +160,17 @@ $sb = $statusBuckets ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 
         new Chart(document.getElementById('rpt-bar-chart'), {
             type: 'bar',
             data: {
-                labels: ['RBI', 'NHB', 'Internal'],
-                datasets: [{ data: [<?= (int)$fw['RBI'] ?>, <?= (int)$fw['NHB'] ?>, <?= (int)$fw['Internal'] ?>], backgroundColor: primary, borderRadius: 6 }]
+                labels: <?= json_encode($frameworkChart['labels'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
+                datasets: [{ data: <?= json_encode($frameworkChart['data'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>, backgroundColor: primary, borderRadius: 6 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
-                scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+                scales: {
+                    x: { ticks: { maxRotation: 45, minRotation: 0, autoSkip: true } },
+                    y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                }
             }
         });
         new Chart(document.getElementById('rpt-donut-chart'), {

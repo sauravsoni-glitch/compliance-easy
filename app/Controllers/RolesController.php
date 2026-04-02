@@ -88,6 +88,7 @@ class RolesController extends BaseController
             'roles' => $roles,
             'stats' => $stats,
             'isAdmin' => Auth::isAdmin(),
+            'viewerId' => Auth::id(),
         ]);
     }
 
@@ -196,6 +197,64 @@ class RolesController extends BaseController
         );
 
         $_SESSION['flash_success'] = 'User ' . $verb . '.';
+        $this->redirect('/roles-permissions');
+    }
+
+    public function deleteUser(int $id): void
+    {
+        Auth::requireRole('admin');
+        $orgId = Auth::organizationId();
+        $actorId = Auth::id();
+
+        if ((int) $id === (int) $actorId) {
+            $_SESSION['flash_error'] = 'You cannot delete your own account.';
+            $this->redirect('/roles-permissions');
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT u.id, u.full_name, u.email, u.status, r.slug AS role_slug
+             FROM users u INNER JOIN roles r ON r.id = u.role_id
+             WHERE u.id = ? AND u.organization_id = ?'
+        );
+        $stmt->execute([$id, $orgId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$row) {
+            $_SESSION['flash_error'] = 'User not found.';
+            $this->redirect('/roles-permissions');
+        }
+
+        if ($row['role_slug'] === 'admin' && in_array($row['status'], ['active', 'pending'], true)) {
+            if ($this->adminCount($orgId) <= 1) {
+                $_SESSION['flash_error'] = 'Cannot delete the only administrator in the organization.';
+                $this->redirect('/roles-permissions');
+            }
+        }
+
+        try {
+            $del = $this->db->prepare('DELETE FROM users WHERE id = ? AND organization_id = ?');
+            $del->execute([$id, $orgId]);
+            if ($del->rowCount() === 0) {
+                $_SESSION['flash_error'] = 'User could not be deleted.';
+                $this->redirect('/roles-permissions');
+            }
+            $this->logActivity(
+                $orgId,
+                $actorId,
+                'user_deleted',
+                sprintf('Deleted user %s (%s)', $row['full_name'], $row['email']),
+                $id
+            );
+            $_SESSION['flash_success'] = 'User removed from the organization.';
+        } catch (\PDOException $e) {
+            $sqlMsg = $e->getMessage();
+            $isFk = strpos($sqlMsg, 'foreign key') !== false
+                || strpos($sqlMsg, '1451') !== false
+                || strpos($sqlMsg, 'Cannot delete') !== false
+                || (string) $e->getCode() === '23000';
+            $_SESSION['flash_error'] = $isFk
+                ? 'This user cannot be deleted while they are still linked to compliances or other records. Deactivate them instead.'
+                : 'Could not delete user.';
+        }
         $this->redirect('/roles-permissions');
     }
 }

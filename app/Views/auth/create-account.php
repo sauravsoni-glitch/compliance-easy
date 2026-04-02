@@ -26,7 +26,7 @@
         <a href="<?= $basePath ?? '' ?>/organization/invite" class="btn btn-secondary btn-block">Request New Invite</a>
         <?php else: ?>
         <h1>Create Your Account</h1>
-        <p class="subtitle">Complete your setup to access system.</p>
+        <p class="subtitle"><?= !empty($inviteMode) ? 'Set your password to join workspace.' : 'Complete your setup to access system.' ?></p>
         <?php endif; ?>
 
         <?php if (!empty($error)): ?>
@@ -40,17 +40,20 @@
         <form method="post" action="<?= $basePath ?? '' ?><?= !empty($inviteMode) ? '/invite/accept' : '/create-account' ?>" class="auth-form">
             <?php if (!empty($inviteMode)): ?>
                 <input type="hidden" name="token" value="<?= htmlspecialchars($inviteToken ?? '') ?>">
+                <input type="hidden" name="full_name" value="<?= htmlspecialchars($inviteName ?? '') ?>">
                 <div class="form-group form-group-icon">
                     <label class="form-label" for="email">Email</label>
                     <span class="input-icon"><i class="fas fa-envelope"></i></span>
                     <input type="email" id="email" class="form-control" value="<?= htmlspecialchars($inviteEmail ?? '') ?>" readonly>
                 </div>
             <?php endif; ?>
+            <?php if (empty($inviteMode)): ?>
             <div class="form-group form-group-icon">
                 <label class="form-label" for="full_name">Full Name</label>
                 <span class="input-icon"><i class="fas fa-user"></i></span>
                 <input type="text" id="full_name" name="full_name" class="form-control" placeholder="Enter your full name" value="<?= htmlspecialchars($_POST['full_name'] ?? ($inviteName ?? '')) ?>" required>
             </div>
+            <?php endif; ?>
             <div class="form-group form-group-icon">
                 <label class="form-label" for="password">Create Password</label>
                 <span class="input-icon"><i class="fas fa-lock"></i></span>

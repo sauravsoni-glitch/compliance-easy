@@ -265,6 +265,7 @@ if (!empty($org['logo_path'])) {
                         <td><span class="org-status-pill org-st-invited">Invited</span></td>
                         <?php if ($isAdmin): ?>
                         <td>
+                            <a href="<?= htmlspecialchars($basePath) ?>/organization/invite?edit=<?= (int)$inv['id'] ?>" class="btn btn-sm btn-outline mr-1">Edit</a>
                             <form method="post" action="<?= htmlspecialchars($basePath) ?>/organization/resend-invite" class="d-inline">
                                 <input type="hidden" name="invite_id" value="<?= (int)$inv['id'] ?>">
                                 <button type="submit" class="btn btn-sm btn-outline">Resend</button>

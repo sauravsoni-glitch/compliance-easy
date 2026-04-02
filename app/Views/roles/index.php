@@ -164,6 +164,11 @@ function rp_status_label(string $status): string {
                                         <button type="submit" class="rp-dd-item rp-dd-danger"><?= $u['status'] === 'active' ? 'Deactivate user' : 'Activate user' ?></button>
                                     </form>
                                     <?php endif; ?>
+                                    <?php if ((int)($u['id'] ?? 0) !== (int)($viewerId ?? 0)): ?>
+                                    <form method="post" action="<?= htmlspecialchars($basePath) ?>/roles-permissions/delete/<?= (int)$u['id'] ?>" class="rp-dd-form" onsubmit="return confirm('Permanently delete this user from the organization? This cannot be undone.');">
+                                        <button type="submit" class="rp-dd-item rp-dd-danger">Delete user</button>
+                                    </form>
+                                    <?php endif; ?>
                                 </div>
                             </details>
                         </td>

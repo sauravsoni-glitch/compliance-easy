@@ -33,6 +33,85 @@ final class Mailer
     }
 
     /**
+     * Notify owner / reviewer / approver after a compliance is created (Mailgun).
+     * Sends one message per recipient; failures are logged only (does not throw).
+     *
+     * @param array<int, array{email: string, name: string}> $recipients Distinct recipients (email => ...)
+     * @return array{ok: int, fail: int, results: list<array{email: string, name: string, ok: bool, error: ?string}>}
+     */
+    public static function sendComplianceCreatedToRecipients(
+        array $appConfig,
+        array $recipients,
+        string $subject,
+        string $plainBody,
+        ?string $htmlBody = null
+    ): array {
+        return self::sendNotificationToRecipients($appConfig, $recipients, $subject, $plainBody, [], $htmlBody);
+    }
+
+    /**
+     * Generic notification sender (Mailgun) for multiple recipients.
+     *
+     * @param array<int, array{email: string, name: string}> $recipients
+     * @param list<array{email: string, name?: string}> $ccRecipients Used only when there is exactly one primary recipient (e.g. reminder to owner with CC).
+     * @return array{ok: int, fail: int, results: list<array{email: string, name: string, ok: bool, error: ?string}>}
+     */
+    public static function sendNotificationToRecipients(
+        array $appConfig,
+        array $recipients,
+        string $subject,
+        string $plainBody,
+        array $ccRecipients = [],
+        ?string $htmlBody = null
+    ): array {
+        $cfg = self::config();
+        $results = [];
+        $ok = 0;
+        $fail = 0;
+        if ($recipients === []) {
+            return ['ok' => 0, 'fail' => 0, 'results' => []];
+        }
+        if (empty($cfg['enabled'])) {
+            foreach ($recipients as $r) {
+                $email = trim((string) ($r['email'] ?? ''));
+                $name = trim((string) ($r['name'] ?? ''));
+                $results[] = ['email' => $email, 'name' => $name, 'ok' => false, 'error' => 'Mail is disabled in config'];
+                $fail++;
+            }
+
+            return ['ok' => $ok, 'fail' => $fail, 'results' => $results];
+        }
+        $htmlOut = $htmlBody ?? (
+            '<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.5;color:#111827;">'
+            . nl2br(htmlspecialchars($plainBody, ENT_QUOTES | ENT_HTML5, 'UTF-8'), false)
+            . '</div>'
+        );
+        $ccHeader = '';
+        if (count($recipients) === 1 && $ccRecipients !== []) {
+            $ccHeader = self::formatCcHeader($ccRecipients);
+        }
+        foreach ($recipients as $r) {
+            $email = trim((string) ($r['email'] ?? ''));
+            $name = trim((string) ($r['name'] ?? ''));
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $results[] = ['email' => $email, 'name' => $name, 'ok' => false, 'error' => 'Invalid or missing email'];
+                $fail++;
+                continue;
+            }
+            [$sent, $err] = self::sendViaMailgun($cfg, $appConfig, $email, $name, $subject, $htmlOut, $plainBody, $ccHeader);
+            if ($sent) {
+                $ok++;
+                $results[] = ['email' => $email, 'name' => $name, 'ok' => true, 'error' => null];
+            } else {
+                $fail++;
+                $results[] = ['email' => $email, 'name' => $name, 'ok' => false, 'error' => $err];
+            }
+        }
+
+        return ['ok' => $ok, 'fail' => $fail, 'results' => $results];
+    }
+
+    /**
      * @return array{0:string,1:string}
      */
     private static function inviteBody(string $toName, string $inviteLink, string $roleLabel, string $department): array
@@ -58,6 +137,24 @@ final class Mailer
     /**
      * @return array{0:bool,1:?string}
      */
+    /**
+     * @param list<array{email: string, name?: string}> $ccRecipients
+     */
+    private static function formatCcHeader(array $ccRecipients): string
+    {
+        $parts = [];
+        foreach ($ccRecipients as $c) {
+            $em = trim((string) ($c['email'] ?? ''));
+            if ($em === '' || !filter_var($em, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+            $nm = trim((string) ($c['name'] ?? ''));
+            $parts[] = $nm !== '' ? $nm . ' <' . $em . '>' : $em;
+        }
+
+        return implode(', ', $parts);
+    }
+
     private static function sendViaMailgun(
         array $cfg,
         array $appConfig,
@@ -65,7 +162,8 @@ final class Mailer
         string $toName,
         string $subject,
         string $htmlBody,
-        string $altBody
+        string $altBody,
+        string $ccHeader = ''
     ): array {
         if (!function_exists('curl_init')) {
             self::logMailgun($cfg, [
@@ -107,16 +205,20 @@ final class Mailer
             ]);
             return [false, 'Could not initialize Mailgun request'];
         }
+        $post = [
+            'from' => $from,
+            'to' => $to,
+            'subject' => $subject,
+            'html' => $htmlBody,
+            'text' => $altBody,
+        ];
+        if ($ccHeader !== '') {
+            $post['cc'] = $ccHeader;
+        }
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => [
-                'from' => $from,
-                'to' => $to,
-                'subject' => $subject,
-                'html' => $htmlBody,
-                'text' => $altBody,
-            ],
+            CURLOPT_POSTFIELDS => $post,
             CURLOPT_USERPWD => 'api:' . $apiKey,
             CURLOPT_TIMEOUT => 20,
         ]);

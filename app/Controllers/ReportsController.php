@@ -37,7 +37,8 @@ class ReportsController extends BaseController
         $completed = 0;
         $overdue = 0;
         $highRisk = 0;
-        $frameworkCounts = ['RBI' => 0, 'NHB' => 0, 'Internal' => 0];
+        $frameworkLabels = $this->fetchUniqueAuthorityNamesOrdered();
+        $frameworkCounts = array_fill_keys($frameworkLabels, 0);
         $statusBuckets = ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0];
 
         foreach ($compliances as $c) {
@@ -61,15 +62,16 @@ class ReportsController extends BaseController
                 $highRisk++;
             }
 
-            $auth = $c['authority_name'] ?? '';
-            if (stripos($auth, 'RBI') !== false) {
-                $frameworkCounts['RBI']++;
-            } elseif (stripos($auth, 'NHB') !== false) {
-                $frameworkCounts['NHB']++;
-            } else {
-                $frameworkCounts['Internal']++;
+            $auth = trim((string)($c['authority_name'] ?? ''));
+            if ($auth !== '' && array_key_exists($auth, $frameworkCounts)) {
+                $frameworkCounts[$auth]++;
             }
         }
+
+        $frameworkChart = [
+            'labels' => array_keys($frameworkCounts),
+            'data' => array_map('intval', array_values($frameworkCounts)),
+        ];
 
         [$rbDoc, $rbDocP] = Auth::complianceScopeSql('c.');
         $docCountStmt = $this->db->prepare("SELECT COUNT(*) FROM compliance_documents d INNER JOIN compliances c ON c.id = d.compliance_id WHERE c.organization_id = ? AND ($rbDoc)");
@@ -99,12 +101,29 @@ class ReportsController extends BaseController
             'kpiOverdue' => $overdue,
             'kpiHighRisk' => $highRisk,
             'kpiDocuments' => $totalDocuments,
-            'frameworkCounts' => $frameworkCounts,
+            'frameworkChart' => $frameworkChart,
             'statusBuckets' => $statusBuckets,
             'recentDocs' => $recentDocs,
             'missingRows' => $missingRows,
             'uploadComplianceOptions' => $uploadComplianceOptions,
         ]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function fetchUniqueAuthorityNamesOrdered(): array
+    {
+        try {
+            $stmt = $this->db->query(
+                'SELECT `name` FROM `authorities` GROUP BY `name` ORDER BY MIN(`id`) ASC'
+            );
+            $names = $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+        } catch (\Throwable $e) {
+            $names = [];
+        }
+
+        return $names !== [] ? $names : ['RBI', 'NHB', 'SEBI', 'Internal Policy', 'Audit'];
     }
 
     private function fetchCompliances(int $orgId, string $q): array
