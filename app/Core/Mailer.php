@@ -175,17 +175,20 @@ final class Mailer
         $domain = trim((string) ($cfg['mailgun_domain'] ?? ''));
         $apiKey = trim((string) ($cfg['mailgun_api_key'] ?? ''));
         $endpoint = rtrim((string) ($cfg['mailgun_endpoint'] ?? 'https://api.mailgun.net'), '/');
-        $authUser = Auth::user();
-        $fromEmail = trim((string) ($authUser['email'] ?? ''));
+        $fromEmail = trim((string) ($cfg['from_email'] ?? ''));
+        if ($fromEmail === '') {
+            $authUser = Auth::user();
+            $fromEmail = trim((string) ($authUser['email'] ?? ''));
+        }
         if ($domain === '' || $apiKey === '' || $fromEmail === '') {
             self::logMailgun($cfg, [
                 'ok' => false,
-                'error' => 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and logged-in user email must be set',
+                'error' => 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and From email (MAIL_FROM / from_email or logged-in user) must be set',
                 'from' => $fromEmail,
                 'to' => $toEmail,
                 'subject' => $subject,
             ]);
-            return [false, 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and logged-in user email must be set'];
+            return [false, 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and From email must be set'];
         }
 
         $to = $toName !== '' ? $toName . ' <' . $toEmail . '>' : $toEmail;

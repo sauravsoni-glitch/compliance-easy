@@ -1,0 +1,153 @@
+================================================================================
+CIRCULAR INTELLIGENCE — AI JSON PARAMETERS (ALL-IN-ONE REFERENCE)
+================================================================================
+Use this file as the contract for your external AI service (request in / response out).
+
+--------------------------------------------------------------------------------
+A) PARAMETERS YOU SEND TO THE AI (REQUEST BODY)
+--------------------------------------------------------------------------------
+
+REQUIRED
+--------
+  organization_id     (number)   Tenant id
+  title               (string)   Circular title from form
+  authority           (string)   e.g. RBI, NHB, SEBI, Internal
+  document_text       (string)   Full extracted text from PDF/TXT/OCR (main input)
+
+STRONGLY RECOMMENDED
+--------------------
+  reference_no        (string|null)
+  circular_date       (string|null)   ISO date YYYY-MM-DD
+  effective_date      (string|null)   ISO date YYYY-MM-DD
+  circular_id         (number|null)   DB row id after insert (for logs)
+  circular_code       (string|null)   e.g. CIR-001
+  document_file_name  (string|null)   Original upload filename
+
+OPTIONAL (STATIC / CONFIG — CAN BE SAME FOR EVERY CALL)
+---------------------------------------------------------
+  organization_name   (string)
+  industry            (string)   e.g. NBFC
+  locale              (string)   e.g. en-IN
+  allowed_frequencies (array of strings)   monthly, quarterly, annual, half-yearly, one-time
+  allowed_risk_levels (array of strings)   low, medium, high, critical
+  allowed_workflows   (array of strings)   two-level, three-level
+
+
+--------------------------------------------------------------------------------
+B) PARAMETERS THE AI MUST RETURN (RESPONSE BODY)
+--------------------------------------------------------------------------------
+Verified against: app/Views/circular/view.php (AI Analysis card, Document snippet,
+Audit Log "AI Suggestion" column) + CircularController::runAiAnalysis() DB writes.
+
+REQUIRED — these 11 keys fill the left column "AI Analysis" + approver tags
+-----------------------------------------------------------------------------
+  JSON key                     → DB column / UI label
+  ----------------------------   ------------------------------------------
+  executive_summary            → ai_executive_summary   ("Executive Summary")
+  department                   → ai_department          ("Department")
+  secondary_department         → ai_secondary_dept      ("Secondary Dept")
+  frequency                    → ai_frequency           ("Frequency")
+  due_date                     → ai_due_date            ("Due Date" — can be text, e.g. "15th of every month")
+  risk_level                   → ai_risk_level          ("Risk Level" — use lowercase: low, medium, high, critical)
+  priority                     → ai_priority            ("Priority" — same lowercase set)
+  owner_name                   → ai_owner               ("Owner" — display string; app may match to user later)
+  workflow                     → ai_workflow            ("Workflow" — two-level | three-level)
+  penalty                      → ai_penalty             ("Penalty Clause")
+  suggested_approver_tags      → ai_approver_tags       ("Suggested Approvers" — array of strings; store joined with ", ")
+
+STRONGLY RECOMMENDED — "Circular Overview" → "DOCUMENT CONTENT" box
+--------------------------------------------------------------------
+  content_summary              → content_summary
+  (first ~2000 chars shown on page; app today uses ~1200 char excerpt from text)
+
+OPTIONAL — app copies these from AI today (runAiAnalysis); you can return for parity
+------------------------------------------------------------------------------------
+  impact                       → circulars.impact       enum: low | medium | high
+  (If omitted, your integration can derive from risk_level like the current PHP does.)
+
+NOT part of AI JSON output (comes from upload form / DB / admin only)
+----------------------------------------------------------------------
+  title, circular_code, authority, reference_no, circular_date, effective_date
+  document_raw_text, document_path, document_name, status, linked_*, review_*,
+  final_*, remarks — these are user/system fields, not the "AI Analysis" block.
+
+AUDIT LOG on page uses the same ai_* fields above for the "AI Suggestion" column
+(Department, Owner, Risk Level, Priority).
+
+
+--------------------------------------------------------------------------------
+C) n8n WEBHOOK (CIRCULAR FILE UPLOAD)
+--------------------------------------------------------------------------------
+
+ENDPOINT (default in config; override with env CIRCULAR_INTELLIGENCE_WEBHOOK_URL):
+  POST multipart/form-data to the configured URL (UAT example in config/app.php).
+
+FIELDS SENT BY THE APP
+----------------------
+  file             (binary)   Present when a file was uploaded (multipart). Omitted for paste-text-only requests.
+  file_name        (string)   Original filename when a file was sent; may be empty for text-only
+  organization_id  (string)   Tenant id
+  circular_id      (string)   Row id in circulars (available after save)
+  title            (string)
+  authority        (string)
+  reference_no     (string)
+  circular_date    (string)
+  effective_date   (string)
+  document_text    (string)   Plain text when available (e.g. .txt upload or pasted notes).
+                                For PDF/DOC/DOCX the app does not inject simulated text — rely on the binary file.
+
+RESPONSE BODY — WHAT n8n MUST RETURN
+------------------------------------
+Return ONE JSON object only: the same flat analysis object as section B (below).
+Do NOT wrap it in fileName, success, or analysis — the HTTP body IS the analysis.
+
+The app still accepts a legacy shape { "analysis": { ... } } and will unwrap the
+inner object once; prefer the flat object for new workflows.
+
+n8n "Respond to Webhook" often returns an array of items, e.g.
+  [ { "json": { "executive_summary": "...", ... } } ]
+The app unwraps that shape automatically. JSON may be wrapped in a markdown
+code fence; a UTF-8 BOM is stripped. HTTP status 2xx or 3xx is treated as success.
+
+--------------------------------------------------------------------------------
+D) MINIMAL JSON EXAMPLES
+--------------------------------------------------------------------------------
+
+REQUEST (minimal):
+{
+  "organization_id": 1,
+  "title": "...",
+  "authority": "RBI",
+  "reference_no": null,
+  "circular_date": null,
+  "effective_date": null,
+  "document_text": "... full extracted text ..."
+}
+
+RESPONSE (minimal):
+{
+  "executive_summary": "...",
+  "department": "...",
+  "secondary_department": "...",
+  "frequency": "monthly",
+  "due_date": "...",
+  "risk_level": "high",
+  "priority": "high",
+  "owner_name": "...",
+  "workflow": "two-level",
+  "penalty": "...",
+  "suggested_approver_tags": ["...", "..."]
+}
+
+
+--------------------------------------------------------------------------------
+E) APP STORAGE (FOR YOUR INFO — DB COLUMNS FILLED FROM RESPONSE)
+--------------------------------------------------------------------------------
+  ai_executive_summary, ai_department, ai_secondary_dept, ai_frequency,
+  ai_due_date, ai_risk_level, ai_priority, ai_owner, ai_workflow, ai_penalty,
+  ai_approver_tags (comma-separated from suggested_approver_tags),
+  content_summary (from response content_summary or excerpt)
+
+================================================================================
+END
+================================================================================

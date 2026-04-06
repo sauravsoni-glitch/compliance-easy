@@ -33,7 +33,8 @@ abstract class BaseController
         $wp = self::webPathPrefix();
         if ($wp !== '') {
             $data['basePath'] = $wp;
-        } elseif (empty($data['basePath'])) {
+        } elseif (!array_key_exists('basePath', $data)) {
+            /* Explicit basePath '' = site root (path-only links); omit key to fall back to APP_URL */
             $data['basePath'] = rtrim($this->appConfig['url'] ?? '', '/');
         }
         extract($data);

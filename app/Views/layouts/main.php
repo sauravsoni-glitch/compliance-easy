@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f3f4f6">
+    <style>html{background-color:#f3f4f6}</style>
     <title><?= htmlspecialchars($pageTitle ?? 'Compliance') ?> - Easy Home Finance</title>
     <link rel="stylesheet" href="<?= htmlspecialchars($basePath ?? '', ENT_QUOTES, 'UTF-8') ?>/assets/css/app.css?v=<?= rawurlencode((string)($assetVersion ?? '1')) ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">

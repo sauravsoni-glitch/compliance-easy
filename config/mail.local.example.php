@@ -1,21 +1,31 @@
 <?php
 
 /**
- * Copy to mail.local.php (same folder) for quick local testing.
- * File mail.local.php is gitignored — do not commit real passwords.
+ * Copy to mail.local.php (same folder). That file is gitignored.
  *
- *   copy config\mail.local.example.php config\mail.local.php
- *
- * For Gmail you must use a real mailbox + App Password (not "something123").
- * For other SMTP labs, use whatever host/user/pass your provider gives you.
+ * Option A — Mailgun (matches app Mailer):
  */
 return [
     'enabled' => true,
-    'host' => 'smtp.gmail.com',
-    'port' => 587,
-    'encryption' => 'tls',
-    'username' => 'something123@gmail.com',
-    'password' => 'something123',
-    'from_email' => 'something123@gmail.com',
-    'from_name' => 'Easy Home Finance (test)',
+    'provider' => 'mailgun',
+    'from_name' => 'Easy Home Finance',
+    'from_email' => 'no-reply@your-verified-mailgun-domain.com',
+    'mailgun_domain' => 'mg.yourdomain.com',
+    'mailgun_api_key' => 'key-xxxxxxxxxxxxxxxx',
+    'mailgun_endpoint' => 'https://api.mailgun.net',
 ];
+
+/**
+ * Option B — legacy SMTP-style keys (only if your deployment still uses SMTP elsewhere).
+ * The built-in Mailer uses Mailgun HTTP API; prefer Option A.
+ */
+// return [
+//     'enabled' => true,
+//     'host' => 'smtp.gmail.com',
+//     'port' => 587,
+//     'encryption' => 'tls',
+//     'username' => 'you@gmail.com',
+//     'password' => 'app-password',
+//     'from_email' => 'you@gmail.com',
+//     'from_name' => 'Easy Home Finance (test)',
+// ];

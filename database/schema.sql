@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS `compliance_submissions` (
   `submission_date` datetime DEFAULT NULL,
   `uploaded_by` int unsigned NOT NULL,
   `maker_created_date` datetime DEFAULT CURRENT_TIMESTAMP,
+  `maker_completion_date` date DEFAULT NULL,
   `document_path` varchar(500) DEFAULT NULL,
   `document_name` varchar(255) DEFAULT NULL,
   `status` enum('draft','submitted','approved','rejected','rework') DEFAULT 'draft',

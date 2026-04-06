@@ -7,7 +7,8 @@
  *   MAIL_ENABLED=1
  *   MAIL_PROVIDER=mailgun
  *   MAIL_FROM_NAME=Easy Home Finance
- *   MAILGUN_DOMAIN=www.ehfletters.com
+ *   MAIL_FROM=admin@your-verified-domain.com   (optional; else uses logged-in user email)
+ *   MAILGUN_DOMAIN=mg.yourdomain.com
  *   MAILGUN_API_KEY=key-xxxxxxxxxxxxxxxx
  *   MAILGUN_ENDPOINT=https://api.mailgun.net
  *
@@ -21,8 +22,10 @@ $config = [
     'enabled' => filter_var(getenv('MAIL_ENABLED') ?: '0', FILTER_VALIDATE_BOOLEAN),
     'provider' => strtolower((string) (getenv('MAIL_PROVIDER') ?: 'mailgun')),
     'from_name' => (string) (getenv('MAIL_FROM_NAME') ?: 'Easy Home Finance'),
-    'mailgun_domain' => (string) (getenv('MAILGUN_DOMAIN') ?: 'www.ehfletters.com'),
-    'mailgun_api_key' => (string) (getenv('MAILGUN_API_KEY') ?: 'key-c53cc2d1ab915b375367e68d5cbd7cee'),
+    /** If empty, Mailgun uses the logged-in user's email as From (must be allowed by Mailgun). */
+    'from_email' => (string) (getenv('MAIL_FROM') ?: ''),
+    'mailgun_domain' => (string) (getenv('MAILGUN_DOMAIN') ?: ''),
+    'mailgun_api_key' => (string) (getenv('MAILGUN_API_KEY') ?: ''),
     'mailgun_endpoint' => rtrim((string) (getenv('MAILGUN_ENDPOINT') ?: 'https://api.mailgun.net'), '/'),
     'mailgun_log_path' => (string) (getenv('MAILGUN_LOG_PATH') ?: dirname(__DIR__) . '/storage/logs/mailgun.log'),
 ];
