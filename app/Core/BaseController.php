@@ -30,13 +30,9 @@ abstract class BaseController
             $data['notificationCount'] = $data['notificationCount'] ?? $this->getNotificationCount();
             $data['notifications'] = $data['notifications'] ?? $this->getNotifications();
         }
-        $wp = self::webPathPrefix();
-        if ($wp !== '') {
-            $data['basePath'] = $wp;
-        } elseif (!array_key_exists('basePath', $data)) {
-            /* Explicit basePath '' = site root (path-only links); omit key to fall back to APP_URL */
-            $data['basePath'] = rtrim($this->appConfig['url'] ?? '', '/');
-        }
+        // Path-only prefix for href/action/src (same host/port as the request). Never use full APP_URL
+        // here — it breaks local dev when the browser URL differs from config (e.g. :8080 vs :8000).
+        $data['basePath'] = self::webPathPrefix();
         extract($data);
         if ($withLayout) {
             ob_start();
