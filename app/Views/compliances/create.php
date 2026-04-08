@@ -231,7 +231,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
             <a href="<?= $basePath ?>/compliance" class="btn btn-secondary">Cancel</a>
             <button type="submit" class="btn btn-primary">Create Compliance</button>
         </div>
-        <p class="form-help">After creation, the compliance appears as <strong>Pending</strong>. The maker can add documents and submit from the detail page.</p>
+        <p class="form-help create-form-footer-help">After creation, the compliance appears as <strong>Pending</strong>. The maker can add documents and submit from the detail page.</p>
     </form>
 </div>
 <script>

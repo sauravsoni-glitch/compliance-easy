@@ -244,7 +244,7 @@ $block = $bySlug[$activeTab] ?? null;
         </form>
         <div class="modal-footer" style="padding:1rem 1.25rem;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;justify-content:space-between;">
             <?php if ($rem): ?>
-            <form method="post" action="<?= htmlspecialchars($basePath) ?>/financial-ratios/clear-reminder" style="margin:0;" onsubmit="return confirm('Remove this reminder?');">
+            <form method="post" action="<?= htmlspecialchars($basePath) ?>/financial-ratios/clear-reminder" style="margin:0;" data-app-confirm="Remove this reminder?">
                 <input type="hidden" name="category_id" value="<?= $cid ?>">
                 <input type="hidden" name="return_tab" value="<?= htmlspecialchars($activeTab) ?>">
                 <button type="submit" class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);">Remove reminder</button>

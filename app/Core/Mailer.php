@@ -28,7 +28,7 @@ final class Mailer
         }
 
         $subject = 'You have been invited to Easy Home Finance';
-        [$htmlBody, $altBody] = self::inviteBody($toName, $inviteLink, $roleLabel, $department);
+        [$htmlBody, $altBody] = self::inviteBody($toEmail, $toName, $inviteLink, $roleLabel, $department);
         return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody);
     }
 
@@ -112,24 +112,74 @@ final class Mailer
     }
 
     /**
+     * Workspace invite: form-style HTML + plain text (email-client friendly tables).
+     *
      * @return array{0:string,1:string}
      */
-    private static function inviteBody(string $toName, string $inviteLink, string $roleLabel, string $department): array
+    private static function inviteBody(string $toEmail, string $toName, string $inviteLink, string $roleLabel, string $department): array
     {
         $safeName = htmlspecialchars($toName !== '' ? $toName : 'there', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $safeEmail = htmlspecialchars($toEmail, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $safeLink = htmlspecialchars($inviteLink, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $safeRole = htmlspecialchars($roleLabel, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $deptLine = $department !== ''
-            ? '<p><strong>Department:</strong> ' . htmlspecialchars($department, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>'
-            : '';
-        $html = '<p>Hi ' . $safeName . ',</p>'
-            . '<p>You have been invited to collaborate on <strong>Easy Home Finance</strong>.</p>'
-            . '<p>Your role: <strong>' . $safeRole . '</strong></p>'
-            . $deptLine
-            . '<p><a href="' . $safeLink . '" style="display:inline-block;padding:12px 20px;background:#111827;color:#fff;text-decoration:none;border-radius:8px;">Join workspace</a></p>'
-            . '<p style="color:#6b7280;font-size:14px;">Or copy this link:<br>' . $safeLink . '</p>'
-            . '<p style="color:#6b7280;font-size:14px;">This link expires in 24 hours.</p>';
-        $text = "Hi,\n\nYou have been invited to Easy Home Finance.\nRole: {$roleLabel}\n\nJoin: {$inviteLink}\n";
+        $deptVal = $department !== '' ? htmlspecialchars($department, ENT_QUOTES | ENT_HTML5, 'UTF-8') : '<span style="color:#9ca3af;">—</span>';
+        $deptPlain = $department !== '' ? $department : '—';
+
+        $row = static function (string $label, string $valueHtml): string {
+            return '<tr>'
+                . '<td style="padding:12px 16px;width:38%;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;vertical-align:top;border-top:1px solid #e5e7eb;background:#fafafa;">' . $label . '</td>'
+                . '<td style="padding:12px 16px;font-size:15px;color:#111827;font-weight:600;vertical-align:top;border-top:1px solid #e5e7eb;">' . $valueHtml . '</td>'
+                . '</tr>';
+        };
+
+        $inner = '
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;font-family:Segoe UI,system-ui,Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <td style="background:linear-gradient(135deg,#1f2937 0%,#111827 50%,#7f1d1d 100%);border-radius:14px 14px 0 0;padding:26px 24px;color:#fff;">
+      <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.88;">Workspace invitation</div>
+      <h1 style="margin:10px 0 4px;font-size:21px;line-height:1.3;font-weight:700;">You&rsquo;re invited to Easy Home Finance</h1>
+      <p style="margin:0;font-size:14px;opacity:0.9;line-height:1.5;">Hi ' . $safeName . ', use the secure link below to finish setup and access the <strong>compliance workspace</strong>.</p>
+    </td>
+  </tr>
+  <tr>
+    <td style="background:#fff;padding:0;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 14px 14px;overflow:hidden;">
+      <div style="padding:18px 20px 8px;font-size:11px;font-weight:700;letter-spacing:0.06em;color:#6b7280;text-transform:uppercase;">Invitation details <span style="font-weight:600;color:#9ca3af;">(read-only summary)</span></div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        ' . $row('Product', '<span style="font-weight:600;">Easy Home Finance</span> <span style="color:#6b7280;font-weight:500;">— Compliance &amp; reporting</span>') . '
+        ' . $row('Invitee name', $safeName) . '
+        ' . $row('Invitee email', '<span style="word-break:break-all;">' . $safeEmail . '</span>') . '
+        ' . $row('Assigned role', $safeRole . ' <span style="display:block;margin-top:6px;font-size:13px;font-weight:500;color:#6b7280;">Controls what you can do with compliance items (create, review, approve, admin).</span>') . '
+        ' . $row('Department', $deptVal) . '
+        ' . $row('Link valid for', '<span style="color:#b91c1c;font-weight:700;">24 hours</span> <span style="color:#6b7280;font-weight:500;">from when this email was sent</span>') . '
+      </table>
+      <div style="padding:22px 20px 10px;text-align:center;">
+        <a href="' . $safeLink . '" style="display:inline-block;padding:14px 28px;background:#111827;color:#fff !important;text-decoration:none;border-radius:10px;font-size:15px;font-weight:700;letter-spacing:0.02em;">Join workspace</a>
+      </div>
+      <div style="padding:0 20px 22px;">
+        <p style="margin:0 0 8px;font-size:12px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Or copy invitation link</p>
+        <p style="margin:0;padding:12px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;word-break:break-all;color:#374151;line-height:1.5;">' . $safeLink . '</p>
+      </div>
+      <div style="padding:14px 20px 20px;background:#f3f4f6;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;line-height:1.55;">
+        If you did not expect this invitation, you can ignore this message. For help, contact your organization administrator.
+      </div>
+    </td>
+  </tr>
+</table>';
+
+        $html = '<div style="background:#f3f4f6;padding:24px 12px;">' . $inner . '</div>';
+
+        $text = "WORKSPACE INVITATION — Easy Home Finance (Compliance)\n"
+            . str_repeat('=', 48) . "\n\n"
+            . 'Hi ' . ($toName !== '' ? $toName : 'there') . ",\n\n"
+            . "You've been invited to the compliance workspace.\n\n"
+            . "INVITATION DETAILS\n"
+            . "- Invitee name: " . ($toName !== '' ? $toName : '—') . "\n"
+            . "- Invitee email: {$toEmail}\n"
+            . "- Assigned role: {$roleLabel}\n"
+            . "- Department: {$deptPlain}\n"
+            . "- Link expires: 24 hours from send\n\n"
+            . "JOIN (open in browser):\n{$inviteLink}\n\n"
+            . "If you did not expect this, ignore this email.\n";
 
         return [$html, $text];
     }

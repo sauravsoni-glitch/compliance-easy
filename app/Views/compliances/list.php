@@ -34,7 +34,7 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
 
     $mk = function (string $cls, string $icon, string $label, string $href = '', string $formAction = ''): string {
         if ($formAction !== '') {
-            return '<form method="post" action="' . htmlspecialchars($formAction) . '" class="d-inline" onsubmit="return confirm(\'Continue?\');">'
+            return '<form method="post" action="' . htmlspecialchars($formAction) . '" class="d-inline" data-app-confirm="Continue?">'
                 . '<button type="submit" class="btn btn-sm ' . htmlspecialchars($cls) . '"><i class="fas ' . htmlspecialchars($icon) . '"></i> ' . htmlspecialchars($label) . '</button></form>';
         }
 

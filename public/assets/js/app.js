@@ -1,3 +1,75 @@
+(function () {
+    function qs(id) { return document.getElementById(id); }
+
+    /**
+     * @param {{ title?: string, message?: string, confirmText?: string, cancelText?: string, alert?: boolean }} opts
+     * @returns {Promise<boolean>}
+     */
+    window.appConfirm = function (opts) {
+        opts = opts || {};
+        var isAlert = !!opts.alert;
+        return new Promise(function (resolve) {
+            var overlay = qs('app-confirm-overlay');
+            var titleEl = qs('app-confirm-title');
+            var msgEl = qs('app-confirm-message');
+            var okBtn = qs('app-confirm-ok');
+            var cancelBtn = qs('app-confirm-cancel');
+            if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn) {
+                resolve(false);
+                return;
+            }
+            titleEl.textContent = opts.title || (isAlert ? 'Notice' : 'Confirm');
+            msgEl.textContent = opts.message || '';
+            okBtn.textContent = opts.confirmText || (isAlert ? 'OK' : 'OK');
+            cancelBtn.textContent = opts.cancelText || 'Cancel';
+            cancelBtn.hidden = isAlert;
+
+            var done = false;
+            function finish(v) {
+                if (done) return;
+                done = true;
+                overlay.hidden = true;
+                overlay.setAttribute('aria-hidden', 'true');
+                overlay.onclick = null;
+                okBtn.onclick = null;
+                cancelBtn.onclick = null;
+                document.removeEventListener('keydown', onKey);
+                resolve(v);
+            }
+
+            function onKey(e) {
+                if (e.key === 'Escape') {
+                    finish(isAlert ? true : false);
+                }
+            }
+
+            okBtn.onclick = function () { finish(true); };
+            cancelBtn.onclick = function () { finish(false); };
+            if (!isAlert) {
+                overlay.onclick = function (ev) {
+                    if (ev.target === overlay) finish(false);
+                };
+            } else {
+                overlay.onclick = null;
+            }
+            document.addEventListener('keydown', onKey);
+            overlay.hidden = false;
+            overlay.setAttribute('aria-hidden', 'false');
+            okBtn.focus();
+        });
+    };
+
+    /** @param {string} message */
+    window.appAlert = function (message, title) {
+        return window.appConfirm({
+            alert: true,
+            title: title || 'Notice',
+            message: message || '',
+            confirmText: 'OK'
+        }).then(function () {});
+    };
+})();
+
 document.addEventListener('DOMContentLoaded', function() {
     var sidebarToggle = document.querySelector('.sidebar-toggle');
     var sidebar = document.querySelector('.sidebar');
@@ -62,4 +134,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     document.addEventListener('click', closeAllDropdowns);
+
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (!form || form.tagName !== 'FORM') return;
+        var msg = form.getAttribute('data-app-confirm');
+        if (msg === null || msg === '') return;
+        e.preventDefault();
+        e.stopPropagation();
+        window.appConfirm({ title: 'Confirm', message: msg }).then(function (ok) {
+            if (ok) form.submit();
+        });
+    }, true);
 });

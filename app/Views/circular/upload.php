@@ -117,13 +117,13 @@ $processUrl = ($bp !== '' ? $bp : '') . '/circular-intelligence/upload-process';
             overlay.setAttribute('aria-hidden', 'true');
             if (submitBtn) { submitBtn.disabled = false; }
             var err = (x.j && x.j.error) ? x.j.error : (x.res.ok ? 'Unexpected response from server.' : 'Request failed (HTTP ' + x.res.status + ').');
-            alert(err);
+            if (window.appAlert) window.appAlert(err); else alert(err);
         })
         .catch(function() {
             overlay.hidden = true;
             overlay.setAttribute('aria-hidden', 'true');
             if (submitBtn) { submitBtn.disabled = false; }
-            alert('Network error. Check your connection and try again.');
+            if (window.appAlert) window.appAlert('Network error. Check your connection and try again.'); else alert('Network error. Check your connection and try again.');
         });
     });
 })();

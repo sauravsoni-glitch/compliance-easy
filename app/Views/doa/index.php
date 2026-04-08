@@ -127,7 +127,7 @@ $deptIcons = ['Finance' => 'fa-coins', 'Operations' => 'fa-cogs', 'Loan Processi
                         <a href="<?= htmlspecialchars($basePath) ?>/doa/view/<?= (int)$l['id'] ?>">View</a>
                         <?php if ($isAdmin): ?>
                         <a href="<?= htmlspecialchars($basePath) ?>/doa/edit/<?= (int)$l['id'] ?>">Edit</a>
-                        <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/delete/<?= (int)$l['id'] ?>" class="d-inline" onsubmit="return confirm('Delete this level?');"><button type="submit" class="btn-link text-danger p-0 border-0 bg-transparent">Delete</button></form>
+                        <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/delete/<?= (int)$l['id'] ?>" class="d-inline" data-app-confirm="Delete this level?"><button type="submit" class="btn-link text-danger p-0 border-0 bg-transparent">Delete</button></form>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -173,7 +173,7 @@ $deptIcons = ['Finance' => 'fa-coins', 'Operations' => 'fa-cogs', 'Loan Processi
                             <?php if ($isAdmin): ?>
                             <a href="<?= htmlspecialchars($basePath) ?>/doa/edit/<?= (int)$r['id'] ?>" class="btn btn-sm btn-outline">Edit</a>
                             <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/toggle/<?= (int)$r['id'] ?>" class="d-inline"><?php if (($r['status'] ?? '') !== 'temporary'): ?><button type="submit" class="btn btn-sm btn-secondary"><?= ($r['status'] ?? '') === 'active' ? 'Deactivate' : 'Activate' ?></button><?php endif; ?></form>
-                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/delete/<?= (int)$r['id'] ?>" class="d-inline" onsubmit="return confirm('Delete this rule?');"><button type="submit" class="btn btn-sm btn-outline text-danger">Delete</button></form>
+                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/delete/<?= (int)$r['id'] ?>" class="d-inline" data-app-confirm="Delete this rule?"><button type="submit" class="btn btn-sm btn-outline text-danger">Delete</button></form>
                             <?php endif; ?>
                         </td>
                     </tr>

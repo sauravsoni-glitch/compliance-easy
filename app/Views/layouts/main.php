@@ -155,6 +155,16 @@
             </main>
         </div>
     </div>
+    <div id="app-confirm-overlay" class="app-confirm-overlay" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
+        <div class="app-confirm-card">
+            <h2 id="app-confirm-title" class="app-confirm-title">Confirm</h2>
+            <p id="app-confirm-message" class="app-confirm-message"></p>
+            <div class="app-confirm-actions">
+                <button type="button" class="btn btn-secondary" id="app-confirm-cancel">Cancel</button>
+                <button type="button" class="btn btn-primary" id="app-confirm-ok">OK</button>
+            </div>
+        </div>
+    </div>
     <script src="<?= htmlspecialchars($basePath ?? '', ENT_QUOTES, 'UTF-8') ?>/assets/js/app.js?v=<?= rawurlencode((string)($assetVersion ?? '1')) ?>"></script>
 </body>
 </html>

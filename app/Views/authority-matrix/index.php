@@ -133,7 +133,7 @@ $riskLabel = function ($r) {
             <div class="am-wf-actions">
                 <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix/view/<?= (int)$row['id'] ?>" class="btn btn-sm btn-outline">View</a>
                 <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix/edit/<?= (int)$row['id'] ?>" class="btn btn-sm btn-outline">Edit</a>
-                <form method="post" action="<?= htmlspecialchars($basePath) ?>/authority-matrix/delete/<?= (int)$row['id'] ?>" class="d-inline" onsubmit="return confirm('Delete this workflow rule?');"><button type="submit" class="btn btn-sm btn-link text-danger p-0 border-0 bg-transparent"><i class="fas fa-trash-alt"></i> Delete</button></form>
+                <form method="post" action="<?= htmlspecialchars($basePath) ?>/authority-matrix/delete/<?= (int)$row['id'] ?>" class="d-inline" data-app-confirm="Delete this workflow rule?"><button type="submit" class="btn btn-sm btn-link text-danger p-0 border-0 bg-transparent"><i class="fas fa-trash-alt"></i> Delete</button></form>
             </div>
         </div>
         <?php endforeach; ?>

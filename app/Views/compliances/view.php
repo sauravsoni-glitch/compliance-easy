@@ -102,49 +102,60 @@ $approverActive = $st === 'under_review';
 </div>
 
 <?php if ($tab === 'overview'): ?>
-<div class="card">
-    <h3 class="card-title">Compliance overview</h3>
-    <p class="text-muted text-sm mb-3">Read-only summary. Use <strong>Process checklist</strong> to move the workflow forward.</p>
-    <div class="compliance-overview-grid">
-        <div><span class="co-label">Authority</span><span class="co-val"><?= htmlspecialchars($c['authority_name'] ?? '—') ?></span></div>
-        <div><span class="co-label">Department</span><span class="co-val"><?= htmlspecialchars($c['department']) ?></span></div>
-        <div><span class="co-label">Frequency</span><span class="co-val"><?= htmlspecialchars(freq_label_view($c['frequency'])) ?></span></div>
-        <div><span class="co-label">Workflow</span><span class="co-val">Maker → Reviewer → Approver</span></div>
-        <?php if (!empty($c['evidence_required'])): ?>
-        <div><span class="co-label">Evidence required</span><span class="co-val">Yes<?php
-            $et = $c['evidence_type'] ?? '';
-            $etl = ['pdf_report' => 'PDF / Report', 'signed_certificate' => 'Signed certificate', 'regulatory_filing' => 'Regulatory filing', 'screenshot' => 'Screenshot / Image', 'spreadsheet' => 'Spreadsheet', 'policy_document' => 'Policy document', 'correspondence' => 'Correspondence', 'audit_trail' => 'Audit trail', 'other' => 'Other'];
-            if ($et !== '') echo ' — ' . htmlspecialchars($etl[$et] ?? ucfirst(str_replace('_', ' ', $et)));
-        ?></span></div>
-        <?php else: ?>
-        <div><span class="co-label">Evidence required</span><span class="co-val">No</span></div>
-        <?php endif; ?>
-        <div><span class="co-label">Status</span><span class="co-val"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $c['status']))) ?></span></div>
-        <div><span class="co-label">Due date</span><span class="co-val"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
+<div class="cd-overview-layout">
+    <div class="cd-overview-main">
+        <div class="card cd-overview-card">
+            <div class="cd-card-head">
+                <h3 class="card-title cd-section-title">Compliance overview</h3>
+                <p class="cd-card-lead">Read-only summary. Use <strong>Process checklist</strong> to move the workflow forward.</p>
+            </div>
+            <div class="compliance-overview-grid">
+                <div class="co-cell"><span class="co-label">Authority</span><span class="co-val"><?= htmlspecialchars($c['authority_name'] ?? '—') ?></span></div>
+                <div class="co-cell"><span class="co-label">Department</span><span class="co-val"><?= htmlspecialchars($c['department']) ?></span></div>
+                <div class="co-cell"><span class="co-label">Frequency</span><span class="co-val"><?= htmlspecialchars(freq_label_view($c['frequency'])) ?></span></div>
+                <div class="co-cell"><span class="co-label">Workflow</span><span class="co-val">Maker → Reviewer → Approver</span></div>
+                <?php if (!empty($c['evidence_required'])): ?>
+                <div class="co-cell"><span class="co-label">Evidence required</span><span class="co-val">Yes<?php
+                    $et = $c['evidence_type'] ?? '';
+                    $etl = ['pdf_report' => 'PDF / Report', 'signed_certificate' => 'Signed certificate', 'regulatory_filing' => 'Regulatory filing', 'screenshot' => 'Screenshot / Image', 'spreadsheet' => 'Spreadsheet', 'policy_document' => 'Policy document', 'correspondence' => 'Correspondence', 'audit_trail' => 'Audit trail', 'other' => 'Other'];
+                    if ($et !== '') echo ' — ' . htmlspecialchars($etl[$et] ?? ucfirst(str_replace('_', ' ', $et)));
+                ?></span></div>
+                <?php else: ?>
+                <div class="co-cell"><span class="co-label">Evidence required</span><span class="co-val">No</span></div>
+                <?php endif; ?>
+                <div class="co-cell"><span class="co-label">Status</span><span class="co-val"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $c['status']))) ?></span></div>
+                <div class="co-cell"><span class="co-label">Due date</span><span class="co-val"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
+                <?php if (!empty($c['circular_reference'])): ?>
+                <div class="co-cell co-cell-full"><span class="co-label">Reference</span><span class="co-val"><?= htmlspecialchars($c['circular_reference']) ?></span></div>
+                <?php endif; ?>
+            </div>
+            <?php if (!empty($c['description'])): ?>
+            <div class="cd-desc-block">
+                <span class="co-label">Description</span>
+                <div class="cd-desc-body"><?= nl2br(htmlspecialchars($c['description'])) ?></div>
+            </div>
+            <?php endif; ?>
+        </div>
     </div>
-    <?php if (!empty($c['circular_reference'])): ?>
-    <p class="mt-2"><span class="co-label">Reference</span> <?= htmlspecialchars($c['circular_reference']) ?></p>
-    <?php endif; ?>
-    <?php if (!empty($c['description'])): ?>
-    <p class="mt-3"><span class="co-label d-block mb-1">Description</span><?= nl2br(htmlspecialchars($c['description'])) ?></p>
-    <?php endif; ?>
-</div>
-<div class="card">
-    <h3 class="card-title">Assigned users</h3>
-    <ul class="assigned-users-list">
-        <li><strong>Maker</strong> <?= htmlspecialchars($c['owner_name'] ?? '—') ?></li>
-        <li><strong>Reviewer</strong> <?= htmlspecialchars($c['reviewer_name'] ?? '—') ?></li>
-        <li><strong>Approver</strong> <?= htmlspecialchars($c['approver_name'] ?? '—') ?></li>
-    </ul>
-</div>
-<div class="card">
-    <h3 class="card-title">Important dates</h3>
-    <div class="important-dates-row">
-        <div class="id-item"><i class="far fa-calendar-alt text-muted"></i><div><span class="id-label">Start</span><span class="id-date"><?= $c['start_date'] ? date('M j, Y', strtotime($c['start_date'])) : '—' ?></span></div></div>
-        <div class="id-item id-item-due"><i class="far fa-clock text-danger"></i><div><span class="id-label">Due</span><span class="id-date"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div></div>
-        <div class="id-item id-item-rem"><i class="fas fa-exclamation-triangle text-warning"></i><div><span class="id-label">Reminder</span><span class="id-date"><?= $c['reminder_date'] ? date('M j, Y', strtotime($c['reminder_date'])) : '—' ?></span></div></div>
-        <div class="id-item"><i class="far fa-calendar"></i><div><span class="id-label">Created</span><span class="id-date"><?= date('M j, Y', strtotime($c['created_at'])) ?></span></div></div>
-    </div>
+    <aside class="cd-overview-aside">
+        <div class="card cd-side-card">
+            <h3 class="card-title cd-section-title">Assigned users</h3>
+            <ul class="assigned-users-list">
+                <li><span class="au-role">Maker</span><span class="au-name"><?= htmlspecialchars($c['owner_name'] ?? '—') ?></span></li>
+                <li><span class="au-role">Reviewer</span><span class="au-name"><?= htmlspecialchars($c['reviewer_name'] ?? '—') ?></span></li>
+                <li><span class="au-role">Approver</span><span class="au-name"><?= htmlspecialchars($c['approver_name'] ?? '—') ?></span></li>
+            </ul>
+        </div>
+        <div class="card cd-side-card">
+            <h3 class="card-title cd-section-title">Important dates</h3>
+            <div class="important-dates-grid">
+                <div class="id-tile"><i class="far fa-calendar-alt" aria-hidden="true"></i><span class="id-label">Start</span><span class="id-date"><?= $c['start_date'] ? date('M j, Y', strtotime($c['start_date'])) : '—' ?></span></div>
+                <div class="id-tile id-tile-due"><i class="far fa-clock" aria-hidden="true"></i><span class="id-label">Due</span><span class="id-date"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
+                <div class="id-tile"><i class="fas fa-bell" aria-hidden="true"></i><span class="id-label">Reminder</span><span class="id-date"><?= $c['reminder_date'] ? date('M j, Y', strtotime($c['reminder_date'])) : '—' ?></span></div>
+                <div class="id-tile"><i class="far fa-file-alt" aria-hidden="true"></i><span class="id-label">Created</span><span class="id-date"><?= date('M j, Y', strtotime($c['created_at'])) ?></span></div>
+            </div>
+        </div>
+    </aside>
 </div>
 
 <?php elseif ($tab === 'checklist'): ?>
@@ -221,7 +232,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         </div>
         <button type="submit" class="btn btn-primary">Approve &amp; forward to approver</button>
     </form>
-    <form method="post" action="<?= $basePath ?>/compliances/rework/<?= (int)$c['id'] ?>" onsubmit="return confirm('Send back to maker for rework?');">
+    <form method="post" action="<?= $basePath ?>/compliances/rework/<?= (int)$c['id'] ?>" data-app-confirm="Send back to maker for rework?">
         <div class="form-group">
             <label class="form-label">Rework reason</label>
             <textarea name="review_comment" class="form-control" rows="2" required placeholder="What needs to be fixed?"></textarea>
@@ -241,7 +252,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         </div>
         <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Approve &amp; close</button>
     </form>
-    <form method="post" action="<?= $basePath ?>/compliances/reject/<?= (int)$c['id'] ?>" onsubmit="return confirm('Reject this compliance?');">
+    <form method="post" action="<?= $basePath ?>/compliances/reject/<?= (int)$c['id'] ?>" data-app-confirm="Reject this compliance?">
         <div class="form-group">
             <label class="form-label">Rejection reason</label>
             <textarea name="final_comment" class="form-control" rows="2" required></textarea>

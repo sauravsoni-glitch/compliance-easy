@@ -245,10 +245,10 @@ $approverTags = array_filter(array_map('trim', explode(',', $c['ai_approver_tags
 
     <?php if ($isAdmin && !$linkedId && ($c['status'] ?? '') !== 'rejected'): ?>
     <div class="ci-actions-bar">
-        <form method="post" action="<?= htmlspecialchars($basePath) ?>/circular-intelligence/approve/<?= (int)$c['id'] ?>" onsubmit="return confirm('Create compliance from this circular?');">
+        <form method="post" action="<?= htmlspecialchars($basePath) ?>/circular-intelligence/approve/<?= (int)$c['id'] ?>" data-app-confirm="Create compliance from this circular?">
             <button type="submit" class="btn btn-primary btn-lg"><i class="fas fa-check"></i> Approve &amp; Create Compliance</button>
         </form>
-        <form method="post" action="<?= htmlspecialchars($basePath) ?>/circular-intelligence/reject/<?= (int)$c['id'] ?>" class="ms-2" onsubmit="return confirm('Reject this circular?');">
+        <form method="post" action="<?= htmlspecialchars($basePath) ?>/circular-intelligence/reject/<?= (int)$c['id'] ?>" class="ms-2" data-app-confirm="Reject this circular?">
             <input type="hidden" name="reject_reason" value="Rejected by admin">
             <button type="submit" class="btn btn-outline">Reject</button>
         </form>

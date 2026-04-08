@@ -115,7 +115,7 @@ function ci_status_badge(string $s): array {
                         <td>
                             <a href="<?= htmlspecialchars($basePath) ?>/circular-intelligence/view/<?= (int)$row['id'] ?>" class="ci-view-link"><i class="fas fa-eye"></i> View</a>
                             <?php if (!empty($isAdmin) && empty($row['linked_compliance_id']) && ($row['status'] ?? '') !== 'rejected'): ?>
-                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/circular-intelligence/reanalyze/<?= (int)$row['id'] ?>" class="ci-inline-form" onsubmit="return confirm('Re-run AI analysis?');">
+                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/circular-intelligence/reanalyze/<?= (int)$row['id'] ?>" class="ci-inline-form" data-app-confirm="Re-run AI analysis?">
                                 <button type="submit" class="btn btn-link btn-sm p-0">Re-Analyze</button>
                             </form>
                             <?php endif; ?>

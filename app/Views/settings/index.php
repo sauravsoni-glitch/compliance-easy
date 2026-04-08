@@ -83,7 +83,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         <div class="st-profile-top">
             <div class="st-avatar-lg"><?= htmlspecialchars(st_initials($profileUser['full_name'] ?? 'U')) ?></div>
             <div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="alert('Photo upload can be connected to your file storage later.');"><i class="fas fa-camera"></i> Change Photo</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="(window.appAlert||alert)('Photo upload can be connected to your file storage later.');"><i class="fas fa-camera"></i> Change Photo</button>
             </div>
         </div>
         <div class="form-row-2">
@@ -496,7 +496,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         <div class="st-tpl-list">
             <div class="st-tpl-list-head">
                 <strong>Email Templates</strong>
-                <button type="button" class="btn btn-sm btn-secondary" title="Add template" onclick="alert('Clone an existing template from the list or contact support to add custom templates.');"><i class="fas fa-plus"></i></button>
+                <button type="button" class="btn btn-sm btn-secondary" title="Add template" onclick="(window.appAlert||alert)('Clone an existing template from the list or contact support to add custom templates.');"><i class="fas fa-plus"></i></button>
             </div>
             <input type="search" class="form-control form-control-sm mb-2" placeholder="Search templates..." id="tpl-search">
             <div class="st-tpl-items" id="tpl-items">
