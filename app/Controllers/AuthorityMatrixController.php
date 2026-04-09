@@ -128,7 +128,7 @@ class AuthorityMatrixController extends BaseController
 
     public function index(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $this->ensureSeed($orgId);
 
@@ -188,7 +188,7 @@ class AuthorityMatrixController extends BaseController
 
     public function export(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare($this->baseSelectSql() . ' ORDER BY am.compliance_area');
         $stmt->execute([$orgId]);
@@ -212,13 +212,13 @@ class AuthorityMatrixController extends BaseController
 
     public function addForm(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $this->formView(null);
     }
 
     public function editForm(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('SELECT * FROM authority_matrix WHERE id = ? AND organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -244,7 +244,7 @@ class AuthorityMatrixController extends BaseController
 
     public function show(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare($this->baseSelectSql() . ' AND am.id = ?');
         $stmt->execute([$orgId, $id]);
@@ -264,7 +264,7 @@ class AuthorityMatrixController extends BaseController
 
     public function hierarchy(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare($this->baseSelectSql() . ' AND am.id = ?');
         $stmt->execute([$orgId, $id]);
@@ -284,13 +284,13 @@ class AuthorityMatrixController extends BaseController
 
     public function store(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $this->persist(null);
     }
 
     public function update(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $chk = $this->db->prepare('SELECT id FROM authority_matrix WHERE id = ? AND organization_id = ?');
         $chk->execute([$id, Auth::organizationId()]);
         if (!$chk->fetchColumn()) {
@@ -361,7 +361,7 @@ class AuthorityMatrixController extends BaseController
 
     public function delete(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $this->db->prepare('DELETE FROM authority_matrix WHERE id = ? AND organization_id = ?')->execute([$id, Auth::organizationId()]);
         $_SESSION['flash_success'] = 'Mapping removed.';
         $this->redirect('/authority-matrix');
@@ -369,7 +369,7 @@ class AuthorityMatrixController extends BaseController
 
     public function toggle(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('SELECT status FROM authority_matrix WHERE id = ? AND organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -386,13 +386,13 @@ class AuthorityMatrixController extends BaseController
     /** Legacy POST /authority-matrix/add */
     public function add(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $this->redirect('/authority-matrix/add');
     }
 
     public function edit(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $this->redirect('/authority-matrix/edit/' . $id);
     }
 }

@@ -14,7 +14,9 @@
     $navRole = (string)($user['role_slug'] ?? '');
     $navAdmin = ($navRole === 'admin');
     $navMaker = ($navRole === 'maker');
-    $navCanCreate = $navAdmin || $navMaker;
+    /** Legacy IT role (separate app): treat like admin for navigation to base modules. */
+    $navPrivileged = $navAdmin || ($navRole === 'it_admin');
+    $navCanCreate = $navPrivileged || $navMaker;
     ?>
     <div class="app-layout">
         <aside class="sidebar">
@@ -51,13 +53,13 @@
                         <i class="fas fa-brain"></i>
                         <span>Circular Intelligence</span>
                     </a>
-                    <?php if ($navAdmin): ?>
+                    <?php if ($navPrivileged): ?>
                     <a href="<?= $basePath ?? '' ?>/doa" class="nav-item <?= ($currentPage ?? '') === 'doa' ? 'active' : '' ?>">
                         <i class="fas fa-users"></i>
                         <span>Delegation of Authority (DOA)</span>
                     </a>
                     <?php endif; ?>
-                    <?php if ($navAdmin): ?>
+                    <?php if ($navPrivileged): ?>
                     <a href="<?= $basePath ?? '' ?>/authority-matrix" class="nav-item <?= ($currentPage ?? '') === 'authority-matrix' ? 'active' : '' ?>">
                         <i class="fas fa-th"></i>
                         <span>Authority Matrix</span>
@@ -110,7 +112,7 @@
             <header class="top-header">
                 <form action="<?= $basePath ?? '' ?>/compliance" method="get" class="header-search" role="search">
                     <i class="fas fa-search"></i>
-                    <input type="search" name="search" placeholder="Search compliances..." class="search-input" value="<?= htmlspecialchars($_GET['search'] ?? '') ?>">
+                    <input type="search" name="search" placeholder="Search compliances…" class="search-input" value="<?= htmlspecialchars($_GET['search'] ?? '') ?>">
                 </form>
                 <div class="header-actions">
                     <div class="header-dropdown-wrap">
@@ -144,7 +146,7 @@
                         </button>
                         <div id="panel-user-menu" class="header-dropdown-panel header-dropdown-panel-user" aria-hidden="true">
                             <a href="<?= $basePath ?? '' ?>/organization" class="panel-item"><i class="fas fa-user"></i> View Profile</a>
-                            <a href="<?= $basePath ?? '' ?>/settings<?= $navAdmin ? '' : '?tab=security' ?>" class="panel-item"><i class="fas fa-key"></i> Change Password</a>
+                            <a href="<?= $basePath ?? '' ?>/settings<?= $navPrivileged ? '' : '?tab=security' ?>" class="panel-item"><i class="fas fa-key"></i> Change Password</a>
                             <a href="<?= $basePath ?? '' ?>/logout" class="panel-item"><i class="fas fa-sign-out-alt"></i> Logout</a>
                         </div>
                     </div>

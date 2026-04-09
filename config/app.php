@@ -13,15 +13,27 @@ $appBaseUrl = getenv('APP_URL');
 if ($appBaseUrl === false || trim((string) $appBaseUrl) === '') {
     $appBaseUrl = 'http://localhost:8000';
 }
+$isDebug = (static function (): bool {
+    $v = getenv('APP_DEBUG');
+    if ($v === false || trim((string) $v) === '') {
+        return false;
+    }
+    return in_array(strtolower(trim((string) $v)), ['1', 'true', 'yes', 'on'], true);
+})();
+$isHttps = stripos((string) $appBaseUrl, 'https://') === 0;
 
 return [
     'name'       => 'Easy Home Finance - Compliance',
     'url'        => rtrim((string) $appBaseUrl, '/'),
     'timezone'   => 'Asia/Kolkata',
-    'debug'      => true,
+    'debug'      => $isDebug,
     'session'    => [
-        'name'   => 'COMPLIANCE_SESSION',
+        'name' => 'COMPLIANCE_SESSION',
         'lifetime' => 0, // session expires when browser closes
+        'same_site' => 'Lax',
+        'http_only' => true,
+        'secure' => $isHttps,
+        'strict_mode' => true,
     ],
     'upload_path' => __DIR__ . '/../public/uploads',
     /** All module uploads (files kept on disk) go under public/uploads/{upload_history_dir}/ */

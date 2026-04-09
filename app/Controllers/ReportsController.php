@@ -6,6 +6,19 @@ use App\Core\BaseController;
 
 class ReportsController extends BaseController
 {
+    /** Shown on IT compliance; omitted from base Reports → "Compliance by Framework" chart. */
+    private const FRAMEWORK_CHART_EXCLUDED_AUTHORITIES = [
+        'ISO 27001',
+        'RBI Cyber Security',
+        'DPDP / Data Protection',
+        'Internal IT Policy',
+    ];
+
+    private function requireBaseComplianceAccess(): void
+    {
+        Auth::requireAuth();
+    }
+
     private function docKindColumn(): bool
     {
         try {
@@ -19,7 +32,7 @@ class ReportsController extends BaseController
 
     public function index(): void
     {
-        Auth::requireAuth();
+        $this->requireBaseComplianceAccess();
         $orgId = Auth::organizationId();
         $tab = preg_replace('/[^a-z\-]/', '', $_GET['tab'] ?? 'overview');
         if (!in_array($tab, ['overview', 'recent', 'missing', 'upload'], true)) {
@@ -37,7 +50,7 @@ class ReportsController extends BaseController
         $completed = 0;
         $overdue = 0;
         $highRisk = 0;
-        $frameworkLabels = $this->fetchUniqueAuthorityNamesOrdered();
+        $frameworkLabels = $this->frameworkChartAuthorityNames();
         $frameworkCounts = array_fill_keys($frameworkLabels, 0);
         $statusBuckets = ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0];
 
@@ -126,6 +139,22 @@ class ReportsController extends BaseController
         return $names !== [] ? $names : ['RBI', 'NHB', 'SEBI', 'Internal Policy', 'Audit'];
     }
 
+    /**
+     * Authority names for the overview bar chart only (excludes IT-specific frameworks).
+     *
+     * @return list<string>
+     */
+    private function frameworkChartAuthorityNames(): array
+    {
+        $all = $this->fetchUniqueAuthorityNamesOrdered();
+
+        return array_values(array_filter($all, static function ($name): bool {
+            $n = trim((string) $name);
+
+            return $n !== '' && !in_array($n, self::FRAMEWORK_CHART_EXCLUDED_AUTHORITIES, true);
+        }));
+    }
+
     private function fetchCompliances(int $orgId, string $q): array
     {
         $sql = 'SELECT c.*, a.name AS authority_name, u.full_name AS owner_name
@@ -204,7 +233,7 @@ class ReportsController extends BaseController
 
     public function quickUpload(): void
     {
-        Auth::requireAuth();
+        $this->requireBaseComplianceAccess();
         $orgId = Auth::organizationId();
         $cid = (int) ($_POST['compliance_id'] ?? 0);
         $docType = trim($_POST['document_type'] ?? '');
@@ -216,7 +245,7 @@ class ReportsController extends BaseController
             $_SESSION['flash_error'] = 'Invalid compliance item.';
             $this->redirect('/reports?tab=upload');
         }
-        if (!Auth::isAdmin() && (!Auth::isMaker() || (int)($crow['owner_id'] ?? 0) !== (int)Auth::id())) {
+        if (!Auth::isAdminOrItAdmin() && (!Auth::isMaker() || (int)($crow['owner_id'] ?? 0) !== (int)Auth::id())) {
             $_SESSION['flash_error'] = 'Only the assigned maker or an admin can upload from reports.';
             $this->redirect('/reports?tab=upload');
         }
@@ -259,7 +288,8 @@ class ReportsController extends BaseController
 
     public function downloadDocument(int $id): void
     {
-        Auth::requireRole('admin');
+        $this->requireBaseComplianceAccess();
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('SELECT d.file_path, d.file_name FROM compliance_documents d INNER JOIN compliances c ON c.id = d.compliance_id WHERE d.id = ? AND c.organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -284,7 +314,8 @@ class ReportsController extends BaseController
 
     public function export(): void
     {
-        Auth::requireRole('admin');
+        $this->requireBaseComplianceAccess();
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $fmt = strtolower($_GET['format'] ?? 'csv');
         $stmt = $this->db->prepare('

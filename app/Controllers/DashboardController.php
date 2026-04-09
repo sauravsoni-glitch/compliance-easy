@@ -136,7 +136,7 @@ class DashboardController extends BaseController
         $monthlyTrend = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         $myTasks = [];
-        if (Auth::isAdmin()) {
+        if (Auth::isAdmin() || Auth::isItAdmin()) {
             $stmt = $db->prepare("SELECT c.id, c.compliance_code, c.title, c.status, c.due_date FROM compliances c WHERE c.organization_id = ? AND c.status IN ('pending','draft','submitted','under_review','rework') ORDER BY c.due_date ASC LIMIT 10");
             $stmt->execute([$orgId]);
             $myTasks = $stmt->fetchAll(\PDO::FETCH_ASSOC);
@@ -257,7 +257,7 @@ class DashboardController extends BaseController
 
         $roleFocusCount = 0;
         $roleFocusLabel = 'Action items';
-        if (Auth::isAdmin()) {
+        if (Auth::isAdmin() || Auth::isItAdmin()) {
             $roleFocusCount = $pendingSubmissions;
             $roleFocusLabel = 'Open pipeline (all roles)';
         } elseif (Auth::isMaker()) {

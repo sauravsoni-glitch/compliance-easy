@@ -82,7 +82,7 @@ class BulkUploadController extends BaseController
 
     public function index(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $logs = [];
         if ($this->logTableExists()) {
@@ -639,7 +639,7 @@ class BulkUploadController extends BaseController
     /** Single-step bulk import: parse file, insert valid rows, log (no preview UI). */
     public function processUpload(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         unset($_SESSION['bulk_upload_preview']);
 
         $orgId = Auth::organizationId();
@@ -743,7 +743,7 @@ class BulkUploadController extends BaseController
 
     public function downloadTemplate(string $kind): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $kind = strtolower($kind);
         header('Content-Type: text/csv; charset=utf-8');
         $out = fopen('php://output', 'w');
@@ -857,7 +857,7 @@ class BulkUploadController extends BaseController
 
     public function uploadCompliance(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $fname = $_FILES['file']['name'] ?? 'upload.csv';
         if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
@@ -931,7 +931,7 @@ class BulkUploadController extends BaseController
 
     public function uploadStatus(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $target = trim($_POST['target_status'] ?? '');
         $allowed = ['draft', 'pending', 'submitted', 'under_review', 'rework', 'approved', 'rejected', 'completed', 'overdue'];
@@ -985,7 +985,7 @@ class BulkUploadController extends BaseController
 
     public function uploadDoa(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $fname = $_FILES['file']['name'] ?? 'doa.csv';
         if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
@@ -1051,7 +1051,7 @@ class BulkUploadController extends BaseController
 
     public function uploadMatrix(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $fname = $_FILES['file']['name'] ?? 'matrix.csv';
         if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
@@ -1127,7 +1127,7 @@ class BulkUploadController extends BaseController
 
     public function uploadRatios(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $fname = $_FILES['file']['name'] ?? 'ratios.csv';
         if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {

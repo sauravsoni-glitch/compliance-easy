@@ -385,12 +385,12 @@ class ComplianceController extends BaseController
             'basePath' => $this->appConfig['url'] ?? '',
             'auth' => [
                 'id' => Auth::id(),
-                'isAdmin' => Auth::isAdmin(),
+                'isAdmin' => Auth::isAdminOrItAdmin(),
                 'isMaker' => Auth::isMaker(),
                 'isReviewer' => Auth::isReviewer(),
                 'isApprover' => Auth::isApprover(),
                 'role' => Auth::role(),
-                'canCreate' => Auth::isAdmin() || Auth::isMaker(),
+                'canCreate' => Auth::isAdminOrItAdmin() || Auth::isMaker(),
             ],
             'items' => $items,
             'total' => $total,
@@ -405,7 +405,7 @@ class ComplianceController extends BaseController
 
     public function createForm(): void
     {
-        Auth::requireRole('admin', 'maker');
+        Auth::requireRole('admin', 'maker', 'it_admin');
         $this->view('compliances/create', [
             'currentPage' => 'compliances-create',
             'pageTitle' => 'Create New Compliance',
@@ -418,7 +418,7 @@ class ComplianceController extends BaseController
 
     public function create(): void
     {
-        Auth::requireRole('admin', 'maker');
+        Auth::requireRole('admin', 'maker', 'it_admin');
         $orgId = Auth::organizationId();
         $title = trim($_POST['title'] ?? '');
         $authorityId = (int)($_POST['authority_id'] ?? 0);
@@ -634,7 +634,7 @@ class ComplianceController extends BaseController
             'basePath' => $this->appConfig['url'] ?? '',
             'auth' => [
                 'id' => Auth::id(),
-                'isAdmin' => Auth::isAdmin(),
+                'isAdmin' => Auth::isAdminOrItAdmin(),
                 'isReviewer' => Auth::isReviewer(),
                 'isApprover' => Auth::isApprover(),
                 'isMaker' => Auth::isMaker(),
@@ -700,7 +700,7 @@ class ComplianceController extends BaseController
 
     public function changeAssignment(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $c = $this->loadCompliance($id, $orgId);
         if (!$c) {
@@ -773,7 +773,7 @@ class ComplianceController extends BaseController
 
     public function delete(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('DELETE FROM compliances WHERE id = ? AND organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -795,7 +795,7 @@ class ComplianceController extends BaseController
             $this->redirect('/compliance/view/' . $id . '?tab=checklist');
         }
         $uid = Auth::id();
-        if (!Auth::isAdmin()) {
+        if (!Auth::isAdminOrItAdmin()) {
             if (!Auth::isMaker() || (int)$c['owner_id'] !== (int)$uid) {
                 $_SESSION['flash_error'] = 'Only the assigned maker can submit.';
                 $this->redirect('/compliance/view/' . $id);
@@ -849,7 +849,7 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Only pending review submissions can be forwarded.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (!Auth::isAdmin()) {
+        if (!Auth::isAdminOrItAdmin()) {
             if (!Auth::isReviewer() || Auth::id() !== (int)($c['reviewer_id'] ?? 0)) {
                 $_SESSION['flash_error'] = 'Only the assigned reviewer can forward.';
                 $this->redirect('/compliance/view/' . $id);
@@ -878,7 +878,7 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Compliance is not awaiting final approval.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (!Auth::isAdmin() && (!Auth::isApprover() || Auth::id() !== (int)$c['approver_id'])) {
+        if (!Auth::isAdminOrItAdmin() && (!Auth::isApprover() || Auth::id() !== (int)$c['approver_id'])) {
             $_SESSION['flash_error'] = 'Only the assigned approver can approve.';
             $this->redirect('/compliance/view/' . $id);
         }
@@ -905,7 +905,7 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Cannot reject in current status.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (!Auth::isAdmin() && (!Auth::isApprover() || Auth::id() !== (int)$c['approver_id'])) {
+        if (!Auth::isAdminOrItAdmin() && (!Auth::isApprover() || Auth::id() !== (int)$c['approver_id'])) {
             $_SESSION['flash_error'] = 'Only the assigned approver can reject.';
             $this->redirect('/compliance/view/' . $id);
         }
@@ -932,11 +932,11 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Rework only from submitted status.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (Auth::isMaker() && !Auth::isAdmin()) {
+        if (Auth::isMaker() && !Auth::isAdminOrItAdmin()) {
             $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (!Auth::isAdmin() && (!Auth::isReviewer() || Auth::id() !== (int)$c['reviewer_id'])) {
+        if (!Auth::isAdminOrItAdmin() && (!Auth::isReviewer() || Auth::id() !== (int)$c['reviewer_id'])) {
             $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
             $this->redirect('/compliance/view/' . $id);
         }
@@ -963,7 +963,7 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Compliance not found.';
             $this->redirect('/compliance');
         }
-        if (!Auth::isAdmin()) {
+        if (!Auth::isAdminOrItAdmin()) {
             if (!Auth::isMaker() || (int)$c['owner_id'] !== (int)Auth::id()) {
                 $_SESSION['flash_error'] = 'Only the assigned maker can upload documents.';
                 $this->redirect('/compliance/view/' . $id);
@@ -990,5 +990,17 @@ class ComplianceController extends BaseController
         }
         $tab = $_POST['return_tab'] ?? 'checklist';
         $this->redirect('/compliance/view/' . $id . '?tab=' . $tab);
+    }
+
+    private function canEditComplianceRecord(array $c): bool
+    {
+        if (Auth::isAdminOrItAdmin()) {
+            return true;
+        }
+        if (Auth::isMaker() && (int) ($c['owner_id'] ?? 0) === (int) Auth::id()) {
+            return in_array($c['status'] ?? '', ['draft', 'pending', 'rework'], true);
+        }
+
+        return false;
     }
 }

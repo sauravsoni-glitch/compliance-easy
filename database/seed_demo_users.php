@@ -2,7 +2,8 @@
 /**
  * Seed demo users for RBAC testing. Run once: php database/seed_demo_users.php
  * Demo credentials: Admin admin@easyhome.com/admin123, Maker maker@easyhome.com/maker123,
- * Reviewer reviewer@demo.com/Reviewer@123, Approver approver@demo.com/Approver@123
+ * Reviewer reviewer@demo.com/Reviewer@123, Approver approver@demo.com/Approver@123,
+ * Legacy IT Admin adminit@easyhome.com/it123 (role it_admin — same base-compliance powers as admin here)
  */
 require dirname(__DIR__) . '/app/autoload.php';
 $dbConfig = require dirname(__DIR__) . '/config/database.php';
@@ -33,6 +34,7 @@ $demos = [
     ['email' => 'maker@easyhome.com',   'password' => 'maker123',   'role_slug' => 'maker',   'full_name' => 'Maker User'],
     ['email' => 'reviewer@demo.com',    'password' => 'Reviewer@123', 'role_slug' => 'reviewer', 'full_name' => 'Reviewer User'],
     ['email' => 'approver@demo.com',   'password' => 'Approver@123', 'role_slug' => 'approver', 'full_name' => 'Approver User'],
+    ['email' => 'adminit@easyhome.com', 'password' => 'it123', 'role_slug' => 'it_admin', 'full_name' => 'IT Compliance Admin'],
 ];
 
 $orgId = 1;

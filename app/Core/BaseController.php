@@ -2,6 +2,7 @@
 namespace App\Core;
 
 use PDO;
+use App\Core\Csrf;
 
 abstract class BaseController
 {
@@ -33,11 +34,14 @@ abstract class BaseController
         // Path-only prefix for href/action/src (same host/port as the request). Never use full APP_URL
         // here — it breaks local dev when the browser URL differs from config (e.g. :8080 vs :8000).
         $data['basePath'] = self::webPathPrefix();
+        $data['csrfToken'] = Csrf::token();
+        $data['csrfField'] = Csrf::fieldHtml();
         extract($data);
+        ob_start();
+        require $path;
+        $content = ob_get_clean();
+        $content = $this->injectCsrfFieldsIntoPostForms($content);
         if ($withLayout) {
-            ob_start();
-            require $path;
-            $content = ob_get_clean();
             $currentPage = $data['currentPage'] ?? null;
             $pageTitle = $data['pageTitle'] ?? 'Dashboard';
             $notificationCount = $data['notificationCount'] ?? 0;
@@ -53,8 +57,28 @@ abstract class BaseController
             }
             require $root . '/app/Views/layouts/main.php';
         } else {
-            require $path;
+            echo $content;
         }
+    }
+
+    private function injectCsrfFieldsIntoPostForms(string $html): string
+    {
+        $field = Csrf::fieldHtml();
+        return (string) preg_replace_callback(
+            '/<form\b[^>]*>/i',
+            static function (array $m) use ($field): string {
+                $tag = $m[0];
+                if (stripos($tag, 'method=') === false || !preg_match('/method\s*=\s*["\']?post["\']?/i', $tag)) {
+                    return $tag;
+                }
+                if (stripos($tag, 'data-no-csrf') !== false) {
+                    return $tag;
+                }
+
+                return $tag . $field;
+            },
+            $html
+        );
     }
 
     /**
@@ -69,6 +93,80 @@ abstract class BaseController
             return '';
         }
         return rtrim($dir, '/');
+    }
+
+    /**
+     * Absolute base URL for outbound emails (invites, password reset, etc.).
+     * Uses APP_URL when it points at a public host; if APP_URL is unset or still localhost,
+     * derives https://host/path from the current request (and X-Forwarded-* when behind a proxy).
+     */
+    protected function publicAbsoluteBaseUrl(): string
+    {
+        $configured = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
+        if ($configured !== '' && !$this->isLocalhostBaseUrl($configured)) {
+            return $configured;
+        }
+        if (PHP_SAPI !== 'cli' && !empty($_SERVER['HTTP_HOST'])) {
+            $derived = $this->deriveAbsoluteBaseUrlFromRequest();
+            if ($derived !== '') {
+                return $derived;
+            }
+        }
+
+        return $configured !== '' ? $configured : 'http://localhost:8000';
+    }
+
+    private function isLocalhostBaseUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if ($host === false || $host === null || $host === '') {
+            return true;
+        }
+        $host = strtolower(trim((string) $host));
+        if ($host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
+            return true;
+        }
+        $suffix = '.localhost';
+        $len = strlen($suffix);
+        if (strlen($host) > $len && substr($host, -$len) === $suffix) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function deriveAbsoluteBaseUrlFromRequest(): string
+    {
+        $host = trim((string) ($_SERVER['HTTP_X_FORWARDED_HOST'] ?? ''));
+        if ($host !== '') {
+            $host = trim(explode(',', $host)[0]);
+        }
+        if ($host === '') {
+            $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        }
+        if ($host === '') {
+            return '';
+        }
+        $https = false;
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            $https = true;
+        }
+        if (isset($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443') {
+            $https = true;
+        }
+        $proto = strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+        if ($proto === 'https' || $proto === 'http') {
+            $https = $proto === 'https';
+        }
+        $scheme = $https ? 'https' : 'http';
+        $script = $_SERVER['SCRIPT_NAME'] ?? '';
+        $dir = str_replace('\\', '/', dirname($script));
+        $path = '';
+        if ($dir !== '/' && $dir !== '.' && $dir !== '') {
+            $path = rtrim($dir, '/');
+        }
+
+        return $scheme . '://' . $host . $path;
     }
 
     protected function redirect(string $url, int $code = 302): void
@@ -96,9 +194,10 @@ abstract class BaseController
         if (!$orgId) {
             return 0;
         }
+        $table = 'compliances';
         [$rb, $rbP] = Auth::complianceScopeSql('');
         $stmt = $this->db->prepare("
-            SELECT COUNT(*) FROM compliances WHERE organization_id = ? AND ($rb)
+            SELECT COUNT(*) FROM {$table} WHERE organization_id = ? AND ($rb)
             AND (
                 (due_date < CURDATE() AND status NOT IN ('approved', 'completed', 'rejected'))
                 OR (status = 'rework')
@@ -115,6 +214,7 @@ abstract class BaseController
         if (!$orgId) {
             return [];
         }
+        $table = 'compliances';
         [$rb, $rbP] = Auth::complianceScopeSql('');
         $stmt = $this->db->prepare("
             SELECT id, compliance_code, title, status, due_date,
@@ -123,7 +223,7 @@ abstract class BaseController
                     WHEN status = 'rework' THEN 'rework'
                     ELSE 'high_risk'
                 END AS type
-            FROM compliances
+            FROM {$table}
             WHERE organization_id = ? AND ($rb)
             AND (
                 (due_date < CURDATE() AND status NOT IN ('approved', 'completed', 'rejected'))
@@ -134,6 +234,7 @@ abstract class BaseController
             LIMIT 15
         ");
         $stmt->execute(array_merge([$orgId], $rbP));
+
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 

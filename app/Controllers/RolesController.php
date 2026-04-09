@@ -64,6 +64,16 @@ class RolesController extends BaseController
             "SELECT id, name, slug FROM roles WHERE slug IN ('admin','maker','reviewer','approver')
              ORDER BY FIELD(slug,'admin','maker','reviewer','approver')"
         )->fetchAll(\PDO::FETCH_ASSOC);
+        $roleSlugs = array_column($roles, 'slug');
+        foreach ($users as $u) {
+            if (($u['role_slug'] ?? '') === 'it_admin' && !in_array('it_admin', $roleSlugs, true)) {
+                $row = $this->db->query("SELECT id, name, slug FROM roles WHERE slug = 'it_admin' LIMIT 1")->fetch(\PDO::FETCH_ASSOC);
+                if ($row) {
+                    $roles[] = $row;
+                }
+                break;
+            }
+        }
 
         $stats = [
             'total' => count($users),
@@ -108,10 +118,6 @@ class RolesController extends BaseController
         $roleStmt = $this->db->prepare('SELECT id, slug, name FROM roles WHERE id = ?');
         $roleStmt->execute([$roleId]);
         $newRole = $roleStmt->fetch(\PDO::FETCH_ASSOC);
-        if (!$newRole || !in_array($newRole['slug'], self::ASSIGNABLE_SLUGS, true)) {
-            $_SESSION['flash_error'] = 'Invalid role selected.';
-            $this->redirect('/roles-permissions');
-        }
 
         $userStmt = $this->db->prepare(
             'SELECT u.id, u.full_name, u.email, u.role_id, r.slug AS role_slug, r.name AS role_name
@@ -122,6 +128,15 @@ class RolesController extends BaseController
         $target = $userStmt->fetch(\PDO::FETCH_ASSOC);
         if (!$target) {
             $_SESSION['flash_error'] = 'User not found.';
+            $this->redirect('/roles-permissions');
+        }
+
+        if ((int) $target['role_id'] === $roleId) {
+            $this->redirect('/roles-permissions');
+        }
+
+        if (!$newRole || !in_array($newRole['slug'], self::ASSIGNABLE_SLUGS, true)) {
+            $_SESSION['flash_error'] = 'Invalid role selected.';
             $this->redirect('/roles-permissions');
         }
 

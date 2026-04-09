@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\BaseController;
+use App\Core\TenantGuard;
 
 class DoaController extends BaseController
 {
@@ -216,11 +217,8 @@ class DoaController extends BaseController
 
     public function show(int $id): void
     {
-        Auth::requireAuth();
-        $orgId = Auth::organizationId();
-        $stmt = $this->db->prepare('SELECT * FROM delegation_authority WHERE id = ? AND organization_id = ?');
-        $stmt->execute([$id, $orgId]);
-        $rule = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $orgId = TenantGuard::requireOrganizationId();
+        $rule = TenantGuard::fetchRowForOrganization($this->db, 'delegation_authority', $id, $orgId);
         if (!$rule) {
             $_SESSION['flash_error'] = 'Rule not found.';
             $this->redirect('/doa');
@@ -237,7 +235,7 @@ class DoaController extends BaseController
 
     public function createForm(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $this->view('doa/form', [
             'currentPage' => 'doa',
             'pageTitle' => 'Add Authority Rule',
@@ -250,7 +248,7 @@ class DoaController extends BaseController
 
     public function editForm(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('SELECT * FROM delegation_authority WHERE id = ? AND organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -271,14 +269,14 @@ class DoaController extends BaseController
 
     public function store(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $this->saveRule($orgId, null);
     }
 
     public function update(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $chk = $this->db->prepare('SELECT id FROM delegation_authority WHERE id = ? AND organization_id = ?');
         $chk->execute([$id, $orgId]);
@@ -355,7 +353,7 @@ class DoaController extends BaseController
 
     public function toggle(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('SELECT status FROM delegation_authority WHERE id = ? AND organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -374,19 +372,19 @@ class DoaController extends BaseController
 
     public function create(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $this->redirect('/doa');
     }
 
     public function edit(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $this->redirect('/doa');
     }
 
     public function delete(int $id): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         $this->db->prepare('DELETE FROM delegation_authority WHERE id = ? AND organization_id = ?')->execute([$id, $orgId]);
         $_SESSION['flash_success'] = 'Rule deleted.';
@@ -395,7 +393,7 @@ class DoaController extends BaseController
 
     public function bulkUpload(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'it_admin');
         $orgId = Auth::organizationId();
         if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
             $_SESSION['flash_error'] = 'Please upload a CSV file.';

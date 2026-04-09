@@ -482,7 +482,7 @@ class OrganizationController extends BaseController
                 $this->db->prepare('INSERT INTO organization_invites (organization_id, email, token, role_id, expires_at, created_by) VALUES (?,?,?,?,?,?)')
                     ->execute([$orgId, $mail, $token, $roleId, $exp, Auth::id()]);
             }
-            $base = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
+            $base = $this->publicAbsoluteBaseUrl();
             $link = $base . '/invite/accept?token=' . urlencode($token);
             $this->finalizeInviteNotification($mail, $fname, $dept, $this->roleDisplayName($roleSlug), $link);
         } catch (\Throwable $e) {
@@ -537,7 +537,7 @@ class OrganizationController extends BaseController
                 $this->db->prepare('UPDATE organization_invites SET email=?, token=?, role_id=?, expires_at=? WHERE id=? AND organization_id=? AND accepted_at IS NULL')
                     ->execute([$mail, $newToken, $roleId, $newExp, $inviteId, $orgId]);
             }
-            $base = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
+            $base = $this->publicAbsoluteBaseUrl();
             $link = $base . '/invite/accept?token=' . urlencode($newToken);
             $this->finalizeInviteNotification($mail, $fname, $dept, $this->roleDisplayName($roleSlug), $link);
         } catch (\Throwable $e) {
@@ -578,7 +578,7 @@ class OrganizationController extends BaseController
         $token = bin2hex(random_bytes(16));
         $this->db->prepare('UPDATE organization_invites SET token = ?, expires_at = ? WHERE id = ? AND organization_id = ?')
             ->execute([$token, date('Y-m-d H:i:s', strtotime('+24 hours')), $id, $orgId]);
-        $base = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
+        $base = $this->publicAbsoluteBaseUrl();
         $link = $base . '/invite/accept?token=' . urlencode($token);
         $row = $this->loadPendingInviteForEmail($id, $orgId);
         if ($row) {

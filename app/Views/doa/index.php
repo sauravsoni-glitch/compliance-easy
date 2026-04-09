@@ -15,7 +15,13 @@ $qBase = function (array $extra = []) use ($basePath, $filterQ, $filterDept, $fi
 function doa_limit_disp(array $l): string {
     return \App\Controllers\DoaController::formatLimit($l);
 }
-$deptIcons = ['Finance' => 'fa-coins', 'Operations' => 'fa-cogs', 'Loan Processing' => 'fa-hand-holding-usd', 'Procurement' => 'fa-shopping-cart', 'HR & Admin' => 'fa-users'];
+$deptMeta = [
+    'Finance' => ['icon' => 'fa-coins', 'slug' => 'finance'],
+    'HR & Admin' => ['icon' => 'fa-users', 'slug' => 'hr-admin'],
+    'Loan Processing' => ['icon' => 'fa-hand-holding-dollar', 'slug' => 'loan'],
+    'Operations' => ['icon' => 'fa-gears', 'slug' => 'operations'],
+    'Procurement' => ['icon' => 'fa-cart-shopping', 'slug' => 'procurement'],
+];
 ?>
 <div class="doa-page">
     <div class="page-header doa-head">
@@ -51,7 +57,7 @@ $deptIcons = ['Finance' => 'fa-coins', 'Operations' => 'fa-cogs', 'Loan Processi
             <div><div class="doa-kpi-val"><?= (int)($temporary ?? 0) ?></div><div class="doa-kpi-lbl">Temporary Delegations</div></div>
         </div>
         <div class="doa-kpi doa-kpi-blue">
-            <div class="doa-kpi-ico"><i class="fas fa-rupee-sign"></i></div>
+            <div class="doa-kpi-ico" aria-hidden="true"><i class="fas fa-money-bill-wave"></i></div>
             <div><div class="doa-kpi-val"><?= htmlspecialchars($maxApprovalSlabDisplay ?? '') ?></div><div class="doa-kpi-lbl">Maximum Approval Slab</div></div>
         </div>
     </div>
@@ -95,12 +101,19 @@ $deptIcons = ['Finance' => 'fa-coins', 'Operations' => 'fa-cogs', 'Loan Processi
         <?php foreach ($byDept ?? [] as $dept => $levels):
             $st = $levels[0]['status'] ?? 'active';
             $exp = $levels[0]['expires_at'] ?? null;
-            $ico = $deptIcons[$dept] ?? 'fa-building';
+            $dm = $deptMeta[$dept] ?? null;
+            if ($dm) {
+                $ico = $dm['icon'];
+                $icoMod = $dm['slug'];
+            } else {
+                $ico = 'fa-building';
+                $icoMod = 'default';
+            }
         ?>
         <div class="doa-dept-card">
             <div class="doa-dept-head">
                 <div class="doa-dept-title">
-                    <span class="doa-dept-ico"><i class="fas <?= htmlspecialchars($ico) ?>"></i></span>
+                    <span class="doa-dept-ico doa-dept-ico--<?= htmlspecialchars($icoMod) ?>" title="<?= htmlspecialchars($dept) ?>"><i class="fas <?= htmlspecialchars($ico) ?>" aria-hidden="true"></i></span>
                     <h3><?= htmlspecialchars($dept) ?></h3>
                 </div>
                 <div class="doa-dept-badges">

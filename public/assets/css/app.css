@@ -23,6 +23,9 @@
     --motion-fast: 0.2s;
     --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
     --page-bg: #f3f4f6;
+    /* Modal backdrop: align with .sidebar / .sidebar.collapsed widths */
+    --sidebar-w: 260px;
+    --sidebar-w-collapsed: 72px;
 }
 
 * {
@@ -41,10 +44,11 @@ body {
     background: var(--page-bg);
 }
 
-/* Simple page entrance: one gentle lift, no stagger (transform-only avoids white flash) */
+/* Page entrance: opacity only — transform on .content-area would make position:fixed modals
+   use that box as their containing block and break sidebar-aligned modal backdrops + blur. */
 @keyframes ehf-page-soft {
-    from { transform: translateY(8px); }
-    to { transform: translateY(0); }
+    from { opacity: 0.88; }
+    to { opacity: 1; }
 }
 
 a {
@@ -1349,15 +1353,17 @@ textarea.form-control { min-height: 88px; resize: vertical; } /* ~10% above 80px
     color: #fff;
 }
 
-/* Modal */
+/* Modal — full-window frosted blur behind dialog (Add Risk, etc.) */
 .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.5);
+    background: rgba(243, 244, 246, 0.42);
+    -webkit-backdrop-filter: blur(8px) saturate(1.08);
+    backdrop-filter: blur(8px) saturate(1.08);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: 1100;
     padding: 1rem;
 }
 .modal {
@@ -2944,9 +2950,9 @@ textarea.form-control { min-height: 88px; resize: vertical; } /* ~10% above 80px
     position: fixed;
     inset: 0;
     z-index: 2100;
-    background: rgba(17, 24, 39, 0.45);
-    -webkit-backdrop-filter: blur(5px);
-    backdrop-filter: blur(5px);
+    background: rgba(243, 244, 246, 0.42);
+    -webkit-backdrop-filter: blur(8px) saturate(1.08);
+    backdrop-filter: blur(8px) saturate(1.08);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2954,6 +2960,14 @@ textarea.form-control { min-height: 88px; resize: vertical; } /* ~10% above 80px
 }
 .app-confirm-overlay[hidden] {
     display: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+    .modal-overlay,
+    .app-confirm-overlay {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+        background: rgba(17, 24, 39, 0.08);
+    }
 }
 .app-confirm-card {
     background: var(--card-bg);
@@ -3150,15 +3164,23 @@ textarea.form-control { min-height: 88px; resize: vertical; } /* ~10% above 80px
     font-weight: 600;
 }
 .doa-dept-ico {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
     background: #f3f4f6;
     color: var(--text-muted);
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
 }
+.doa-dept-ico i { font-size: 1.05rem; line-height: 1; }
+.doa-dept-ico--finance { background: #eff6ff; color: #1d4ed8; }
+.doa-dept-ico--hr-admin { background: #f5f3ff; color: #6d28d9; }
+.doa-dept-ico--loan { background: #ecfdf5; color: #047857; }
+.doa-dept-ico--operations { background: #fff7ed; color: #c2410c; }
+.doa-dept-ico--procurement { background: #fef3c7; color: #b45309; }
+.doa-dept-ico--default { background: #f3f4f6; color: #4b5563; }
 .doa-dept-badges {
     display: flex;
     flex-direction: column;
@@ -4307,6 +4329,329 @@ a.am-kpi.am-kpi-link:focus-visible {
         background: #e5e7eb;
         transform: translateY(-1px);
     }
+}
+
+/* IT operational risk modules */
+.it-risk-page .d-inline {
+    display: inline-block;
+    vertical-align: middle;
+}
+.it-risk-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+.it-risk-head-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+/* Title row: frosted panel + gradient “blended” heading (operational risk pages) */
+.it-risk-page .it-risk-head > div:first-child {
+    padding: 0.75rem 1rem 0.85rem;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    box-shadow: 0 1px 3px rgba(17, 24, 39, 0.05);
+    max-width: min(100%, 42rem);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .it-risk-page .it-risk-head > div:first-child {
+        -webkit-backdrop-filter: blur(10px) saturate(1.15);
+        backdrop-filter: blur(10px) saturate(1.15);
+        background: rgba(255, 255, 255, 0.38);
+    }
+}
+.it-risk-page .it-risk-head .page-title {
+    margin-bottom: 0.25rem;
+    font-size: 1.4rem;
+    font-weight: 750;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    color: #0f172a;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    .it-risk-page .it-risk-head .page-title {
+        background: linear-gradient(115deg, #0f172a 0%, #334155 42%, #64748b 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        -webkit-text-fill-color: transparent;
+    }
+}
+.it-risk-page .it-risk-head .page-subtitle {
+    color: #64748b;
+    opacity: 0.95;
+}
+.it-risk-subnav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 1.25rem;
+    padding: 0.35rem;
+    background: var(--surface-elevated, #fff);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.it-risk-subnav-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.85rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-decoration: none;
+    border: 1px solid transparent;
+}
+.it-risk-subnav-item:hover {
+    color: var(--text);
+    background: rgba(17, 24, 39, 0.04);
+}
+.it-risk-subnav-item.active {
+    color: var(--text);
+    background: #fff;
+    border-color: var(--border);
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.06);
+}
+.it-risk-filters-card {
+    margin-bottom: 1rem;
+}
+.it-risk-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+.it-risk-search-wrap {
+    position: relative;
+    flex: 1 1 220px;
+    min-width: 180px;
+}
+.it-risk-search-wrap .fa-search {
+    position: absolute;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    pointer-events: none;
+}
+.it-risk-search-wrap .form-control {
+    padding-left: 2.25rem;
+}
+.it-risk-filters .form-control {
+    flex: 0 1 160px;
+    min-width: 120px;
+}
+.it-risk-kpi-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+@media (max-width: 900px) {
+    .it-risk-kpi-row {
+        grid-template-columns: 1fr;
+    }
+}
+.it-kpi-card {
+    background: var(--surface-elevated, #fff);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+}
+.it-kpi-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-transform: capitalize;
+    margin-bottom: 0.35rem;
+}
+.it-kpi-value-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+}
+.it-kpi-num {
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+.it-kpi-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.15rem 0.45rem;
+    border-radius: 6px;
+}
+.it-kpi-success .it-kpi-badge {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+}
+.it-kpi-warning .it-kpi-badge {
+    background: rgba(217, 119, 6, 0.12);
+    color: #c2410c;
+}
+.it-kpi-danger .it-kpi-badge {
+    background: rgba(220, 38, 38, 0.12);
+    color: #b91c1c;
+}
+.it-kpi-muted .it-kpi-badge {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+.it-kpi-bar {
+    height: 6px;
+    border-radius: 4px;
+    background: #e5e7eb;
+    overflow: hidden;
+}
+.it-kpi-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: #94a3b8;
+}
+.it-kpi-success .it-kpi-bar > span {
+    background: #22c55e;
+}
+.it-kpi-warning .it-kpi-bar > span {
+    background: #f59e0b;
+}
+.it-kpi-danger .it-kpi-bar > span {
+    background: #ef4444;
+}
+.it-kpi-muted .it-kpi-bar > span {
+    background: #cbd5e1;
+}
+.it-badge-sev {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+}
+.it-sev-low {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+}
+.it-sev-medium {
+    background: rgba(217, 119, 6, 0.14);
+    color: #c2410c;
+}
+.it-sev-high {
+    background: rgba(234, 88, 12, 0.15);
+    color: #c2410c;
+}
+.it-sev-critical {
+    background: rgba(220, 38, 38, 0.14);
+    color: #b91c1c;
+}
+.it-badge-st {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.45rem;
+    border-radius: 6px;
+    background: #f3f4f6;
+    color: #374151;
+}
+.it-badge-eff {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.45rem;
+    border-radius: 6px;
+}
+.it-eff-effective {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+}
+.it-eff-partially_effective {
+    background: rgba(217, 119, 6, 0.14);
+    color: #b45309;
+}
+.it-eff-ineffective {
+    background: rgba(220, 38, 38, 0.14);
+    color: #b91c1c;
+}
+.it-badge-ctl-st {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.45rem;
+    border-radius: 6px;
+}
+.it-ctl-st-active {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+}
+.it-ctl-st-under_review {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+}
+.it-ctl-st-improvement_required {
+    background: rgba(220, 38, 38, 0.12);
+    color: #b91c1c;
+}
+.it-badge-kri-st {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.45rem;
+    border-radius: 6px;
+}
+.it-kri-st-active {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+}
+.it-kri-st-inactive {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+.it-kri-st-under_review {
+    background: rgba(217, 119, 6, 0.14);
+    color: #b45309;
+}
+.it-kri-performance {
+    margin-top: 0.5rem;
+}
+.it-kri-performance-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+.it-kri-view-toggle {
+    display: flex;
+    gap: 0.35rem;
+}
+.it-kri-charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+}
+.it-kri-chart-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.75rem 1rem 0.5rem;
+    background: #fafafa;
+}
+.it-kri-chart-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+}
+.it-kri-chart-wrap {
+    position: relative;
+    height: 220px;
+}
+.it-risk-empty-banner {
+    margin-bottom: 1rem;
+    padding: 1rem 1.25rem;
 }
 
 @media (prefers-reduced-motion: no-preference) {

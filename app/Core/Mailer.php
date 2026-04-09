@@ -33,6 +33,40 @@ final class Mailer
     }
 
     /**
+     * Password reset link. Set MAIL_FROM in production (no logged-in user when sending from worker).
+     *
+     * @return array{0:bool,1:?string}
+     */
+    public static function sendPasswordReset(
+        array $appConfig,
+        string $toEmail,
+        string $toName,
+        string $resetLink
+    ): array {
+        $cfg = self::config();
+        if (empty($cfg['enabled'])) {
+            return [false, 'Mail is disabled'];
+        }
+        $subject = 'Reset your Easy Home Finance password';
+        $safeName = htmlspecialchars($toName !== '' ? $toName : 'there', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $safeLink = htmlspecialchars($resetLink, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $htmlBody = '<div style="background:#f3f4f6;padding:24px 12px;font-family:Segoe UI,system-ui,Roboto,sans-serif;">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">'
+            . '<tr><td style="padding:24px 22px 8px;">'
+            . '<h1 style="margin:0 0 8px;font-size:20px;color:#111827;">Password reset</h1>'
+            . '<p style="margin:0;font-size:15px;line-height:1.55;color:#374151;">Hi ' . $safeName . ', we received a request to reset your password. The link below is valid for <strong>1 hour</strong>.</p>'
+            . '</td></tr>'
+            . '<tr><td style="padding:8px 22px 20px;text-align:center;">'
+            . '<a href="' . $safeLink . '" style="display:inline-block;padding:14px 28px;background:#111827;color:#fff !important;text-decoration:none;border-radius:10px;font-size:15px;font-weight:700;">Reset password</a>'
+            . '</td></tr>'
+            . '<tr><td style="padding:0 22px 22px;font-size:12px;color:#6b7280;line-height:1.5;">If you did not request this, you can ignore this email. Your password will not change.</td></tr>'
+            . '</table></div>';
+        $plain = "Password reset\n\nUse this link (valid 1 hour):\n{$resetLink}\n\nIf you did not request this, ignore this email.\n";
+
+        return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $plain);
+    }
+
+    /**
      * Notify owner / reviewer / approver after a compliance is created (Mailgun).
      * Sends one message per recipient; failures are logged only (does not throw).
      *
@@ -185,9 +219,6 @@ final class Mailer
     }
 
     /**
-     * @return array{0:bool,1:?string}
-     */
-    /**
      * @param list<array{email: string, name?: string}> $ccRecipients
      */
     private static function formatCcHeader(array $ccRecipients): string
@@ -228,7 +259,9 @@ final class Mailer
         $fromEmail = trim((string) ($cfg['from_email'] ?? ''));
         if ($fromEmail === '') {
             $authUser = Auth::user();
-            $fromEmail = trim((string) ($authUser['email'] ?? ''));
+            if (is_array($authUser)) {
+                $fromEmail = trim((string) ($authUser['email'] ?? ''));
+            }
         }
         if ($domain === '' || $apiKey === '' || $fromEmail === '') {
             self::logMailgun($cfg, [

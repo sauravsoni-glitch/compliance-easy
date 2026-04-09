@@ -6,6 +6,11 @@ use App\Core\BaseController;
 
 class FinancialRatiosController extends BaseController
 {
+    private function requireBaseComplianceAccess(): void
+    {
+        Auth::requireAuth();
+    }
+
     private function historyTableExists(): bool
     {
         try {
@@ -108,7 +113,7 @@ class FinancialRatiosController extends BaseController
 
     public function index(): void
     {
-        Auth::requireAuth();
+        $this->requireBaseComplianceAccess();
         $orgId = Auth::organizationId();
         $this->ensureSeededData($orgId);
 
@@ -214,6 +219,7 @@ class FinancialRatiosController extends BaseController
 
     public function updateCategory(): void
     {
+        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $catId = (int) ($_POST['category_id'] ?? 0);
@@ -267,6 +273,7 @@ class FinancialRatiosController extends BaseController
 
     public function saveReminder(): void
     {
+        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         if (!$this->reminderTableExists()) {
             $_SESSION['flash_error'] = 'Reminder feature requires DB migration (financial_ratio_category_reminders).';
@@ -299,6 +306,7 @@ class FinancialRatiosController extends BaseController
 
     public function clearReminder(): void
     {
+        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         if (!$this->reminderTableExists()) {
             $this->redirect('/financial-ratios');
@@ -313,6 +321,7 @@ class FinancialRatiosController extends BaseController
 
     public function downloadTemplate(): void
     {
+        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         $filename = 'financial_ratios_template.csv';
         header('Content-Type: text/csv; charset=utf-8');
@@ -326,6 +335,7 @@ class FinancialRatiosController extends BaseController
 
     public function uploadForm(): void
     {
+        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         $this->view('financial-ratios/upload', [
             'currentPage' => 'financial-ratios',
@@ -337,6 +347,7 @@ class FinancialRatiosController extends BaseController
 
     public function upload(): void
     {
+        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
