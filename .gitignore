@@ -21,9 +21,14 @@ config/mail.local.php
 .mysql-my.ini
 .tools/
 venv/
+.claude/
+
+# Financial ratios uploads (user files)
+/public/uploads/financial_ratios/**
 
 # IDE / OS
 .idea/
+/Untitled
 .vscode/
 *.swp
 Thumbs.db
