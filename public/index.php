@@ -11,6 +11,29 @@ if (php_sapi_name() === 'cli-server') {
 }
 
 define('ROOT_PATH', dirname(__DIR__));
+
+// Load .env file if present (simple key=value parser, no external lib needed)
+$envFile = ROOT_PATH . '/.env';
+if (is_file($envFile)) {
+    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '#') continue;
+        if (strpos($line, '=') === false) continue;
+        [$key, $val] = explode('=', $line, 2);
+        $key = trim($key);
+        $val = trim($val);
+        // Strip surrounding quotes
+        if (strlen($val) >= 2 && in_array($val[0], ['"', "'"], true) && $val[-1] === $val[0]) {
+            $val = substr($val, 1, -1);
+        }
+        if ($key !== '' && getenv($key) === false) {
+            putenv("{$key}={$val}");
+            $_ENV[$key] = $val;
+        }
+    }
+}
+
 if (is_file(ROOT_PATH . '/vendor/autoload.php')) {
     require ROOT_PATH . '/vendor/autoload.php';
 } else {

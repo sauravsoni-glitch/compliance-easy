@@ -12,13 +12,13 @@
         <div class="auth-logo-wrap">
             <a href="<?= $basePath ?? '' ?>/" class="logo">easy</a>
         </div>
-        <h1>Welcome</h1>
-        <p class="subtitle">Sign in to your account or create a new one.</p>
-
         <div class="auth-tabs">
             <span class="auth-tab active">Sign In</span>
             <a href="<?= $basePath ?? '' ?>/pricing" class="auth-tab">Sign Up</a>
         </div>
+        <h1>Welcome</h1>
+        <p class="subtitle">Sign in to your account or create a new one.</p>
+
 
         <form method="post" action="<?= $basePath ?? '' ?>/login" class="auth-form">
             <?php if (!empty($error)): ?>
@@ -44,13 +44,9 @@
             <button type="submit" class="btn btn-primary btn-block btn-lg">Sign In</button>
             <div class="auth-form-links">
                 <a href="<?= $basePath ?? '' ?>/forgot-password">Forgot Password</a>
-                <span class="sep">·</span>
                 <a href="<?= $basePath ?? '' ?>/pricing">View Pricing</a>
             </div>
         </form>
-
-        <p class="auth-cta-text">To create an account, start by choosing a plan.</p>
-        <a href="<?= $basePath ?? '' ?>/pricing" class="btn btn-primary btn-block">View Plans & Sign Up</a>
 
         <div class="auth-links">
             New to ComplianceHub? <a href="<?= $basePath ?? '' ?>/pricing">Sign Up</a><br>
