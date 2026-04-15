@@ -1,8 +1,6 @@
 <?php
-$appConfig = require dirname(__DIR__) . '/config/app.php';
-$isDebug = !empty($appConfig['debug']);
 error_reporting(E_ALL);
-ini_set('display_errors', $isDebug ? '1' : '0');
+ini_set('display_errors', 1);
 
 // PHP built-in server: serve existing files (CSS, JS, images), route the rest to the app
 if (php_sapi_name() === 'cli-server') {
@@ -19,35 +17,20 @@ if (is_file(ROOT_PATH . '/vendor/autoload.php')) {
     require ROOT_PATH . '/app/autoload.php';
 }
 
+use App\Core\Router;
+use App\Core\Auth;
+use App\Core\Database;
+
 $routes = require ROOT_PATH . '/config/routes.php';
-$router = new \App\Core\Router($routes);
+$router = new Router($routes);
 [$controllerName, $action, $params] = $router->dispatch();
 
-// Security headers for browser hardening.
-header('X-Frame-Options: SAMEORIGIN');
-header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: strict-origin-when-cross-origin');
-header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
-if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
-    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
-}
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';");
-
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-    if (!\App\Core\Csrf::validateRequest()) {
-        http_response_code(419);
-        header('Content-Type: text/html; charset=UTF-8');
-        echo 'Security validation failed. Please refresh the page and try again.';
-        exit;
-    }
-}
-
-if (\App\Core\Auth::check()) {
+if (Auth::check()) {
     try {
-        \App\Core\Auth::syncRoleFromDatabase(\App\Core\Database::getConnection());
-        $u = \App\Core\Auth::user();
+        Auth::syncRoleFromDatabase(Database::getConnection());
+        $u = Auth::user();
         if (($u['status'] ?? '') === 'inactive') {
-            \App\Core\Auth::logout();
+            Auth::logout();
             $pre = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? ''));
             $pre = ($pre !== '/' && $pre !== '.' && $pre !== '') ? rtrim($pre, '/') : '';
             header('Location: ' . $pre . '/login', true, 302);

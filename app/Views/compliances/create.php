@@ -16,7 +16,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
 <div class="alert alert-danger"><?= htmlspecialchars($flashError) ?></div>
 <?php endif; ?>
 
-<div class="card create-compact-wrap">
+<div class="card">
     <form method="post" action="<?= $basePath ?>/compliances/create" enctype="multipart/form-data" id="form-create-compliance">
         <div class="card create-section-card">
             <h3 class="card-title">Basic Information</h3>
@@ -40,17 +40,11 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 </div>
                 <div class="form-group">
                     <label class="form-label">Applicable Department *</label>
-                    <select name="department" class="form-control" required>
-                        <option value="">Select applicable department</option>
-                        <?php $departmentPost = (string)($_POST['department'] ?? ''); ?>
-                        <option value="Legal" <?= $departmentPost === 'Legal' ? 'selected' : '' ?>>Legal</option>
-                        <option value="Finance" <?= $departmentPost === 'Finance' ? 'selected' : '' ?>>Finance</option>
-                        <option value="Operations" <?= $departmentPost === 'Operations' ? 'selected' : '' ?>>Operations</option>
-                        <option value="Risk" <?= $departmentPost === 'Risk' ? 'selected' : '' ?>>Risk</option>
-                        <option value="IT" <?= $departmentPost === 'IT' ? 'selected' : '' ?>>IT</option>
-                        <option value="Compliance" <?= $departmentPost === 'Compliance' ? 'selected' : '' ?>>Compliance</option>
-                        <option value="HR" <?= $departmentPost === 'HR' ? 'selected' : '' ?>>HR</option>
-                    </select>
+                    <input type="text" name="department" id="dept-input" class="form-control" list="dept-suggestions" placeholder="Select or type department" value="<?= htmlspecialchars($_POST['department'] ?? '') ?>" required autocomplete="off">
+                    <datalist id="dept-suggestions">
+                        <option value="Legal"><option value="Finance"><option value="Operations"><option value="Risk"><option value="IT">
+                    </datalist>
+                    <p class="form-help" id="matrix-dept-hint" style="display:none;color:var(--primary);margin-top:0.35rem;"></p>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Risk Level *</label>
@@ -113,14 +107,15 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 </div>
                 <div class="form-group">
                     <label class="form-label">Approval Workflow *</label>
-                    <select class="form-control" disabled>
-                        <option>Three Level (Maker → Reviewer → Approver)</option>
+                    <?php $wfPost = $_POST['workflow_type'] ?? 'three-level'; ?>
+                    <select name="workflow_type" id="workflow_type" class="form-control">
+                        <option value="two-level" <?= $wfPost === 'two-level' ? 'selected' : '' ?>>Two Level (Maker → Approver)</option>
+                        <option value="three-level" <?= $wfPost !== 'two-level' ? 'selected' : '' ?>>Three Level (Maker → Reviewer → Approver)</option>
                     </select>
-                    <p class="form-help">Maker submits to Reviewer; Reviewer forwards to Approver for final decision.</p>
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="reviewer-field" style="<?= $wfPost === 'two-level' ? 'display:none;' : '' ?>">
                     <label class="form-label">Reviewer</label>
-                    <select name="reviewer_id" class="form-control">
+                    <select name="reviewer_id" id="reviewer_id" class="form-control">
                         <option value="">Select reviewer</option>
                         <?php foreach ($userOptions as $u): ?>
                         <option value="<?= $u['id'] ?>" <?= (int)($_POST['reviewer_id'] ?? 0) === (int)$u['id'] ? 'selected' : '' ?>><?= htmlspecialchars($u['full_name']) ?></option>
@@ -181,9 +176,9 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                             <span class="evidence-dropzone-icon"><i class="fas fa-cloud-upload-alt"></i></span>
                             <p class="evidence-dropzone-text"><strong>Click to upload</strong> or drag and drop</p>
                             <p class="evidence-dropzone-hint">PDF, DOC, PNG, JPG, XLS (max 10MB)</p>
+                            <span id="evidence-file-name" class="ci-file-name"></span>
                         </div>
                     </div>
-                    <p class="form-help mt-2" id="evidence-file-name"></p>
                     <p class="form-help">Evidence can also be uploaded later during execution on the compliance detail page.</p>
                 </div>
             </div>
@@ -231,7 +226,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
             <a href="<?= $basePath ?>/compliance" class="btn btn-secondary">Cancel</a>
             <button type="submit" class="btn btn-primary">Create Compliance</button>
         </div>
-        <p class="form-help create-form-footer-help">After creation, the compliance appears as <strong>Pending</strong>. The maker can add documents and submit from the detail page.</p>
+        <p class="form-help">After creation, the compliance appears as <strong>Pending</strong>. The maker can add documents and submit from the detail page.</p>
     </form>
 </div>
 <script>
@@ -275,8 +270,85 @@ $evTypePost = $_POST['evidence_type'] ?? '';
     }
     function updateFileName() {
         if (!input || !nameEl) return;
-        nameEl.textContent = input.files && input.files[0] ? 'Selected: ' + input.files[0].name : '';
+        var file = input.files && input.files[0];
+        nameEl.textContent = file ? file.name : '';
     }
+})();
+
+(function(){
+    var wf       = document.getElementById('workflow_type');
+    var revField = document.getElementById('reviewer-field');
+    var revSel   = document.getElementById('reviewer_id');
+    var appSel   = document.querySelector('select[name="approver_id"]');
+    var deptInp  = document.getElementById('dept-input');
+    var hint     = document.getElementById('matrix-dept-hint');
+    var basePath = '<?= htmlspecialchars($basePath ?? '') ?>';
+
+    function toggleWorkflow(lock) {
+        var isTwoLevel = wf.value === 'two-level';
+        revField.style.display = isTwoLevel ? 'none' : '';
+        if (isTwoLevel) revSel.value = '';
+        wf.disabled = !!lock;
+        document.getElementById('wf-hidden') && document.getElementById('wf-hidden').remove();
+        if (lock) {
+            // disabled selects don't submit — add hidden input
+            var h = document.createElement('input');
+            h.type = 'hidden'; h.name = 'workflow_type'; h.id = 'wf-hidden'; h.value = wf.value;
+            wf.parentNode.appendChild(h);
+        }
+        document.querySelector('input[name="workflow_type"]') && !lock
+            && (document.querySelector('input[name="workflow_type"]').remove());
+    }
+
+    function applyMatrix(data) {
+        if (!data.found) {
+            // unlock everything
+            wf.disabled = false;
+            hint.style.display = 'none';
+            toggleWorkflow(false);
+            return;
+        }
+        // set workflow from matrix
+        wf.value = data.workflow;
+        toggleWorkflow(true); // lock dropdown
+
+        // auto-select reviewer
+        if (data.reviewer_id && revSel) {
+            revSel.value = data.reviewer_id;
+        }
+        // auto-select approver
+        if (data.approver_id && appSel) {
+            appSel.value = data.approver_id;
+        }
+
+        // show hint
+        var wfLabel = data.workflow === 'two-level' ? 'Two Level' : 'Three Level';
+        hint.textContent = '⚡ Authority Matrix found: ' + wfLabel + ' workflow applied automatically.';
+        hint.style.display = 'block';
+    }
+
+    var debounceTimer;
+    function fetchMatrix() {
+        var dept = deptInp ? deptInp.value.trim() : '';
+        if (!dept) { applyMatrix({ found: false }); return; }
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(function() {
+            fetch(basePath + '/compliances/matrix-for-dept?dept=' + encodeURIComponent(dept))
+                .then(function(r){ return r.json(); })
+                .then(applyMatrix)
+                .catch(function(){ applyMatrix({ found: false }); });
+        }, 400);
+    }
+
+    if (deptInp) {
+        deptInp.addEventListener('input', fetchMatrix);
+        deptInp.addEventListener('change', fetchMatrix);
+        // trigger on load if dept pre-filled (e.g. form re-submit)
+        if (deptInp.value.trim()) fetchMatrix();
+    }
+
+    if (wf) wf.addEventListener('change', function(){ toggleWorkflow(false); });
+    toggleWorkflow(false);
 })();
 
 var checklistIndex = 0;

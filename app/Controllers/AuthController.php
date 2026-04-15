@@ -4,71 +4,9 @@ namespace App\Controllers;
 use App\Core\Auth;
 use App\Core\BaseController;
 use App\Core\Database;
-use App\Core\JobQueue;
-use App\Core\Mailer;
-use App\Core\PasswordReset;
-use App\Core\RateLimiter;
 
 class AuthController extends BaseController
 {
-    private const LOGIN_WINDOW_SECONDS = 900;
-    private const LOGIN_MAX_ATTEMPTS = 7;
-    private const FORGOT_PASSWORD_IP_WINDOW = 3600;
-    private const FORGOT_PASSWORD_IP_MAX = 5;
-    private const RESET_PASSWORD_IP_WINDOW = 3600;
-    private const RESET_PASSWORD_IP_MAX = 12;
-
-    private function clientIp(): string
-    {
-        $ip = trim((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-        return $ip !== '' ? $ip : 'unknown';
-    }
-
-    private function loginRateLimitKey(string $email): string
-    {
-        return 'login:' . hash('sha256', strtolower($email) . '|' . $this->clientIp());
-    }
-
-    private function forgotPasswordIpKey(): string
-    {
-        return 'forgot_pw:' . hash('sha256', $this->clientIp());
-    }
-
-    private function resetPasswordIpKey(): string
-    {
-        return 'reset_pw:' . hash('sha256', $this->clientIp());
-    }
-
-    private function passwordResetStorageAvailable(): bool
-    {
-        static $ok;
-        if ($ok !== null) {
-            return $ok;
-        }
-        try {
-            $this->db->query('SELECT 1 FROM password_reset_tokens LIMIT 1');
-            $ok = true;
-        } catch (\Throwable $e) {
-            $ok = false;
-        }
-
-        return $ok;
-    }
-
-    private function queueOrSendPasswordResetEmail(string $email, string $name, string $resetUrl): void
-    {
-        try {
-            JobQueue::push($this->db, [
-                'type' => 'password_reset_email',
-                'email' => $email,
-                'name' => $name,
-                'reset_url' => $resetUrl,
-            ]);
-        } catch (\Throwable $e) {
-            Mailer::sendPasswordReset($this->appConfig, $email, $name, $resetUrl);
-        }
-    }
-
     private function dashboardPathForRole(string $roleSlug): string
     {
         if ($roleSlug === 'admin') {
@@ -83,6 +21,7 @@ class AuthController extends BaseController
         if ($roleSlug === 'approver') {
             return '/dashboard/approver';
         }
+
         return '/dashboard';
     }
 
@@ -174,11 +113,6 @@ class AuthController extends BaseController
             $_SESSION['login_error'] = 'Email and password are required.';
             $this->redirect('/login');
         }
-        $rateLimitKey = $this->loginRateLimitKey($email);
-        if (RateLimiter::tooManyAttempts($rateLimitKey, self::LOGIN_MAX_ATTEMPTS, self::LOGIN_WINDOW_SECONDS)) {
-            $_SESSION['login_error'] = 'Too many failed attempts. Please wait 15 minutes and try again.';
-            $this->redirect('/login');
-        }
         $stmt = $this->db->prepare(
             'SELECT u.id, u.organization_id, u.full_name, u.email, u.password, u.department, u.status, r.slug AS role_slug
              FROM users u
@@ -188,11 +122,9 @@ class AuthController extends BaseController
         $stmt->execute([$email]);
         $user = $stmt->fetch(\PDO::FETCH_ASSOC);
         if (!$user || !password_verify($password, $user['password'])) {
-            RateLimiter::hit($rateLimitKey, self::LOGIN_WINDOW_SECONDS);
             $_SESSION['login_error'] = 'Invalid email or password.';
             $this->redirect('/login');
         }
-        RateLimiter::clear($rateLimitKey);
         unset($user['password']);
         Auth::login($user);
         try {
@@ -231,108 +163,9 @@ class AuthController extends BaseController
             $_SESSION['forgot_error'] = 'Please enter your email address.';
             $this->redirect('/forgot-password');
         }
-        $ipKey = $this->forgotPasswordIpKey();
-        if (RateLimiter::tooManyAttempts($ipKey, self::FORGOT_PASSWORD_IP_MAX, self::FORGOT_PASSWORD_IP_WINDOW)) {
-            $_SESSION['forgot_error'] = 'Too many requests. Please try again later.';
-            $this->redirect('/forgot-password');
-        }
-        RateLimiter::hit($ipKey, self::FORGOT_PASSWORD_IP_WINDOW);
-
-        $mailCfg = require dirname(__DIR__, 2) . '/config/mail.php';
-        if (empty($mailCfg['enabled'])) {
-            $_SESSION['forgot_success'] = 'If an account exists with this email, you will receive instructions shortly.';
-            $this->redirect('/forgot-password');
-        }
-        if (!$this->passwordResetStorageAvailable()) {
-            $_SESSION['forgot_error'] = 'Password reset is not configured. Ask an administrator to run database migrations.';
-            $this->redirect('/forgot-password');
-        }
-
-        $stmt = $this->db->prepare(
-            "SELECT id, email, full_name FROM users WHERE LOWER(email) = LOWER(?) AND status IN ('active','pending')"
-        );
-        $stmt->execute([$email]);
-        $users = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-        $baseUrl = $this->publicAbsoluteBaseUrl();
-        foreach ($users as $u) {
-            try {
-                $raw = PasswordReset::createToken($this->db, (int) $u['id']);
-                $link = $baseUrl . '/reset-password?token=' . urlencode($raw);
-                $this->queueOrSendPasswordResetEmail((string) $u['email'], (string) ($u['full_name'] ?? ''), $link);
-            } catch (\Throwable $e) {
-                if (!empty($this->appConfig['debug'])) {
-                    error_log('password reset enqueue: ' . $e->getMessage());
-                }
-            }
-        }
-
+        // In production: send reset link via email; for now show message
         $_SESSION['forgot_success'] = 'If an account exists with this email, you will receive a password reset link shortly.';
         $this->redirect('/forgot-password');
-    }
-
-    public function resetPasswordPage(): void
-    {
-        if (Auth::check()) {
-            $this->redirect('/dashboard');
-        }
-        Auth::init();
-        $token = trim((string) ($_GET['token'] ?? ''));
-        $basePath = $this->appConfig['url'] ?? '';
-        $error = $_SESSION['reset_pw_error'] ?? null;
-        unset($_SESSION['reset_pw_error']);
-        $this->view('auth/reset-password', [
-            'pageTitle' => 'Reset Password',
-            'basePath' => $basePath,
-            'token' => $token,
-            'error' => $error,
-        ], false);
-    }
-
-    public function resetPasswordSubmit(): void
-    {
-        Auth::init();
-        if (Auth::check()) {
-            $this->redirect('/dashboard');
-        }
-        $ipKey = $this->resetPasswordIpKey();
-        if (RateLimiter::tooManyAttempts($ipKey, self::RESET_PASSWORD_IP_MAX, self::RESET_PASSWORD_IP_WINDOW)) {
-            $_SESSION['reset_pw_error'] = 'Too many attempts. Please try again later.';
-            $this->redirect('/reset-password');
-        }
-
-        $token = trim((string) ($_POST['token'] ?? ''));
-        $p1 = (string) ($_POST['password'] ?? '');
-        $p2 = (string) ($_POST['password_confirm'] ?? '');
-        if ($token === '' || $p1 === '' || $p2 === '') {
-            $_SESSION['reset_pw_error'] = 'All fields are required.';
-            $this->redirect('/reset-password?token=' . urlencode($token));
-        }
-        if ($p1 !== $p2) {
-            $_SESSION['reset_pw_error'] = 'Passwords do not match.';
-            $this->redirect('/reset-password?token=' . urlencode($token));
-        }
-        if (strlen($p1) < 8) {
-            $_SESSION['reset_pw_error'] = 'Password must be at least 8 characters.';
-            $this->redirect('/reset-password?token=' . urlencode($token));
-        }
-
-        if (!$this->passwordResetStorageAvailable()) {
-            $_SESSION['reset_pw_error'] = 'Password reset is not available. Contact administrator.';
-            $this->redirect('/forgot-password');
-        }
-
-        $userId = PasswordReset::validateAndDelete($this->db, $token);
-        if (!$userId) {
-            RateLimiter::hit($ipKey, self::RESET_PASSWORD_IP_WINDOW);
-            $_SESSION['reset_pw_error'] = 'Invalid or expired link. Please request a new reset.';
-            $this->redirect('/forgot-password');
-        }
-
-        $hash = password_hash($p1, PASSWORD_BCRYPT);
-        $this->db->prepare('UPDATE users SET password = ? WHERE id = ?')->execute([$hash, $userId]);
-        RateLimiter::clear($ipKey);
-        $_SESSION['login_success'] = 'Your password was updated. Sign in with your new password.';
-        $this->redirect('/login');
     }
 
     public function createAccountPage(): void
@@ -388,16 +221,11 @@ class AuthController extends BaseController
 
     public function inviteAcceptPage(): void
     {
-        $token = trim((string) ($_GET['token'] ?? ''));
-        if (Auth::check() && $token === '') {
+        if (Auth::check()) {
             $this->redirect('/dashboard');
         }
-        if (Auth::check() && $token !== '') {
-            // Allow invite onboarding even if another user is currently signed in on same browser.
-            Auth::logout();
-            Auth::init();
-        }
         $basePath = $this->appConfig['url'] ?? '';
+        $token = trim((string) ($_GET['token'] ?? ''));
         $error = $_SESSION['invite_error'] ?? null;
         $success = $_SESSION['invite_success'] ?? null;
         unset($_SESSION['invite_error'], $_SESSION['invite_success']);
@@ -447,8 +275,8 @@ class AuthController extends BaseController
             $_SESSION['invite_error'] = 'Invalid or expired invitation link.';
             $this->redirect('/invite/accept?token=' . urlencode($token));
         }
-        if ($password === '' || $confirm === '') {
-            $_SESSION['invite_error'] = 'Password and confirm password are required.';
+        if ($fullName === '' || $password === '' || $confirm === '') {
+            $_SESSION['invite_error'] = 'All fields are required.';
             $this->redirect('/invite/accept?token=' . urlencode($token));
         }
         if (strlen($password) < 8) {
@@ -459,12 +287,11 @@ class AuthController extends BaseController
             $_SESSION['invite_error'] = 'Passwords do not match.';
             $this->redirect('/invite/accept?token=' . urlencode($token));
         }
+
         $email = strtolower(trim((string) ($invite['email'] ?? '')));
         $orgId = (int) ($invite['organization_id'] ?? 0);
         $roleId = (int) ($invite['role_id'] ?? 0);
         $dept = trim((string) ($invite['department'] ?? ''));
-        $nameFromInvite = trim((string) ($invite['full_name'] ?? ''));
-        $nameForUser = $nameFromInvite !== '' ? $nameFromInvite : ($fullName !== '' ? $fullName : $email);
 
         $exists = $this->db->prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1');
         $exists->execute([$email]);
@@ -478,7 +305,7 @@ class AuthController extends BaseController
         $this->db->beginTransaction();
         try {
             $this->db->prepare('INSERT INTO users (organization_id, role_id, full_name, email, department, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                ->execute([$orgId, $roleId, $nameForUser, $email, $dept !== '' ? $dept : null, $hashed, 'active']);
+                ->execute([$orgId, $roleId, $fullName, $email, $dept !== '' ? $dept : null, $hashed, 'active']);
             $this->db->prepare('UPDATE organization_invites SET accepted_at = NOW() WHERE id = ? AND accepted_at IS NULL')
                 ->execute([(int) $invite['id']]);
             $this->db->commit();

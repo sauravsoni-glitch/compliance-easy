@@ -83,7 +83,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         <div class="st-profile-top">
             <div class="st-avatar-lg"><?= htmlspecialchars(st_initials($profileUser['full_name'] ?? 'U')) ?></div>
             <div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="(window.appAlert||alert)('Photo upload can be connected to your file storage later.');"><i class="fas fa-camera"></i> Change Photo</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="alert('Photo upload can be connected to your file storage later.');"><i class="fas fa-camera"></i> Change Photo</button>
             </div>
         </div>
         <div class="form-row-2">
@@ -246,69 +246,19 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
 
     <?php if ($automationSub === 'escalation'):
         $depts = $escalation['depts'] ?? [];
-        $globalLevels = $escalation['global_levels'] ?? [];
-        $escalateToOptions = ['Owner (Maker)', 'Reviewer', 'Approver'];
-        $templateNameOptions = [];
-        foreach (($templates['list'] ?? []) as $tplOpt) {
-            if (!is_array($tplOpt)) {
-                continue;
-            }
-            $tplName = trim((string) ($tplOpt['name'] ?? ''));
-            if ($tplName === '') {
-                continue;
-            }
-            $tplType = strtolower(trim((string) ($tplOpt['type'] ?? '')));
-            if (!in_array($tplType, ['escalation', 'reminder', 'creation'], true)) {
-                continue;
-            }
-            if (!in_array($tplName, $templateNameOptions, true)) {
-                $templateNameOptions[] = $tplName;
-            }
-        }
-        if (!is_array($globalLevels) || empty($globalLevels)) {
-            $globalLevels = [
-                ['d' => 0, 'to' => 'Owner (Maker)', 'tpl' => 'Escalation Level 1 - Overdue'],
-                ['d' => 3, 'to' => 'Reviewer', 'tpl' => 'Escalation Level 2 - Manager Alert'],
-                ['d' => 7, 'to' => 'Approver', 'tpl' => 'High Risk Escalation'],
-                ['d' => 14, 'to' => 'Approver', 'tpl' => 'High Risk Escalation'],
-            ];
-        }
     ?>
     <h3 class="card-title mt-3">Escalation Matrix</h3>
-    <p class="text-muted text-sm">Configure one universal escalation rule set for all departments. Recipients are resolved from each compliance Owner, Reviewer, and Approver.</p>
+    <p class="text-muted text-sm">Configure department-wise escalation rules and workflows.</p>
     <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/escalation">
-        <h4 class="st-subhead mt-3">Universal Escalation Configuration</h4>
-        <div class="st-levels-table-wrap st-levels-table-wrap-global">
-            <table class="data-table st-levels-table">
-                <thead><tr><th>Level</th><th>Days After Due</th><th>Escalate To (Owner/Reviewer/Approver)</th><th>Email Template Name</th></tr></thead>
-                <tbody>
-                    <?php for ($i = 0; $i < 4; $i++): $L = $globalLevels[$i] ?? ['d' => '', 'to' => '', 'tpl' => '']; ?>
-                    <tr>
-                        <td><?= $i + 1 ?></td>
-                        <td><input type="number" class="form-control form-control-sm" name="global_levels[<?= $i ?>][d]" value="<?= htmlspecialchars((string)($L['d'] ?? '')) ?>" min="0"></td>
-                        <td>
-                            <select class="form-control form-control-sm" name="global_levels[<?= $i ?>][to]">
-                                <?php $toSelected = (string) ($L['to'] ?? ''); ?>
-                                <?php foreach ($escalateToOptions as $opt): ?>
-                                <option value="<?= htmlspecialchars($opt) ?>" <?= $toSelected === $opt ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </td>
-                        <td>
-                            <select class="form-control form-control-sm" name="global_levels[<?= $i ?>][tpl]">
-                                <?php $tplSelected = (string) ($L['tpl'] ?? ''); ?>
-                                <?php if ($tplSelected !== '' && !in_array($tplSelected, $templateNameOptions, true)): ?>
-                                <option value="<?= htmlspecialchars($tplSelected) ?>" selected><?= htmlspecialchars($tplSelected) ?></option>
-                                <?php endif; ?>
-                                <?php foreach ($templateNameOptions as $tplName): ?>
-                                <option value="<?= htmlspecialchars($tplName) ?>" <?= $tplSelected === $tplName ? 'selected' : '' ?>><?= htmlspecialchars($tplName) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </td>
-                    </tr>
-                    <?php endfor; ?>
-                </tbody>
-            </table>
+        <div class="st-toggle-row st-toggle-inline">
+            <div>
+                <strong>Enable Department-wise Escalation</strong>
+                <p class="text-muted text-sm mb-0">Override global escalation matrix with department-specific configurations.</p>
+            </div>
+            <label class="st-switch">
+                <input type="hidden" name="enable_dept" value="0"><input type="checkbox" name="enable_dept" value="1" <?= !empty($escalation['enable_dept']) ? 'checked' : '' ?>>
+                <span class="st-slider"></span>
+            </label>
         </div>
         <div class="st-toggle-row st-toggle-inline">
             <div>
@@ -320,16 +270,22 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                 <span class="st-slider"></span>
             </label>
         </div>
-        <h4 class="st-subhead mt-3">Departments (all use universal matrix)</h4>
+        <h4 class="st-subhead mt-3">Department Escalation Configuration</h4>
         <?php
+        $expanded = ['finance', 'compliance'];
         foreach ($depts as $slug => $d):
+            $isExp = in_array($slug, $expanded, true);
             $useG = !empty($d['use_global']);
         ?>
-        <div class="st-dept-card">
+        <div class="st-dept-card <?= $isExp ? 'st-dept-expanded' : '' ?>">
             <div class="st-dept-head">
                 <div>
                     <strong><?= htmlspecialchars($d['name'] ?? $slug) ?></strong>
-                    <span class="text-muted text-sm"> — Using Universal</span>
+                    <?php if ($useG && !$isExp): ?>
+                    <span class="text-muted text-sm"> — Using Global</span>
+                    <?php else: ?>
+                    <span class="st-pill st-pill-admin" style="font-size:11px;margin-left:0.5rem;">Active</span>
+                    <?php endif; ?>
                 </div>
                 <div class="st-dept-head-actions">
                     <label class="st-switch st-switch-sm" title="On = use global matrix for this department">
@@ -340,9 +296,30 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     </label>
                 </div>
             </div>
+            <?php if ($isExp): ?>
+            <div class="st-levels-table-wrap">
+                <table class="data-table st-levels-table">
+                    <thead><tr><th>Level</th><th>Days After Due</th><th>Escalate To</th><th>Email Template</th></tr></thead>
+                    <tbody>
+                        <?php
+                        $lvls = $d['levels'] ?? [];
+                        for ($i = 0; $i < 4; $i++):
+                            $L = $lvls[$i] ?? ['d' => '', 'to' => '', 'tpl' => ''];
+                        ?>
+                        <tr>
+                            <td><?= $i + 1 ?></td>
+                            <td><input type="number" class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][d]" value="<?= htmlspecialchars((string)($L['d'] ?? '')) ?>" min="0"></td>
+                            <td><input type="text" class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][to]" value="<?= htmlspecialchars($L['to'] ?? '') ?>"></td>
+                            <td><input type="text" class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][tpl]" value="<?= htmlspecialchars($L['tpl'] ?? '') ?>"></td>
+                        </tr>
+                        <?php endfor; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
         </div>
         <?php endforeach; ?>
-        <p class="text-muted text-sm st-fallback-note"><strong>How it works:</strong> When a compliance crosses due date, the system checks these universal levels and sends mail to Owner/Reviewer/Approver from that compliance record using the matching template in Notification Templates.</p>
+        <p class="text-muted text-sm st-fallback-note"><strong>Fallback:</strong> Departments marked “Using Global” follow the global escalation matrix. High-risk items follow accelerated rules when enabled.</p>
         <div class="st-actions-right">
             <button type="submit" class="btn btn-primary">Save Escalation Settings</button>
         </div>
@@ -496,7 +473,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         <div class="st-tpl-list">
             <div class="st-tpl-list-head">
                 <strong>Email Templates</strong>
-                <button type="button" class="btn btn-sm btn-secondary" title="Add template" onclick="(window.appAlert||alert)('Clone an existing template from the list or contact support to add custom templates.');"><i class="fas fa-plus"></i></button>
+                <button type="button" class="btn btn-sm btn-secondary" title="Add template" onclick="alert('Clone an existing template from the list or contact support to add custom templates.');"><i class="fas fa-plus"></i></button>
             </div>
             <input type="search" class="form-control form-control-sm mb-2" placeholder="Search templates..." id="tpl-search">
             <div class="st-tpl-items" id="tpl-items">

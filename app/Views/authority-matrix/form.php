@@ -2,12 +2,14 @@
 $r = $rule;
 $edit = !empty($r);
 $basePath = $basePath ?? '';
-$wl = $r['workflow_level'] ?? 'Two-Level';
+$wlRaw = $r['workflow_level'] ?? 'three-level';
+// normalise legacy values
+$wl = in_array($wlRaw, ['Single-Level', 'two-level']) ? 'two-level' : 'three-level';
 ?>
 <div class="am-page">
     <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix" class="text-primary"><i class="fas fa-arrow-left"></i> Back</a>
     <h1 class="page-title"><?= $edit ? 'Edit Authority Mapping' : 'Add Authority Mapping' ?></h1>
-    <p class="page-subtitle">Map Maker → Reviewer → Approver for a compliance workflow.</p>
+    <p class="page-subtitle"><?= $wl === 'two-level' ? 'Map Maker → Approver for a compliance workflow.' : 'Map Maker → Reviewer → Approver for a compliance workflow.' ?></p>
 
     <div class="card" style="max-width:640px;">
         <form method="post" action="<?= htmlspecialchars($basePath) ?><?= $edit ? '/authority-matrix/update/' . (int)$r['id'] : '/authority-matrix/store' ?>" id="am-form">
@@ -33,9 +35,8 @@ $wl = $r['workflow_level'] ?? 'Two-Level';
                 <div class="form-group">
                     <label class="form-label">Workflow type *</label>
                     <select name="workflow_level" class="form-control" id="am-workflow-level">
-                        <option value="Single-Level" <?= $wl === 'Single-Level' ? 'selected' : '' ?>>Single-Level</option>
-                        <option value="Two-Level" <?= $wl === 'Two-Level' ? 'selected' : '' ?>>Two-Level</option>
-                        <option value="Multi-Level" <?= $wl === 'Multi-Level' ? 'selected' : '' ?>>Multi-Level</option>
+                        <option value="two-level" <?= $wl === 'two-level' ? 'selected' : '' ?>>Two Level (Maker → Approver)</option>
+                        <option value="three-level" <?= $wl === 'three-level' ? 'selected' : '' ?>>Three Level (Maker → Reviewer → Approver)</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -61,7 +62,7 @@ $wl = $r['workflow_level'] ?? 'Two-Level';
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="form-group" id="am-reviewer-wrap">
+            <div class="form-group" id="am-reviewer-wrap" style="<?= $wl === 'two-level' ? 'display:none;' : '' ?>">
                 <label class="form-label">Reviewer (user) *</label>
                 <select name="reviewer_id" class="form-control" id="am-reviewer-id">
                     <option value="">Select user</option>
@@ -102,7 +103,12 @@ $wl = $r['workflow_level'] ?? 'Two-Level';
   var sel = document.getElementById('am-workflow-level');
   var wrap = document.getElementById('am-reviewer-wrap');
   var rev = document.getElementById('am-reviewer-id');
-  function t(){ var s = sel.value === 'Single-Level'; wrap.style.display = s ? 'none' : 'block'; if(s) rev.removeAttribute('required'); else rev.setAttribute('required','required'); }
+  function t(){
+    var isTwoLevel = sel.value === 'two-level';
+    wrap.style.display = isTwoLevel ? 'none' : 'block';
+    if (isTwoLevel) { rev.removeAttribute('required'); rev.value = ''; }
+    else { rev.setAttribute('required', 'required'); }
+  }
   sel.addEventListener('change', t); t();
 })();
 </script>

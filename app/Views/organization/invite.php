@@ -5,10 +5,7 @@ $flashError = $_SESSION['flash_error'] ?? null;
 unset($_SESSION['flash_success'], $_SESSION['flash_error']);
 $step = (int)($onboardingStep ?? 2);
 $roles = $rolesForInvite ?? [];
-$departmentOptions = $departmentOptions ?? [];
 $orgFlowPhase = $step >= 3 ? 'done' : 'invite';
-$editInvite = $editInvite ?? null;
-$isEdit = !empty($editInvite);
 ?>
 <div class="org-page org-page-v2">
     <?php include __DIR__ . '/_stepper.php'; ?>
@@ -16,49 +13,37 @@ $isEdit = !empty($editInvite);
     <?php if ($flashError): ?><div class="alert alert-danger"><?= htmlspecialchars($flashError) ?></div><?php endif; ?>
 
     <div class="org-section-head org-head-setup">
-        <h1 class="page-title"><?= $isEdit ? 'Edit Invitation' : 'Invite Users' ?></h1>
-        <p class="page-subtitle"><?= $isEdit ? 'Update invite details and resend with a fresh link.' : 'Invite your team members to access the compliance system.' ?></p>
+        <h1 class="page-title">Invite Users</h1>
+        <p class="page-subtitle">Invite your team members to access the compliance system.</p>
     </div>
 
     <div class="card org-invite-card org-invite-card-v2">
-        <form method="post" action="<?= htmlspecialchars($basePath) ?><?= $isEdit ? '/organization/invite/update' : '/organization/invite' ?>" class="org-invite-single-form">
-            <?php if ($isEdit): ?>
-            <input type="hidden" name="invite_id" value="<?= (int) ($editInvite['id'] ?? 0) ?>">
-            <?php endif; ?>
+        <form method="post" action="<?= htmlspecialchars($basePath) ?>/organization/invite" class="org-invite-single-form">
             <div class="org-invite-grid">
                 <div class="form-group">
                     <label class="form-label">Full Name <span class="text-danger">*</span></label>
-                    <input type="text" name="invite_full_name" class="form-control" required placeholder="e.g. Jane Doe" autocomplete="name" value="<?= htmlspecialchars($editInvite['full_name'] ?? '') ?>">
+                    <input type="text" name="invite_full_name" class="form-control" required placeholder="e.g. Jane Doe" autocomplete="name">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Email Address <span class="text-danger">*</span></label>
-                    <input type="email" name="invite_email" class="form-control" required placeholder="jane@company.com" autocomplete="email" value="<?= htmlspecialchars($editInvite['email'] ?? '') ?>">
+                    <input type="email" name="invite_email" class="form-control" required placeholder="jane@company.com" autocomplete="email">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Department</label>
-                    <select name="invite_department" class="form-control">
-                        <option value="">Select department</option>
-                        <?php $selectedDept = (string) ($editInvite['department'] ?? ''); ?>
-                        <?php foreach ($departmentOptions as $dep): ?>
-                        <option value="<?= htmlspecialchars($dep) ?>" <?= $selectedDept === $dep ? 'selected' : '' ?>><?= htmlspecialchars($dep) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <input type="text" name="invite_department" class="form-control" placeholder="e.g. Compliance">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Role <span class="text-danger">*</span></label>
                     <select name="invite_role" class="form-control" required>
                         <option value="">Select role</option>
                         <?php foreach ($roles as $r): ?>
-                        <option value="<?= htmlspecialchars($r['slug']) ?>" <?= (!empty($editInvite['role_slug']) && $editInvite['role_slug'] === $r['slug']) ? 'selected' : '' ?>><?= htmlspecialchars($r['name']) ?></option>
+                        <option value="<?= htmlspecialchars($r['slug']) ?>"><?= htmlspecialchars($r['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
             </div>
             <div class="org-invite-send-row">
-                <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> <?= $isEdit ? 'Save & Resend Invitation' : 'Send Invitation' ?></button>
-                <?php if ($isEdit): ?>
-                <a href="<?= htmlspecialchars($basePath) ?>/organization/invite" class="btn btn-secondary">Cancel</a>
-                <?php endif; ?>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send Invitation</button>
             </div>
         </form>
 

@@ -10,31 +10,7 @@ class Auth
     {
         if (session_status() === PHP_SESSION_NONE) {
             $config = require dirname(__DIR__, 2) . '/config/app.php';
-            $session = $config['session'] ?? [];
-            session_name($session['name'] ?? 'APP_SESSION');
-            ini_set('session.use_strict_mode', !empty($session['strict_mode']) ? '1' : '0');
-            ini_set('session.use_only_cookies', '1');
-            ini_set('session.cookie_httponly', !empty($session['http_only']) ? '1' : '0');
-            ini_set('session.cookie_secure', !empty($session['secure']) ? '1' : '0');
-            $cookieParams = [
-                'lifetime' => (int) ($session['lifetime'] ?? 0),
-                'path' => '/',
-                'domain' => '',
-                'secure' => !empty($session['secure']),
-                'httponly' => !empty($session['http_only']),
-                'samesite' => (string) ($session['same_site'] ?? 'Lax'),
-            ];
-            if (PHP_VERSION_ID >= 70300) {
-                session_set_cookie_params($cookieParams);
-            } else {
-                session_set_cookie_params(
-                    $cookieParams['lifetime'],
-                    '/; samesite=' . $cookieParams['samesite'],
-                    $cookieParams['domain'],
-                    $cookieParams['secure'],
-                    $cookieParams['httponly']
-                );
-            }
+            session_name($config['session']['name'] ?? 'APP_SESSION');
             session_start();
         }
     }
@@ -42,7 +18,6 @@ class Auth
     public static function login(array $user): void
     {
         self::init();
-        session_regenerate_id(true);
         $_SESSION[self::USER_KEY] = $user;
         $_SESSION[self::ROLE_KEY] = $user['role_slug'] ?? null;
     }
@@ -108,20 +83,6 @@ class Auth
         return self::role() === 'admin';
     }
 
-    /** Legacy role slug (IT compliance was split to a separate app). Treated like admin for base compliance scope. */
-    public static function isItAdmin(): bool
-    {
-        return self::role() === 'it_admin';
-    }
-
-    /** Admin or legacy IT admin — full management of base compliance records. */
-    public static function isAdminOrItAdmin(): bool
-    {
-        $r = self::role();
-
-        return $r === 'admin' || $r === 'it_admin';
-    }
-
     public static function isMaker(): bool
     {
         return self::role() === 'maker';
@@ -150,8 +111,7 @@ class Auth
     public static function requireAuth(): void
     {
         if (!self::check()) {
-            $p = self::webPathPrefix();
-            header('Location: ' . ($p !== '' ? $p : '') . '/login', true, 302);
+            header('Location: /login');
             exit;
         }
     }
@@ -167,8 +127,8 @@ class Auth
         }
     }
 
-    /** Path prefix for redirects and asset URLs when app is in a subfolder. */
-    public static function webPathPrefix(): string
+    /** Path prefix for redirects (matches BaseController when app is in a subfolder). */
+    private static function webPathPrefix(): string
     {
         $script = $_SERVER['SCRIPT_NAME'] ?? '';
         $dir = str_replace('\\', '/', dirname($script));
@@ -185,7 +145,7 @@ class Auth
      */
     public static function complianceScopeSql(string $colPrefix = 'c.'): array
     {
-        if (self::isAdmin() || self::isItAdmin()) {
+        if (self::isAdmin()) {
             return ['1=1', []];
         }
         $uid = (int) self::id();
@@ -195,7 +155,7 @@ class Auth
 
     public static function canAccessCompliance(array $row): bool
     {
-        if (self::isAdmin() || self::isItAdmin()) {
+        if (self::isAdmin()) {
             return true;
         }
         $uid = (int) self::id();
@@ -212,7 +172,7 @@ class Auth
      */
     public static function calendarEventsScopeSql(string $colPrefix = 'c.'): array
     {
-        if (self::isAdmin() || self::isItAdmin()) {
+        if (self::isAdmin()) {
             return ['1=1', []];
         }
         $uid = (int) self::id();

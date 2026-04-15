@@ -100,17 +100,14 @@ class AuthorityMatrixController extends BaseController
     private function workflowDepthForRow(array $it): int
     {
         $wl = strtolower(trim((string) ($it['workflow_level'] ?? '')));
-        if ($wl !== '' && strpos($wl, 'multi') !== false) {
-            return 4;
-        }
-        if ($wl !== '' && strpos($wl, 'single') !== false) {
-            return 2;
-        }
-        if (!empty($it['reviewer_id'])) {
-            return 3;
-        }
-
-        return 2;
+        // new values
+        if ($wl === 'two-level') return 2;
+        if ($wl === 'three-level') return 3;
+        // legacy values
+        if (strpos($wl, 'single') !== false) return 2;
+        if (strpos($wl, 'multi') !== false) return 3;
+        // fallback: check reviewer
+        return !empty($it['reviewer_id']) ? 3 : 2;
     }
 
     private function maxWorkflowDepthKpi(array $allItems): int
@@ -128,7 +125,7 @@ class AuthorityMatrixController extends BaseController
 
     public function index(): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $this->ensureSeed($orgId);
 
@@ -188,7 +185,7 @@ class AuthorityMatrixController extends BaseController
 
     public function export(): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare($this->baseSelectSql() . ' ORDER BY am.compliance_area');
         $stmt->execute([$orgId]);
@@ -212,13 +209,13 @@ class AuthorityMatrixController extends BaseController
 
     public function addForm(): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $this->formView(null);
     }
 
     public function editForm(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('SELECT * FROM authority_matrix WHERE id = ? AND organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -244,7 +241,7 @@ class AuthorityMatrixController extends BaseController
 
     public function show(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare($this->baseSelectSql() . ' AND am.id = ?');
         $stmt->execute([$orgId, $id]);
@@ -264,7 +261,7 @@ class AuthorityMatrixController extends BaseController
 
     public function hierarchy(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare($this->baseSelectSql() . ' AND am.id = ?');
         $stmt->execute([$orgId, $id]);
@@ -284,13 +281,13 @@ class AuthorityMatrixController extends BaseController
 
     public function store(): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $this->persist(null);
     }
 
     public function update(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $chk = $this->db->prepare('SELECT id FROM authority_matrix WHERE id = ? AND organization_id = ?');
         $chk->execute([$id, Auth::organizationId()]);
         if (!$chk->fetchColumn()) {
@@ -305,9 +302,9 @@ class AuthorityMatrixController extends BaseController
         $area = trim($_POST['compliance_area'] ?? '');
         $dept = trim($_POST['department'] ?? '');
         $freq = trim($_POST['frequency'] ?? 'Monthly');
-        $wl = trim($_POST['workflow_level'] ?? 'Two-Level');
-        if (!in_array($wl, ['Single-Level', 'Two-Level', 'Multi-Level'], true)) {
-            $wl = 'Two-Level';
+        $wl = trim($_POST['workflow_level'] ?? 'three-level');
+        if (!in_array($wl, ['two-level', 'three-level'], true)) {
+            $wl = 'three-level';
         }
         $risk = strtolower(trim($_POST['risk_level'] ?? 'medium'));
         if (!in_array($risk, ['low', 'medium', 'high'], true)) {
@@ -316,11 +313,8 @@ class AuthorityMatrixController extends BaseController
         $esc = (int) ($_POST['escalation_days_before'] ?? 2);
         $st = ($_POST['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
         $makerId = (int) ($_POST['maker_id'] ?? 0) ?: null;
-        $reviewerId = (int) ($_POST['reviewer_id'] ?? 0) ?: null;
+        $reviewerId = $wl === 'two-level' ? null : ((int) ($_POST['reviewer_id'] ?? 0) ?: null);
         $approverId = (int) ($_POST['approver_id'] ?? 0) ?: null;
-        if ($wl === 'Single-Level') {
-            $reviewerId = null;
-        }
         $mrl = trim($_POST['maker_role_label'] ?? '') ?: null;
         $rrl = trim($_POST['reviewer_role_label'] ?? '') ?: null;
         $arl = trim($_POST['approver_role_label'] ?? '') ?: null;
@@ -329,8 +323,8 @@ class AuthorityMatrixController extends BaseController
             $_SESSION['flash_error'] = 'Compliance area, department, maker, and approver are required.';
             $this->redirect($id ? '/authority-matrix/edit/' . $id : '/authority-matrix/add');
         }
-        if ($wl !== 'Single-Level' && !$reviewerId) {
-            $_SESSION['flash_error'] = 'Reviewer is required for two-level and multi-level workflows.';
+        if ($wl === 'three-level' && !$reviewerId) {
+            $_SESSION['flash_error'] = 'Reviewer is required for three-level workflow.';
             $this->redirect($id ? '/authority-matrix/edit/' . $id : '/authority-matrix/add');
         }
 
@@ -361,7 +355,7 @@ class AuthorityMatrixController extends BaseController
 
     public function delete(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $this->db->prepare('DELETE FROM authority_matrix WHERE id = ? AND organization_id = ?')->execute([$id, Auth::organizationId()]);
         $_SESSION['flash_success'] = 'Mapping removed.';
         $this->redirect('/authority-matrix');
@@ -369,7 +363,7 @@ class AuthorityMatrixController extends BaseController
 
     public function toggle(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('SELECT status FROM authority_matrix WHERE id = ? AND organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -386,13 +380,13 @@ class AuthorityMatrixController extends BaseController
     /** Legacy POST /authority-matrix/add */
     public function add(): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $this->redirect('/authority-matrix/add');
     }
 
     public function edit(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $this->redirect('/authority-matrix/edit/' . $id);
     }
 }

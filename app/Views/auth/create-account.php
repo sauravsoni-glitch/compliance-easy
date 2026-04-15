@@ -3,20 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#f3f4f6">
-    <style>html{background-color:#f3f4f6}</style>
     <title>Create Your Account - Easy Home Finance</title>
-    <link rel="stylesheet" href="<?= htmlspecialchars($basePath ?? '') ?>/assets/css/app.css">
+    <link rel="stylesheet" href="<?= $basePath ?? '' ?>/assets/css/app.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="auth-layout">
-    <?php
-    $bp = $basePath ?? '';
-    $createAccountFormAction = $bp . (!empty($inviteMode) ? '/invite/accept' : '/create-account');
-    ?>
     <div class="auth-card auth-card-create">
         <div class="auth-logo-wrap">
-            <a href="<?= htmlspecialchars($bp) ?>/" class="logo">easy</a>
+            <a href="<?= $basePath ?? '' ?>/" class="logo">easy</a>
         </div>
 
         <?php if (!empty($cardVerified) && empty($inviteMode)): ?>
@@ -29,10 +23,11 @@
         <?php if (!empty($inviteInvalid)): ?>
         <h1>Invite Link Invalid</h1>
         <p class="subtitle"><?= htmlspecialchars($inviteError ?? 'Invalid or expired invitation link.') ?></p>
-        <a href="<?= htmlspecialchars($bp) ?>/organization/invite" class="btn btn-secondary btn-block">Request New Invite</a>
+        <a href="<?= $basePath ?? '' ?>/organization/invite" class="btn btn-secondary btn-block">Request New Invite</a>
         <?php else: ?>
         <h1>Create Your Account</h1>
-        <p class="subtitle"><?= !empty($inviteMode) ? 'Set your password to join workspace.' : 'Complete your setup to access system.' ?></p>
+        <p class="subtitle">Complete your setup to access system.</p>
+        <?php endif; ?>
 
         <?php if (!empty($error)): ?>
         <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
@@ -41,23 +36,21 @@
         <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
         <?php endif; ?>
 
-        <form method="post" action="<?= htmlspecialchars($createAccountFormAction) ?>" class="auth-form">
+        <?php if (empty($inviteInvalid)): ?>
+        <form method="post" action="<?= $basePath ?? '' ?><?= !empty($inviteMode) ? '/invite/accept' : '/create-account' ?>" class="auth-form">
             <?php if (!empty($inviteMode)): ?>
                 <input type="hidden" name="token" value="<?= htmlspecialchars($inviteToken ?? '') ?>">
-                <input type="hidden" name="full_name" value="<?= htmlspecialchars($inviteName ?? '') ?>">
                 <div class="form-group form-group-icon">
                     <label class="form-label" for="email">Email</label>
                     <span class="input-icon"><i class="fas fa-envelope"></i></span>
                     <input type="email" id="email" class="form-control" value="<?= htmlspecialchars($inviteEmail ?? '') ?>" readonly>
                 </div>
             <?php endif; ?>
-            <?php if (empty($inviteMode)): ?>
             <div class="form-group form-group-icon">
                 <label class="form-label" for="full_name">Full Name</label>
                 <span class="input-icon"><i class="fas fa-user"></i></span>
                 <input type="text" id="full_name" name="full_name" class="form-control" placeholder="Enter your full name" value="<?= htmlspecialchars($_POST['full_name'] ?? ($inviteName ?? '')) ?>" required>
             </div>
-            <?php endif; ?>
             <div class="form-group form-group-icon">
                 <label class="form-label" for="password">Create Password</label>
                 <span class="input-icon"><i class="fas fa-lock"></i></span>
@@ -77,7 +70,7 @@
         <?php endif; ?>
 
         <div class="auth-links">
-            Already have an account? <a href="<?= htmlspecialchars($bp) ?>/login">Sign In</a>
+            Already have an account? <a href="<?= $basePath ?? '' ?>/login">Sign In</a>
         </div>
     </div>
     <footer class="auth-footer">

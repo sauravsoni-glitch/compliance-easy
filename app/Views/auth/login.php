@@ -3,8 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#f3f4f6">
-    <style>html{background-color:#f3f4f6}</style>
     <title>Login - Easy Home Finance</title>
     <link rel="stylesheet" href="<?= $basePath ?? '' ?>/assets/css/app.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -50,6 +48,14 @@
                 <a href="<?= $basePath ?? '' ?>/pricing">View Pricing</a>
             </div>
         </form>
+
+        <p class="auth-cta-text">To create an account, start by choosing a plan.</p>
+        <a href="<?= $basePath ?? '' ?>/pricing" class="btn btn-primary btn-block">View Plans & Sign Up</a>
+
+        <div class="auth-links">
+            New to ComplianceHub? <a href="<?= $basePath ?? '' ?>/pricing">Sign Up</a><br>
+            <a href="<?= $basePath ?? '' ?>/pricing">View Pricing Plans</a>
+        </div>
     </div>
     <footer class="auth-footer">
         © <?= date('Y') ?> Easy Home Finance. All rights reserved.

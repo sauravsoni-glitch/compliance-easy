@@ -6,19 +6,6 @@ use App\Core\BaseController;
 
 class ReportsController extends BaseController
 {
-    /** Shown on IT compliance; omitted from base Reports → "Compliance by Framework" chart. */
-    private const FRAMEWORK_CHART_EXCLUDED_AUTHORITIES = [
-        'ISO 27001',
-        'RBI Cyber Security',
-        'DPDP / Data Protection',
-        'Internal IT Policy',
-    ];
-
-    private function requireBaseComplianceAccess(): void
-    {
-        Auth::requireAuth();
-    }
-
     private function docKindColumn(): bool
     {
         try {
@@ -32,7 +19,7 @@ class ReportsController extends BaseController
 
     public function index(): void
     {
-        $this->requireBaseComplianceAccess();
+        Auth::requireAuth();
         $orgId = Auth::organizationId();
         $tab = preg_replace('/[^a-z\-]/', '', $_GET['tab'] ?? 'overview');
         if (!in_array($tab, ['overview', 'recent', 'missing', 'upload'], true)) {
@@ -50,9 +37,16 @@ class ReportsController extends BaseController
         $completed = 0;
         $overdue = 0;
         $highRisk = 0;
-        $frameworkLabels = $this->frameworkChartAuthorityNames();
-        $frameworkCounts = array_fill_keys($frameworkLabels, 0);
+        $frameworkCounts = ['RBI' => 0, 'NHB' => 0, 'SEBI' => 0, 'IRDAI' => 0, 'Internal' => 0];
         $statusBuckets = ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0];
+        $emptyBucket = ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0];
+        $statusByAuthority = [
+            'RBI'      => $emptyBucket,
+            'NHB'      => $emptyBucket,
+            'SEBI'     => $emptyBucket,
+            'IRDAI'    => $emptyBucket,
+            'Internal' => $emptyBucket,
+        ];
 
         foreach ($compliances as $c) {
             $st = $c['status'] ?? '';
@@ -62,29 +56,41 @@ class ReportsController extends BaseController
             if (in_array($st, ['completed', 'approved'], true)) {
                 $completed++;
                 $statusBuckets['completed']++;
+                $bucket = 'completed';
             } elseif ($st === 'overdue' || $isLate) {
                 $overdue++;
                 $statusBuckets['overdue']++;
+                $bucket = 'overdue';
             } elseif ($st === 'under_review') {
                 $statusBuckets['under_review']++;
+                $bucket = 'under_review';
             } else {
                 $statusBuckets['pending']++;
+                $bucket = 'pending';
             }
 
             if (in_array($c['risk_level'] ?? '', ['high', 'critical'], true)) {
                 $highRisk++;
             }
 
-            $auth = trim((string)($c['authority_name'] ?? ''));
-            if ($auth !== '' && array_key_exists($auth, $frameworkCounts)) {
-                $frameworkCounts[$auth]++;
+            $auth = $c['authority_name'] ?? '';
+            if (stripos($auth, 'RBI') !== false) {
+                $frameworkCounts['RBI']++;
+                $statusByAuthority['RBI'][$bucket]++;
+            } elseif (stripos($auth, 'NHB') !== false) {
+                $frameworkCounts['NHB']++;
+                $statusByAuthority['NHB'][$bucket]++;
+            } elseif (stripos($auth, 'SEBI') !== false) {
+                $frameworkCounts['SEBI']++;
+                $statusByAuthority['SEBI'][$bucket]++;
+            } elseif (stripos($auth, 'IRDAI') !== false) {
+                $frameworkCounts['IRDAI']++;
+                $statusByAuthority['IRDAI'][$bucket]++;
+            } else {
+                $frameworkCounts['Internal']++;
+                $statusByAuthority['Internal'][$bucket]++;
             }
         }
-
-        $frameworkChart = [
-            'labels' => array_keys($frameworkCounts),
-            'data' => array_map('intval', array_values($frameworkCounts)),
-        ];
 
         [$rbDoc, $rbDocP] = Auth::complianceScopeSql('c.');
         $docCountStmt = $this->db->prepare("SELECT COUNT(*) FROM compliance_documents d INNER JOIN compliances c ON c.id = d.compliance_id WHERE c.organization_id = ? AND ($rbDoc)");
@@ -114,45 +120,13 @@ class ReportsController extends BaseController
             'kpiOverdue' => $overdue,
             'kpiHighRisk' => $highRisk,
             'kpiDocuments' => $totalDocuments,
-            'frameworkChart' => $frameworkChart,
+            'frameworkCounts' => $frameworkCounts,
             'statusBuckets' => $statusBuckets,
+            'statusByAuthority' => $statusByAuthority,
             'recentDocs' => $recentDocs,
             'missingRows' => $missingRows,
             'uploadComplianceOptions' => $uploadComplianceOptions,
         ]);
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function fetchUniqueAuthorityNamesOrdered(): array
-    {
-        try {
-            $stmt = $this->db->query(
-                'SELECT `name` FROM `authorities` GROUP BY `name` ORDER BY MIN(`id`) ASC'
-            );
-            $names = $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
-        } catch (\Throwable $e) {
-            $names = [];
-        }
-
-        return $names !== [] ? $names : ['RBI', 'NHB', 'SEBI', 'Internal Policy', 'Audit'];
-    }
-
-    /**
-     * Authority names for the overview bar chart only (excludes IT-specific frameworks).
-     *
-     * @return list<string>
-     */
-    private function frameworkChartAuthorityNames(): array
-    {
-        $all = $this->fetchUniqueAuthorityNamesOrdered();
-
-        return array_values(array_filter($all, static function ($name): bool {
-            $n = trim((string) $name);
-
-            return $n !== '' && !in_array($n, self::FRAMEWORK_CHART_EXCLUDED_AUTHORITIES, true);
-        }));
     }
 
     private function fetchCompliances(int $orgId, string $q): array
@@ -233,7 +207,7 @@ class ReportsController extends BaseController
 
     public function quickUpload(): void
     {
-        $this->requireBaseComplianceAccess();
+        Auth::requireAuth();
         $orgId = Auth::organizationId();
         $cid = (int) ($_POST['compliance_id'] ?? 0);
         $docType = trim($_POST['document_type'] ?? '');
@@ -245,7 +219,7 @@ class ReportsController extends BaseController
             $_SESSION['flash_error'] = 'Invalid compliance item.';
             $this->redirect('/reports?tab=upload');
         }
-        if (!Auth::isAdminOrItAdmin() && (!Auth::isMaker() || (int)($crow['owner_id'] ?? 0) !== (int)Auth::id())) {
+        if (!Auth::isAdmin() && (!Auth::isMaker() || (int)($crow['owner_id'] ?? 0) !== (int)Auth::id())) {
             $_SESSION['flash_error'] = 'Only the assigned maker or an admin can upload from reports.';
             $this->redirect('/reports?tab=upload');
         }
@@ -288,8 +262,7 @@ class ReportsController extends BaseController
 
     public function downloadDocument(int $id): void
     {
-        $this->requireBaseComplianceAccess();
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('SELECT d.file_path, d.file_name FROM compliance_documents d INNER JOIN compliances c ON c.id = d.compliance_id WHERE d.id = ? AND c.organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -314,8 +287,7 @@ class ReportsController extends BaseController
 
     public function export(): void
     {
-        $this->requireBaseComplianceAccess();
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $fmt = strtolower($_GET['format'] ?? 'csv');
         $stmt = $this->db->prepare('

@@ -3,7 +3,6 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\BaseController;
-use App\Core\CircularIntelligenceWebhook;
 
 class CircularController extends BaseController
 {
@@ -13,9 +12,45 @@ class CircularController extends BaseController
         if ($ok === null) {
             try {
                 $this->db->query('SELECT review_department FROM circulars LIMIT 1');
+                // Schema exists — ensure new reviewer/approver columns are present too
+                try {
+                    $this->db->exec("
+                        ALTER TABLE `circulars`
+                          ADD COLUMN IF NOT EXISTS `review_reviewer_id` int unsigned DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_approver_id` int unsigned DEFAULT NULL
+                    ");
+                } catch (\Throwable $ignored) {}
                 $ok = true;
             } catch (\Throwable $e) {
-                $ok = false;
+                // Columns missing — run auto-migration
+                try {
+                    $this->db->exec("
+                        ALTER TABLE `circulars`
+                          ADD COLUMN IF NOT EXISTS `ai_secondary_dept` varchar(100) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `document_raw_text` mediumtext NULL,
+                          ADD COLUMN IF NOT EXISTS `ai_approver_tags` varchar(500) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_department` varchar(100) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_secondary_dept` varchar(100) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_owner_id` int unsigned DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_reviewer_id` int unsigned DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_approver_id` int unsigned DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_workflow` varchar(50) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_frequency` varchar(50) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_risk` varchar(20) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_priority` varchar(20) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_due_date` date DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_expected_date` date DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `review_penalty` text NULL,
+                          ADD COLUMN IF NOT EXISTS `review_remarks` text NULL,
+                          ADD COLUMN IF NOT EXISTS `final_department` varchar(100) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `final_risk_level` varchar(20) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `final_priority` varchar(20) DEFAULT NULL,
+                          ADD COLUMN IF NOT EXISTS `final_owner_label` varchar(150) DEFAULT NULL
+                    ");
+                    $ok = true;
+                } catch (\Throwable $e2) {
+                    $ok = false;
+                }
             }
         }
         return $ok;
@@ -27,7 +62,25 @@ class CircularController extends BaseController
             $this->db->query('SELECT 1 FROM circular_activity LIMIT 1');
             return true;
         } catch (\Throwable $e) {
-            return false;
+            // Auto-create circular_activity table if missing
+            try {
+                $this->db->exec("
+                    CREATE TABLE IF NOT EXISTS `circular_activity` (
+                      `id` int unsigned NOT NULL AUTO_INCREMENT,
+                      `circular_id` int unsigned NOT NULL,
+                      `action` varchar(80) NOT NULL,
+                      `detail` text,
+                      `user_id` int unsigned DEFAULT NULL,
+                      `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`),
+                      KEY `circular_id` (`circular_id`),
+                      CONSTRAINT `circ_act_circ` FOREIGN KEY (`circular_id`) REFERENCES `circulars` (`id`) ON DELETE CASCADE
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                ");
+                return true;
+            } catch (\Throwable $e2) {
+                return false;
+            }
         }
     }
 
@@ -45,186 +98,6 @@ class CircularController extends BaseController
         $stmt = $this->db->prepare('SELECT COALESCE(MAX(CAST(SUBSTRING(circular_code, 5) AS UNSIGNED)), 0) + 1 FROM circulars WHERE organization_id = ?');
         $stmt->execute([$orgId]);
         return 'CIR-' . str_pad((string) $stmt->fetchColumn(), 3, '0', STR_PAD_LEFT);
-    }
-
-    private function normalizeAiFrequency(string $f): string
-    {
-        $f = preg_replace('/[^a-z0-9\-]/', '', strtolower($f));
-
-        return in_array($f, ['monthly', 'quarterly', 'annual', 'half-yearly', 'one-time'], true) ? $f : 'monthly';
-    }
-
-    private function normalizeAiRiskOrPriority(string $v, string $default = 'medium'): string
-    {
-        $v = strtolower(trim($v));
-
-        return in_array($v, ['low', 'medium', 'high', 'critical'], true) ? $v : $default;
-    }
-
-    private function normalizeAiWorkflow(string $w): string
-    {
-        $w = strtolower(trim($w));
-
-        return $w === 'three-level' ? 'three-level' : 'two-level';
-    }
-
-    /**
-     * @param array<string, mixed> $v content_summary, executive_summary, department, secondary_department,
-     *   frequency, due_date, risk_level, priority, owner_name, workflow, penalty, approver_tags, impact
-     */
-    private function persistCircularAiFromValues(array &$row, int $orgId, array $v): void
-    {
-        $docSnippet = (string) $v['content_summary'];
-        $summary = (string) $v['executive_summary'];
-        $dept = (string) $v['department'];
-        $sec = (string) $v['secondary_department'];
-        $freq = (string) $v['frequency'];
-        $dueHint = (string) $v['due_date'];
-        $risk = (string) $v['risk_level'];
-        $pri = (string) $v['priority'];
-        $ownerName = (string) $v['owner_name'];
-        $workflow = (string) $v['workflow'];
-        $penalty = (string) $v['penalty'];
-        $approverTagsStr = (string) $v['approver_tags'];
-        $impact = (string) $v['impact'];
-
-        $stmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND full_name = ? LIMIT 1');
-        $stmt->execute([$orgId, $ownerName]);
-        $oid = $stmt->fetchColumn();
-        if (!$oid) {
-            $stmt = $this->db->prepare('SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND r.slug = ? ORDER BY u.id LIMIT 1');
-            $stmt->execute([$orgId, 'maker']);
-            $oid = $stmt->fetchColumn() ?: null;
-        }
-        $ownerId = $oid ? (int) $oid : null;
-
-        $ext = $this->extendedSchema();
-        $id = (int) $row['id'];
-
-        $okExt = false;
-        if ($ext) {
-            try {
-                $this->db->prepare('UPDATE circulars SET
-                    content_summary = ?, ai_executive_summary = ?, ai_department = ?, ai_secondary_dept = ?,
-                    ai_frequency = ?, ai_due_date = ?, ai_risk_level = ?, ai_priority = ?, ai_owner = ?,
-                    ai_workflow = ?, ai_penalty = ?, ai_approver_tags = ?, department = ?, impact = ?,
-                    review_department = ?, review_secondary_dept = ?, review_owner_id = ?, review_workflow = ?,
-                    review_frequency = ?, review_risk = ?, review_priority = ?, review_penalty = ?,
-                    review_due_date = ?, review_expected_date = ?, status = ?
-                    WHERE id = ?')->execute([
-                    $docSnippet,
-                    $summary,
-                    $dept,
-                    $sec,
-                    $freq,
-                    $dueHint,
-                    $risk,
-                    $pri,
-                    $ownerName,
-                    $workflow,
-                    $penalty,
-                    $approverTagsStr,
-                    $dept,
-                    $impact,
-                    $dept,
-                    $sec,
-                    $ownerId,
-                    $workflow,
-                    $freq,
-                    $risk,
-                    $pri,
-                    $penalty,
-                    date('Y-m-d', strtotime('+14 days')),
-                    date('Y-m-d', strtotime('+30 days')),
-                    'ai_analyzed',
-                    $id,
-                ]);
-                $okExt = true;
-            } catch (\Throwable $e) {
-            }
-        }
-        if (!$okExt) {
-            $this->db->prepare('UPDATE circulars SET content_summary = ?, ai_executive_summary = ?, ai_department = ?, ai_frequency = ?, ai_due_date = ?, ai_risk_level = ?, ai_priority = ?, ai_owner = ?, ai_workflow = ?, ai_penalty = ?, department = ?, impact = ?, status = ? WHERE id = ?')
-                ->execute([$docSnippet, $summary, $dept, $freq, $dueHint, $risk, $pri, $ownerName, $workflow, $penalty, $dept, $impact, 'ai_analyzed', $id]);
-        }
-
-        $this->logActivity($id, 'AI Analyzed', 'AI extracted compliance requirements', null);
-        $row = array_merge($row, [
-            'content_summary' => $docSnippet,
-            'ai_executive_summary' => $summary,
-            'ai_department' => $dept,
-            'ai_secondary_dept' => $sec,
-            'ai_frequency' => $freq,
-            'ai_due_date' => $dueHint,
-            'ai_risk_level' => $risk,
-            'ai_priority' => $pri,
-            'ai_owner' => $ownerName,
-            'ai_workflow' => $workflow,
-            'ai_penalty' => $penalty,
-            'ai_approver_tags' => $approverTagsStr,
-            'status' => 'ai_analyzed',
-            'department' => $dept,
-            'impact' => $impact,
-        ]);
-    }
-
-    /** Map n8n / LLM JSON (flat object) into persist keys. */
-    private function webhookAnalysisToPersistValues(array $p, array $row, int $orgId): array
-    {
-        $raw = trim((string) ($row['document_raw_text'] ?? ''));
-        $exec = trim((string) ($p['executive_summary'] ?? ''));
-        $dept = trim((string) ($p['department'] ?? ''));
-        $sec = trim((string) ($p['secondary_department'] ?? ''));
-        $freqIn = trim((string) ($p['frequency'] ?? ''));
-        $freq = $freqIn === '' ? '' : $this->normalizeAiFrequency($freqIn);
-        if ($freq === '') {
-            $freq = 'monthly';
-        }
-        $due = trim((string) ($p['due_date'] ?? ''));
-        $riskRaw = trim((string) ($p['risk_level'] ?? ''));
-        $priRaw = trim((string) ($p['priority'] ?? ''));
-        $risk = $riskRaw === '' ? 'medium' : $this->normalizeAiRiskOrPriority($riskRaw, 'medium');
-        $pri = $priRaw === '' ? 'medium' : $this->normalizeAiRiskOrPriority($priRaw, 'medium');
-        $ownerName = trim((string) ($p['owner_name'] ?? ''));
-        $workflow = $this->normalizeAiWorkflow((string) ($p['workflow'] ?? 'two-level'));
-        $penalty = trim((string) ($p['penalty'] ?? ''));
-        $tags = $p['suggested_approver_tags'] ?? [];
-        if (is_string($tags)) {
-            $tags = array_values(array_filter(array_map('trim', preg_split('/[,;|]/', $tags))));
-        }
-        if (!is_array($tags)) {
-            $tags = [];
-        }
-        $approverStr = implode(', ', $tags);
-        $docSnippet = trim((string) ($p['content_summary'] ?? ''));
-        if ($docSnippet === '') {
-            $docSnippet = $raw !== '' ? mb_substr($raw, 0, 1200) : ($exec !== '' ? mb_substr($exec, 0, 1200) : '');
-        }
-        $impact = strtolower(trim((string) ($p['impact'] ?? '')));
-        if (!in_array($impact, ['low', 'medium', 'high'], true)) {
-            $impact = ($risk === 'high' || $risk === 'critical') ? 'high' : 'medium';
-        }
-        return [
-            'content_summary' => $docSnippet,
-            'executive_summary' => $exec,
-            'department' => $dept,
-            'secondary_department' => $sec,
-            'frequency' => $freq,
-            'due_date' => $due,
-            'risk_level' => $risk,
-            'priority' => $pri,
-            'owner_name' => $ownerName,
-            'workflow' => $workflow,
-            'penalty' => $penalty,
-            'approver_tags' => $approverStr,
-            'impact' => $impact,
-        ];
-    }
-
-    private function applyWebhookAnalysisToCircular(array &$row, int $orgId, array $payload): void
-    {
-        $v = $this->webhookAnalysisToPersistValues($payload, $row, $orgId);
-        $this->persistCircularAiFromValues($row, $orgId, $v);
     }
 
     /** Simulated AI: keyword rules + optional raw text */
@@ -268,24 +141,75 @@ class CircularController extends BaseController
         $penalty = 'Monetary penalty and supervisory action';
         $ownerName = $this->suggestOwnerName($orgId, $dept);
 
+        $stmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND full_name = ? LIMIT 1');
+        $stmt->execute([$orgId, $ownerName]);
+        $oid = $stmt->fetchColumn();
+        if (!$oid) {
+            $stmt = $this->db->prepare('SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND r.slug = ? ORDER BY u.id LIMIT 1');
+            $stmt->execute([$orgId, 'maker']);
+            $oid = $stmt->fetchColumn() ?: null;
+        }
+        $ownerId = $oid ? (int) $oid : null;
+
         $docSnippet = $raw !== '' ? mb_substr($raw, 0, 1200) : "Regulatory circular {$ref}. Entities must adhere to reporting timelines, maintain evidence of compliance, and notify regulators of material events as prescribed.";
 
-        $impact = $risk === 'high' || $risk === 'critical' ? 'high' : 'medium';
+        $ext = $this->extendedSchema();
+        $id = (int) $row['id'];
 
-        $this->persistCircularAiFromValues($row, $orgId, [
-            'content_summary' => $docSnippet,
-            'executive_summary' => $summary,
-            'department' => $dept,
-            'secondary_department' => $sec,
-            'frequency' => $freq,
-            'due_date' => $dueHint,
-            'risk_level' => $risk,
-            'priority' => $pri,
-            'owner_name' => $ownerName,
-            'workflow' => 'two-level',
-            'penalty' => $penalty,
-            'approver_tags' => 'Level 1 Compliance Head, Level 2 CFO',
-            'impact' => $impact,
+        $okExt = false;
+        if ($ext) {
+            try {
+                $this->db->prepare('UPDATE circulars SET
+                    content_summary = ?, ai_executive_summary = ?, ai_department = ?, ai_secondary_dept = ?,
+                    ai_frequency = ?, ai_due_date = ?, ai_risk_level = ?, ai_priority = ?, ai_owner = ?,
+                    ai_workflow = ?, ai_penalty = ?, ai_approver_tags = ?, department = ?, impact = ?,
+                    review_department = ?, review_secondary_dept = ?, review_owner_id = ?, review_workflow = ?,
+                    review_frequency = ?, review_risk = ?, review_priority = ?, review_penalty = ?,
+                    review_due_date = ?, review_expected_date = ?, status = ?
+                    WHERE id = ?')->execute([
+                    $docSnippet,
+                    $summary,
+                    $dept,
+                    $sec,
+                    $freq,
+                    $dueHint,
+                    $risk,
+                    $pri,
+                    $ownerName,
+                    'two-level',
+                    $penalty,
+                    'Level 1 Compliance Head, Level 2 CFO',
+                    $dept,
+                    $risk === 'high' ? 'high' : 'medium',
+                    $dept,
+                    $sec,
+                    $ownerId,
+                    'two-level',
+                    $freq,
+                    $risk,
+                    $pri,
+                    $penalty,
+                    date('Y-m-d', strtotime('+14 days')),
+                    date('Y-m-d', strtotime('+30 days')),
+                    'ai_analyzed',
+                    $id,
+                ]);
+                $okExt = true;
+            } catch (\Throwable $e) {
+            }
+        }
+        if (!$okExt) {
+            $this->db->prepare('UPDATE circulars SET content_summary = ?, ai_executive_summary = ?, ai_department = ?, ai_frequency = ?, ai_due_date = ?, ai_risk_level = ?, ai_priority = ?, ai_owner = ?, ai_workflow = ?, ai_penalty = ?, department = ?, impact = ?, status = ? WHERE id = ?')
+                ->execute([$docSnippet, $summary, $dept, $freq, $dueHint, $risk, $pri, $ownerName, 'two-level', $penalty, $dept, $risk === 'high' ? 'high' : 'medium', 'ai_analyzed', $id]);
+        }
+
+        $this->logActivity($id, 'AI Analyzed', 'AI extracted compliance requirements', null);
+        $row = array_merge($row, [
+            'content_summary' => $docSnippet, 'ai_executive_summary' => $summary, 'ai_department' => $dept,
+            'ai_secondary_dept' => $sec, 'ai_frequency' => $freq, 'ai_due_date' => $dueHint, 'ai_risk_level' => $risk,
+            'ai_priority' => $pri, 'ai_owner' => $ownerName, 'ai_workflow' => 'two-level', 'ai_penalty' => $penalty,
+            'ai_approver_tags' => 'Level 1 Compliance Head, Level 2 CFO', 'status' => 'ai_analyzed', 'department' => $dept,
+            'impact' => $risk === 'high' ? 'high' : 'medium',
         ]);
     }
 
@@ -358,7 +282,7 @@ class CircularController extends BaseController
             'currentPage' => 'circular',
             'pageTitle' => 'Circular Intelligence',
             'user' => Auth::user(),
-            'basePath' => self::webPathPrefix(),
+            'basePath' => $this->appConfig['url'] ?? '',
             'items' => $items,
             'totalCirculars' => $totalCirculars,
             'pendingApproval' => $pendingApproval,
@@ -393,7 +317,7 @@ class CircularController extends BaseController
 
         $users = [];
         if (Auth::isAdmin()) {
-            $u = $this->db->prepare('SELECT u.id, u.full_name, u.department FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND u.status = ? ORDER BY u.full_name');
+            $u = $this->db->prepare('SELECT u.id, u.full_name, u.department, r.slug AS role_slug, r.name AS role_name FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND u.status = ? ORDER BY u.full_name');
             $u->execute([$orgId, 'active']);
             $users = $u->fetchAll(\PDO::FETCH_ASSOC);
         }
@@ -402,143 +326,13 @@ class CircularController extends BaseController
             'currentPage' => 'circular',
             'pageTitle' => $circular['title'],
             'user' => Auth::user(),
-            'basePath' => self::webPathPrefix(),
+            'basePath' => $this->appConfig['url'] ?? '',
             'circular' => $circular,
             'activity' => $activity,
             'userOptions' => $users,
             'isAdmin' => Auth::isAdmin(),
             'extendedSchema' => $this->extendedSchema(),
         ]);
-    }
-
-    /**
-     * Same data as the HTML view page, as JSON (for AI / integrations). Requires login + org access.
-     * GET /circular-intelligence/json/{id}
-     */
-    public function showJson(int $id): void
-    {
-        Auth::requireAuth();
-        $orgId = Auth::organizationId();
-        $stmt = $this->db->prepare('SELECT c.*, comp.compliance_code AS linked_code FROM circulars c LEFT JOIN compliances comp ON comp.id = c.linked_compliance_id WHERE c.id = ? AND c.organization_id = ?');
-        $stmt->execute([$id, $orgId]);
-        $circular = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if (!$circular) {
-            header('Content-Type: application/json; charset=utf-8', true, 404);
-            echo json_encode(['ok' => false, 'error' => 'Circular not found.'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            exit;
-        }
-
-        $activity = [];
-        if ($this->activityTableExists()) {
-            $a = $this->db->prepare('SELECT a.id, a.circular_id, a.action, a.detail, a.user_id, a.created_at, u.full_name AS user_name FROM circular_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.circular_id = ? ORDER BY a.created_at ASC');
-            $a->execute([$id]);
-            $activity = $a->fetchAll(\PDO::FETCH_ASSOC);
-        }
-
-        $userOptions = [];
-        if (Auth::isAdmin()) {
-            $u = $this->db->prepare('SELECT u.id, u.full_name, u.department FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND u.status = ? ORDER BY u.full_name');
-            $u->execute([$orgId, 'active']);
-            $userOptions = $u->fetchAll(\PDO::FETCH_ASSOC);
-        }
-
-        $tags = array_values(array_filter(array_map('trim', explode(',', (string) ($circular['ai_approver_tags'] ?? '')))));
-
-        $reviewOwnerId = (int) ($circular['review_owner_id'] ?? 0);
-        $reviewOwnerName = null;
-        foreach ($userOptions as $u) {
-            if ($reviewOwnerId === (int) ($u['id'] ?? 0)) {
-                $reviewOwnerName = $u['full_name'] ?? null;
-                break;
-            }
-        }
-
-        /** Maps to left column “AI Analysis” on /circular-intelligence/view/{id} */
-        $aiSuggestion = [
-            'executive_summary' => $circular['ai_executive_summary'] ?? null,
-            'department' => $circular['ai_department'] ?? null,
-            'secondary_department' => $circular['ai_secondary_dept'] ?? null,
-            'frequency' => $circular['ai_frequency'] ?? null,
-            'due_date' => $circular['ai_due_date'] ?? null,
-            'risk_level' => $circular['ai_risk_level'] ?? null,
-            'priority' => $circular['ai_priority'] ?? null,
-            'owner_name' => $circular['ai_owner'] ?? null,
-            'workflow' => $circular['ai_workflow'] ?? null,
-            'penalty' => $circular['ai_penalty'] ?? null,
-            'suggested_approver_tags' => $tags,
-        ];
-
-        /** Maps to right column “Admin Review & Override” form */
-        $adminReview = [
-            'department' => $circular['review_department'] ?? null,
-            'secondary_department' => $circular['review_secondary_dept'] ?? null,
-            'owner_user_id' => $reviewOwnerId ?: null,
-            'owner_name' => $reviewOwnerName,
-            'workflow' => $circular['review_workflow'] ?? null,
-            'frequency' => $circular['review_frequency'] ?? null,
-            'risk_level' => $circular['review_risk'] ?? null,
-            'priority' => $circular['review_priority'] ?? null,
-            'due_date' => $circular['review_due_date'] ?? null,
-            'expected_date' => $circular['review_expected_date'] ?? null,
-            'penalty' => $circular['review_penalty'] ?? null,
-            'remarks' => $circular['review_remarks'] ?? null,
-        ];
-
-        /** Text the simulated AI / extraction used (send this to an external model as context) */
-        $documentForAi = [
-            'content_summary' => $circular['content_summary'] ?? null,
-            'document_raw_text' => $circular['document_raw_text'] ?? null,
-            'document_name' => $circular['document_name'] ?? null,
-            'document_path' => $circular['document_path'] ?? null,
-        ];
-
-        /** Same rows as “Audit Log: AI Suggestion vs Final Approved” table (before final approve, “final” is review draft) */
-        $approved = ($circular['status'] ?? '') === 'approved';
-        $auditRows = [
-            ['field' => 'Department', 'ai_suggestion' => $circular['ai_department'] ?? '', 'final_approved' => $approved ? ($circular['final_department'] ?? $circular['review_department'] ?? $circular['ai_department']) : ($circular['review_department'] ?? $circular['ai_department'])],
-            ['field' => 'Owner', 'ai_suggestion' => $circular['ai_owner'] ?? '', 'final_approved' => $approved ? ($circular['final_owner_label'] ?? $reviewOwnerName ?? $circular['ai_owner']) : ($reviewOwnerName ?? $circular['ai_owner'])],
-            ['field' => 'Risk Level', 'ai_suggestion' => $circular['ai_risk_level'] ?? '', 'final_approved' => $approved ? ($circular['final_risk_level'] ?? $circular['review_risk'] ?? $circular['ai_risk_level']) : ($circular['review_risk'] ?? $circular['ai_risk_level'])],
-            ['field' => 'Priority', 'ai_suggestion' => $circular['ai_priority'] ?? '', 'final_approved' => $approved ? ($circular['final_priority'] ?? $circular['review_priority'] ?? $circular['ai_priority']) : ($circular['review_priority'] ?? $circular['ai_priority'])],
-        ];
-
-        $origin = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
-        $pathPre = self::webPathPrefix();
-        $viewUrl = $origin . $pathPre . '/circular-intelligence/view/' . $id;
-        $jsonUrl = $origin . $pathPre . '/circular-intelligence/json/' . $id;
-        $payload = [
-            'ok' => true,
-            'meta' => [
-                'view_url' => $viewUrl,
-                'json_url' => $jsonUrl,
-                'extended_schema' => $this->extendedSchema(),
-                'is_admin' => Auth::isAdmin(),
-            ],
-            'circular_identity' => [
-                'id' => (int) ($circular['id'] ?? 0),
-                'circular_code' => $circular['circular_code'] ?? null,
-                'title' => $circular['title'] ?? null,
-                'authority' => $circular['authority'] ?? null,
-                'reference_no' => $circular['reference_no'] ?? null,
-                'circular_date' => $circular['circular_date'] ?? null,
-                'effective_date' => $circular['effective_date'] ?? null,
-                'status' => $circular['status'] ?? null,
-                'impact' => $circular['impact'] ?? null,
-                'linked_compliance_id' => isset($circular['linked_compliance_id']) ? (int) $circular['linked_compliance_id'] : null,
-                'linked_code' => $circular['linked_code'] ?? null,
-            ],
-            'document_for_ai' => $documentForAi,
-            'ai_suggestion' => $aiSuggestion,
-            'admin_review' => $adminReview,
-            'audit_log_preview' => $auditRows,
-            'circular' => $circular,
-            'ai_approver_tags_list' => $tags,
-            'activity' => $activity,
-            'user_options' => $userOptions,
-        ];
-
-        header('Content-Type: application/json; charset=utf-8');
-        echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        exit;
     }
 
     public function addForm(): void
@@ -548,7 +342,7 @@ class CircularController extends BaseController
             'currentPage' => 'circular',
             'pageTitle' => 'Add Circular',
             'user' => Auth::user(),
-            'basePath' => self::webPathPrefix(),
+            'basePath' => $this->appConfig['url'] ?? '',
         ]);
     }
 
@@ -593,224 +387,86 @@ class CircularController extends BaseController
             'currentPage' => 'circular',
             'pageTitle' => 'Upload Circular',
             'user' => Auth::user(),
-            'basePath' => self::webPathPrefix(),
+            'basePath' => $this->appConfig['url'] ?? '',
         ]);
     }
 
-    private function rollbackCircularUpload(int $id, ?string $absoluteFilePath): void
+    public function upload(): void
     {
-        if ($absoluteFilePath !== null && $absoluteFilePath !== '' && is_file($absoluteFilePath)) {
-            @unlink($absoluteFilePath);
-        }
-        try {
-            $this->db->prepare('DELETE FROM circular_activity WHERE circular_id = ?')->execute([$id]);
-        } catch (\Throwable $e) {
-        }
-        try {
-            $this->db->prepare('DELETE FROM circulars WHERE id = ?')->execute([$id]);
-        } catch (\Throwable $e) {
-        }
-    }
-
-    /**
-     * Upload file and/or paste; when n8n is enabled, analysis comes only from the webhook (no fake PDF text, no offline rules).
-     *
-     * @return array{ok:bool, id?:int, error?:string, message?:string, source?:string}
-     */
-    private function processCircularUpload(): array
-    {
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
-        $title = trim($_POST['title'] ?? '');
         $authority = trim($_POST['authority'] ?? 'RBI');
         $referenceNo = trim($_POST['reference_no'] ?? '');
         $circularDate = $_POST['circular_date'] ?? date('Y-m-d');
         $effectiveDate = $_POST['effective_date'] ?? null;
-        $pasted = trim($_POST['paste_text'] ?? '');
-        $useN8n = !empty($this->appConfig['circular_intelligence_webhook_enabled']);
-
-        if ($title === '') {
-            return ['ok' => false, 'error' => 'Title is required.'];
-        }
-
-        if ($useN8n && $pasted === '' && (empty($_FILES['document']['name']) || (int) ($_FILES['document']['error'] ?? 0) !== UPLOAD_ERR_OK)) {
-            return ['ok' => false, 'error' => 'Upload a file or paste circular text. Analysis is performed by n8n only.'];
-        }
 
         $rawText = '';
         $docName = null;
         $docPath = null;
-        $fullPathForWebhook = null;
-
-        if (!empty($_FILES['document']['name'])) {
-            if ((int) $_FILES['document']['error'] !== UPLOAD_ERR_OK) {
-                return ['ok' => false, 'error' => 'File upload failed. Try again or use a smaller file.'];
-            }
+        if (!empty($_FILES['document']['name']) && (int) $_FILES['document']['error'] === UPLOAD_ERR_OK) {
             $ext = strtolower(pathinfo($_FILES['document']['name'], PATHINFO_EXTENSION));
             $allowed = ['pdf', 'doc', 'docx', 'txt'];
             if (!in_array($ext, $allowed, true)) {
-                return ['ok' => false, 'error' => 'Allowed: PDF, DOC, DOCX, TXT.'];
+                $_SESSION['flash_error'] = 'Allowed: PDF, DOC, DOCX, TXT.';
+                $this->redirect('/circular-intelligence/upload');
             }
             if ($_FILES['document']['size'] > 15 * 1024 * 1024) {
-                return ['ok' => false, 'error' => 'Max file size 15MB.'];
+                $_SESSION['flash_error'] = 'Max file size 15MB.';
+                $this->redirect('/circular-intelligence/upload');
             }
             $uploadDir = $this->uploadHistorySubdir('circulars');
             $fn = 'circ_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
             $full = $uploadDir . DIRECTORY_SEPARATOR . $fn;
-            if (!move_uploaded_file($_FILES['document']['tmp_name'], $full)) {
-                return ['ok' => false, 'error' => 'Could not save the uploaded file.'];
-            }
-            chmod($full, 0644);
-            $fullPathForWebhook = $full;
-            $docName = $_FILES['document']['name'];
-            $docPath = $this->uploadHistoryDbPath('circulars', $fn);
-            if ($ext === 'txt') {
-                $rawText = (string) file_get_contents($full);
+            if (move_uploaded_file($_FILES['document']['tmp_name'], $full)) {
+                chmod($full, 0644);
+                $this->forwardUploadedFileToWebhook($full, $_FILES['document']['name']);
+                $docName = $_FILES['document']['name'];
+                $docPath = $this->uploadHistoryDbPath('circulars', $fn);
+                if ($ext === 'txt') {
+                    $rawText = (string) file_get_contents($full);
+                } else {
+                    $rawText = "[AI Text Extraction — Simulated for {$ext}]\n\nFile: {$docName}\n\n"
+                        . "The circular mandates enhanced reporting controls, periodic certifications, and documentation retention. "
+                        . "Institutions must designate responsible officers, adhere to submission deadlines, and maintain evidence for regulatory examination.\n";
+                }
             }
         } else {
-            $rawText = $pasted;
+            $rawText = trim($_POST['paste_text'] ?? '');
         }
 
-        if ($pasted !== '' && $fullPathForWebhook !== null) {
-            $rawText = trim($rawText . ($rawText !== '' ? "\n\n--- Pasted text ---\n" : '') . $pasted);
+        // Auto-generate title from filename or date
+        $title = trim($_POST['title'] ?? '');
+        if ($title === '') {
+            if ($docName) {
+                $title = ucwords(str_replace(['_', '-'], ' ', pathinfo($docName, PATHINFO_FILENAME)));
+            } else {
+                $title = 'Circular — ' . date('d M Y');
+            }
         }
 
         $code = $this->nextCode($orgId);
         $id = null;
         try {
             $this->db->prepare('INSERT INTO circulars (organization_id, circular_code, title, authority, reference_no, circular_date, effective_date, status, uploaded_by, document_path, document_name, document_raw_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-                ->execute([$orgId, $code, $title, $authority, $referenceNo ?: null, $circularDate, $effectiveDate ?: null, 'uploaded', Auth::id(), $docPath, $docName, $rawText !== '' ? $rawText : null]);
+                ->execute([$orgId, $code, $title, $authority, $referenceNo ?: null, $circularDate, $effectiveDate ?: null, 'uploaded', Auth::id(), $docPath, $docName, $rawText ?: null]);
             $id = (int) $this->db->lastInsertId();
         } catch (\Throwable $e) {
-            try {
-                $this->db->prepare('INSERT INTO circulars (organization_id, circular_code, title, authority, reference_no, circular_date, effective_date, status, uploaded_by, document_path, document_name, content_summary) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-                    ->execute([$orgId, $code, $title, $authority, $referenceNo ?: null, $circularDate, $effectiveDate ?: null, 'uploaded', Auth::id(), $docPath, $docName, $rawText !== '' ? $rawText : null]);
-                $id = (int) $this->db->lastInsertId();
-            } catch (\Throwable $e2) {
-                if ($fullPathForWebhook && is_file($fullPathForWebhook)) {
-                    @unlink($fullPathForWebhook);
-                }
-
-                return ['ok' => false, 'error' => 'Could not save the circular record.'];
-            }
+            $this->db->prepare('INSERT INTO circulars (organization_id, circular_code, title, authority, reference_no, circular_date, effective_date, status, uploaded_by, document_path, document_name, content_summary) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+                ->execute([$orgId, $code, $title, $authority, $referenceNo ?: null, $circularDate, $effectiveDate ?: null, 'uploaded', Auth::id(), $docPath, $docName, $rawText ?: null]);
+            $id = (int) $this->db->lastInsertId();
         }
-        try {
-            $this->logActivity($id, 'Uploaded', $docName ? ('File: ' . $docName) : 'Document uploaded', Auth::id());
-        } catch (\Throwable $e) {
-        }
+        $this->logActivity($id, 'Uploaded', $docName ? ('File: ' . $docName) : 'Document uploaded', Auth::id());
 
         $stmt = $this->db->prepare('SELECT * FROM circulars WHERE id = ?');
         $stmt->execute([$id]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($rawText !== '' && empty($row['document_raw_text'])) {
+        if ($rawText && empty($row['document_raw_text'])) {
             $row['document_raw_text'] = $rawText;
         }
-
-        $ctx = [
-            'organization_id' => $orgId,
-            'circular_id' => $id,
-            'title' => $title,
-            'authority' => $authority,
-            'reference_no' => $referenceNo,
-            'circular_date' => $circularDate,
-            'effective_date' => (string) ($effectiveDate ?? ''),
-            'document_text' => $rawText,
-        ];
-
-        if ($useN8n) {
-            $webhookPayload = null;
-            if ($fullPathForWebhook && is_file($fullPathForWebhook)) {
-                $webhookPayload = CircularIntelligenceWebhook::analyzeUploadedFile(
-                    $fullPathForWebhook,
-                    $docName ?? basename($fullPathForWebhook),
-                    $this->appConfig,
-                    $ctx
-                );
-            } else {
-                $webhookPayload = CircularIntelligenceWebhook::analyzeContextOnly($this->appConfig, $ctx);
-            }
-            if ($webhookPayload === null) {
-                $this->rollbackCircularUpload($id, $fullPathForWebhook);
-
-                return [
-                    'ok' => false,
-                    'error' => 'n8n did not return valid analysis JSON. Check the workflow at the webhook URL and server logs (CircularIntelligenceWebhook).',
-                ];
-            }
-            $this->applyWebhookAnalysisToCircular($row, $orgId, $webhookPayload);
-
-            return [
-                'ok' => true,
-                'id' => $id,
-                'source' => 'webhook',
-                'message' => 'Circular saved. Analysis data came from n8n.',
-            ];
-        }
-
         $this->runAiAnalysis($row, $orgId);
 
-        return [
-            'ok' => true,
-            'id' => $id,
-            'source' => 'offline',
-            'message' => 'Circular uploaded. Offline rules were used (n8n webhook is disabled).',
-        ];
-    }
-
-    public function upload(): void
-    {
-        Auth::requireRole('admin');
-        $result = $this->processCircularUpload();
-        if (!$result['ok']) {
-            $_SESSION['flash_error'] = $result['error'];
-            $this->redirect('/circular-intelligence/upload');
-        }
-        $_SESSION['flash_success'] = $result['message'];
-        $this->redirect('/circular-intelligence/view/' . $result['id']);
-    }
-
-    /**
-     * Same as POST /circular-intelligence/upload but returns JSON (for XHR + processing UI).
-     */
-    public function uploadProcess(): void
-    {
-        header('Content-Type: application/json; charset=utf-8');
-        if (!Auth::check()) {
-            http_response_code(401);
-            echo json_encode(['ok' => false, 'error' => 'Please sign in again.', 'redirect' => null], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            exit;
-        }
-        if (!Auth::isAdmin()) {
-            http_response_code(403);
-            echo json_encode(['ok' => false, 'error' => 'Admin access required.', 'redirect' => null], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            exit;
-        }
-        try {
-            $r = $this->processCircularUpload();
-        } catch (\Throwable $e) {
-            http_response_code(500);
-            $msg = 'Something went wrong. Please try again.';
-            if (!empty($this->appConfig['debug'])) {
-                $msg = $e->getMessage();
-                error_log('uploadProcess: ' . $e->getMessage());
-            }
-            echo json_encode(['ok' => false, 'error' => $msg, 'redirect' => null], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            exit;
-        }
-        $pre = self::webPathPrefix();
-        $pathPre = $pre !== '' ? $pre : '';
-        $payload = [
-            'ok' => $r['ok'],
-            'id' => $r['id'] ?? null,
-            'error' => $r['error'] ?? null,
-            'message' => $r['message'] ?? null,
-            'source' => $r['source'] ?? null,
-            'redirect' => ($r['ok'] && isset($r['id'])) ? ($pathPre . '/circular-intelligence/view/' . (int) $r['id']) : null,
-        ];
-        if (!$r['ok']) {
-            http_response_code(422);
-        }
-        echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        exit;
+        $_SESSION['flash_success'] = 'Circular uploaded. AI analysis completed.';
+        $this->redirect('/circular-intelligence/view/' . $id);
     }
 
     public function reanalyze(int $id): void
@@ -828,49 +484,8 @@ class CircularController extends BaseController
             $_SESSION['flash_error'] = 'Cannot re-analyze after compliance is linked.';
             $this->redirect('/circular-intelligence/view/' . $id);
         }
-
-        $useN8n = !empty($this->appConfig['circular_intelligence_webhook_enabled']);
-        $ctx = [
-            'organization_id' => $orgId,
-            'circular_id' => (int) $row['id'],
-            'title' => (string) ($row['title'] ?? ''),
-            'authority' => (string) ($row['authority'] ?? ''),
-            'reference_no' => (string) ($row['reference_no'] ?? ''),
-            'circular_date' => (string) ($row['circular_date'] ?? ''),
-            'effective_date' => (string) ($row['effective_date'] ?? ''),
-            'document_text' => trim((string) ($row['document_raw_text'] ?? '')),
-        ];
-
-        if ($useN8n) {
-            $webhookPayload = null;
-            $full = null;
-            if (!empty($row['document_path'])) {
-                $full = $this->resolveUploadFilesystemPath($row['document_path']);
-            }
-            if ($full && is_file($full)) {
-                $webhookPayload = CircularIntelligenceWebhook::analyzeUploadedFile(
-                    $full,
-                    (string) ($row['document_name'] ?: basename($full)),
-                    $this->appConfig,
-                    $ctx
-                );
-            } else {
-                if ($ctx['document_text'] === '') {
-                    $_SESSION['flash_error'] = 'No file on disk and no stored text to send to n8n.';
-                    $this->redirect('/circular-intelligence/view/' . $id);
-                }
-                $webhookPayload = CircularIntelligenceWebhook::analyzeContextOnly($this->appConfig, $ctx);
-            }
-            if ($webhookPayload === null) {
-                $_SESSION['flash_error'] = 'n8n did not return valid analysis JSON. Check the workflow.';
-                $this->redirect('/circular-intelligence/view/' . $id);
-            }
-            $this->applyWebhookAnalysisToCircular($row, $orgId, $webhookPayload);
-            $_SESSION['flash_success'] = 'AI re-analysis completed (n8n).';
-        } else {
-            $this->runAiAnalysis($row, $orgId);
-            $_SESSION['flash_success'] = 'AI re-analysis completed (offline rules; n8n disabled).';
-        }
+        $this->runAiAnalysis($row, $orgId);
+        $_SESSION['flash_success'] = 'AI re-analysis completed.';
         $this->redirect('/circular-intelligence/view/' . $id);
     }
 
@@ -887,15 +502,22 @@ class CircularController extends BaseController
         if (!$stmt->fetchColumn()) {
             $this->redirect('/circular-intelligence');
         }
+        $reviewWorkflow = trim($_POST['review_workflow'] ?? 'two-level');
+        $reviewerId = $reviewWorkflow === 'three-level' ? ((int) ($_POST['review_reviewer_id'] ?? 0) ?: null) : null;
+        $approverId = (int) ($_POST['review_approver_id'] ?? 0) ?: null;
+
         $this->db->prepare('UPDATE circulars SET
-            review_department = ?, review_secondary_dept = ?, review_owner_id = ?, review_workflow = ?,
+            review_department = ?, review_secondary_dept = ?, review_owner_id = ?,
+            review_reviewer_id = ?, review_approver_id = ?, review_workflow = ?,
             review_frequency = ?, review_risk = ?, review_priority = ?, review_due_date = ?, review_expected_date = ?,
             review_penalty = ?, review_remarks = ?, status = ?
             WHERE id = ? AND organization_id = ?')->execute([
             trim($_POST['review_department'] ?? ''),
             trim($_POST['review_secondary_dept'] ?? '') ?: null,
             (int) ($_POST['review_owner_id'] ?? 0) ?: null,
-            trim($_POST['review_workflow'] ?? 'two-level'),
+            $reviewerId,
+            $approverId,
+            $reviewWorkflow,
             preg_replace('/[^a-z0-9\-]/', '', strtolower($_POST['review_frequency'] ?? 'monthly')) ?: 'monthly',
             $_POST['review_risk'] ?? 'medium',
             $_POST['review_priority'] ?? 'medium',
@@ -935,20 +557,35 @@ class CircularController extends BaseController
         $penalty = $ext ? ($c['review_penalty'] ?: $c['ai_penalty']) : $c['ai_penalty'];
         $workflow = $ext ? ($c['review_workflow'] ?: 'two-level') : 'two-level';
 
-        if ($ownerId < 1) {
+        // Resolve owner: review form → AI name match → circular uploader → first maker in org
+        if ($ownerId < 1 && !empty($c['ai_owner'])) {
             $stmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND full_name = ? LIMIT 1');
-            $stmt->execute([$orgId, $c['ai_owner'] ?? '']);
+            $stmt->execute([$orgId, $c['ai_owner']]);
             $ownerId = (int) ($stmt->fetchColumn() ?: 0);
+        }
+        if ($ownerId < 1 && !empty($c['uploaded_by'])) {
+            // Use the person who uploaded the circular as the maker
+            $ownerId = (int) $c['uploaded_by'];
         }
         if ($ownerId < 1) {
             $stmt = $this->db->prepare('SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND r.slug = ? LIMIT 1');
             $stmt->execute([$orgId, 'maker']);
             $ownerId = (int) $stmt->fetchColumn();
         }
-        if ($dept === '' || $ownerId < 1) {
-            $_SESSION['flash_error'] = 'Set department and owner before approval.';
-            $this->redirect('/circular-intelligence/view/' . $id);
+        if ($ownerId < 1) {
+            // Last resort: current admin
+            $ownerId = Auth::id();
         }
+
+        // Use authority name as fallback dept if AI did not detect one
+        if ($dept === '') {
+            $dept = $c['authority'] ?? 'General';
+        }
+
+        // Sanitise freq/risk/priority
+        $freq     = $freq     ?: 'monthly';
+        $risk     = $risk     ?: 'medium';
+        $pri      = $pri      ?: 'medium';
 
         $authId = $this->authorityIdForCircular($c['authority'] ?? 'RBI');
         $title = $c['title'];
@@ -967,11 +604,40 @@ class CircularController extends BaseController
         $num = $stmt->fetchColumn();
         $cmpCode = 'CMP-' . str_pad((string) $num, 3, '0', STR_PAD_LEFT);
 
-        $reviewerId = null;
-        $approverId = null;
-        $matrix = $this->matrixReviewerApprover($orgId, $dept, $freq);
-        if ($matrix) {
-            [$reviewerId, $approverId] = $matrix;
+        // Use admin-selected reviewer/approver from the review form first
+        $reviewerId = $ext ? ((int) ($c['review_reviewer_id'] ?? 0) ?: null) : null;
+        $approverId = $ext ? ((int) ($c['review_approver_id'] ?? 0) ?: null) : null;
+
+        // Fall back to authority matrix if not set in the review form
+        if (!$approverId) {
+            $matrix = $this->matrixReviewerApprover($orgId, $dept, $freq);
+            if ($matrix) {
+                [$matrixReviewer, $matrixApprover, $matrixWorkflow] = $matrix;
+                if (!$reviewerId) $reviewerId = $matrixReviewer;
+                if (!$approverId) $approverId = $matrixApprover;
+                if (!empty($matrixWorkflow) && !$ext) {
+                    $workflow = $matrixWorkflow;
+                }
+            }
+        }
+
+        // For two-level workflow, reviewer is not used
+        if ($workflow === 'two-level') {
+            $reviewerId = null;
+        }
+
+        // Validate required assignments before creating compliance
+        if ($ownerId < 1) {
+            $_SESSION['flash_error'] = 'Please save the review and select an Owner (Maker) before approving.';
+            $this->redirect('/circular-intelligence/view/' . $id);
+        }
+        if (!$approverId) {
+            $_SESSION['flash_error'] = 'Please save the review and select an Approver before approving.';
+            $this->redirect('/circular-intelligence/view/' . $id);
+        }
+        if ($workflow === 'three-level' && !$reviewerId) {
+            $_SESSION['flash_error'] = 'Three-level workflow requires a Reviewer. Please save the review and select a Reviewer.';
+            $this->redirect('/circular-intelligence/view/' . $id);
         }
 
         if ($hasEv) {
@@ -1013,17 +679,22 @@ class CircularController extends BaseController
     private function matrixReviewerApprover(int $orgId, string $department, string $frequency): ?array
     {
         try {
-            $stmt = $this->db->prepare('SELECT reviewer_id, approver_id FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency = ? LIMIT 1');
+            $stmt = $this->db->prepare('SELECT reviewer_id, approver_id, workflow_type FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency = ? LIMIT 1');
             $stmt->execute([$orgId, $department, $frequency]);
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            if ($row) {
-                return [(int) $row['reviewer_id'], (int) $row['approver_id']];
+            if (!$row) {
+                $stmt = $this->db->prepare('SELECT reviewer_id, approver_id, workflow_type FROM authority_matrix WHERE organization_id = ? AND department = ? LIMIT 1');
+                $stmt->execute([$orgId, $department]);
+                $row = $stmt->fetch(\PDO::FETCH_ASSOC);
             }
-            $stmt = $this->db->prepare('SELECT reviewer_id, approver_id FROM authority_matrix WHERE organization_id = ? AND department = ? LIMIT 1');
-            $stmt->execute([$orgId, $department]);
-            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
             if ($row) {
-                return [(int) $row['reviewer_id'], (int) $row['approver_id']];
+                $wl = $row['workflow_type'] ?? '';
+                if (in_array($wl, ['Single-Level', 'two-level', 'Two-Level'], true)) {
+                    $wl = 'two-level';
+                } elseif ($wl !== '') {
+                    $wl = 'three-level';
+                }
+                return [(int) $row['reviewer_id'], (int) $row['approver_id'], $wl];
             }
         } catch (\Throwable $e) {
         }

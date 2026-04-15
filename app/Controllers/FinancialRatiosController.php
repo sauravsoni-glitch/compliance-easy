@@ -6,11 +6,6 @@ use App\Core\BaseController;
 
 class FinancialRatiosController extends BaseController
 {
-    private function requireBaseComplianceAccess(): void
-    {
-        Auth::requireAuth();
-    }
-
     private function historyTableExists(): bool
     {
         try {
@@ -113,7 +108,7 @@ class FinancialRatiosController extends BaseController
 
     public function index(): void
     {
-        $this->requireBaseComplianceAccess();
+        Auth::requireAuth();
         $orgId = Auth::organizationId();
         $this->ensureSeededData($orgId);
 
@@ -219,7 +214,6 @@ class FinancialRatiosController extends BaseController
 
     public function updateCategory(): void
     {
-        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $catId = (int) ($_POST['category_id'] ?? 0);
@@ -273,7 +267,6 @@ class FinancialRatiosController extends BaseController
 
     public function saveReminder(): void
     {
-        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         if (!$this->reminderTableExists()) {
             $_SESSION['flash_error'] = 'Reminder feature requires DB migration (financial_ratio_category_reminders).';
@@ -306,7 +299,6 @@ class FinancialRatiosController extends BaseController
 
     public function clearReminder(): void
     {
-        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         if (!$this->reminderTableExists()) {
             $this->redirect('/financial-ratios');
@@ -321,7 +313,6 @@ class FinancialRatiosController extends BaseController
 
     public function downloadTemplate(): void
     {
-        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         $filename = 'financial_ratios_template.csv';
         header('Content-Type: text/csv; charset=utf-8');
@@ -335,7 +326,6 @@ class FinancialRatiosController extends BaseController
 
     public function uploadForm(): void
     {
-        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         $this->view('financial-ratios/upload', [
             'currentPage' => 'financial-ratios',
@@ -347,7 +337,6 @@ class FinancialRatiosController extends BaseController
 
     public function upload(): void
     {
-        $this->requireBaseComplianceAccess();
         Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
@@ -431,5 +420,56 @@ class FinancialRatiosController extends BaseController
         fclose($fh);
         $_SESSION['flash_success'] = $n ? "Updated $n ratio row(s)." : 'No valid rows imported.';
         $this->redirect('/financial-ratios');
+    }
+
+    public function uploadSingleRatio(int $ratioId): void
+    {
+        Auth::requireRole('admin');
+        $orgId    = Auth::organizationId();
+        $returnTab = preg_replace('/[^a-z\-]/', '', $_POST['return_tab'] ?? 'overview');
+
+        $stmt = $this->db->prepare('SELECT * FROM financial_ratios WHERE id = ? AND organization_id = ?');
+        $stmt->execute([$ratioId, $orgId]);
+        $ratio = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$ratio) {
+            $_SESSION['flash_error'] = 'Ratio not found.';
+            $this->redirect('/financial-ratios?tab=' . urlencode($returnTab));
+        }
+
+        $val  = trim($_POST['current_value'] ?? '');
+        $st   = strtolower(trim($_POST['status'] ?? 'compliant'));
+        $asOf = trim($_POST['updated_at'] ?? '') ?: date('Y-m-d');
+        if (!in_array($st, ['compliant', 'watch', 'non_compliant'], true)) $st = 'compliant';
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $asOf)) $asOf = date('Y-m-d');
+
+        if ($val === '') {
+            $_SESSION['flash_error'] = 'Value is required.';
+            $this->redirect('/financial-ratios?tab=' . urlencode($returnTab));
+        }
+
+        // Handle optional document upload
+        if (!empty($_FILES['document']['name']) && (int)$_FILES['document']['error'] === UPLOAD_ERR_OK) {
+            $ext     = strtolower(pathinfo($_FILES['document']['name'], PATHINFO_EXTENSION));
+            $allowed = ['pdf','doc','docx','xlsx','xls','csv','txt'];
+            if (in_array($ext, $allowed, true) && $_FILES['document']['size'] <= 10 * 1024 * 1024) {
+                $dir = rtrim($this->appConfig['upload_path'] ?? (dirname(__DIR__, 2) . '/public/uploads'), '/') . '/financial_ratios';
+                if (!is_dir($dir)) @mkdir($dir, 0755, true);
+                $fn   = 'fr_' . $ratioId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+                @move_uploaded_file($_FILES['document']['tmp_name'], $dir . '/' . $fn);
+            }
+        }
+
+        // Update the ratio
+        $this->db->prepare('UPDATE financial_ratios SET current_value=?, status=?, updated_at=? WHERE id=? AND organization_id=?')
+            ->execute([$val, $st, $asOf, $ratioId, $orgId]);
+
+        // Log to history
+        if ($this->historyTableExists()) {
+            $this->db->prepare('INSERT INTO financial_ratio_upload_history (ratio_id, value, status, uploaded_at, uploaded_by) VALUES (?,?,?,?,?)')
+                ->execute([$ratioId, $val, $st, $asOf, Auth::id()]);
+        }
+
+        $_SESSION['flash_success'] = 'Ratio "' . htmlspecialchars($ratio['name']) . '" updated successfully.';
+        $this->redirect('/financial-ratios?tab=' . urlencode($returnTab));
     }
 }

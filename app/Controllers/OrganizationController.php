@@ -7,41 +7,6 @@ use App\Core\Mailer;
 
 class OrganizationController extends BaseController
 {
-    /** @return string[] */
-    private function departmentOptions(): array
-    {
-        $defaults = ['Compliance', 'Finance', 'Legal', 'Operations', 'Risk', 'IT', 'HR'];
-        $opts = $defaults;
-        try {
-            $stmt = $this->db->prepare('SELECT DISTINCT department FROM users WHERE organization_id = ? AND department IS NOT NULL AND TRIM(department) <> "" ORDER BY department');
-            $stmt->execute([Auth::organizationId()]);
-            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $d) {
-                $d = trim((string) $d);
-                if ($d !== '' && !in_array($d, $opts, true)) {
-                    $opts[] = $d;
-                }
-            }
-        } catch (\Throwable $e) {
-            // keep defaults only
-        }
-        sort($opts, SORT_NATURAL | SORT_FLAG_CASE);
-        return $opts;
-    }
-
-    private function normalizedDepartmentOrEmpty(string $dept): string
-    {
-        $dept = trim($dept);
-        if ($dept === '') {
-            return '';
-        }
-        foreach ($this->departmentOptions() as $opt) {
-            if (strcasecmp($opt, $dept) === 0) {
-                return $opt;
-            }
-        }
-        return '';
-    }
-
     private function orgExtended(): bool
     {
         static $x;
@@ -194,27 +159,6 @@ class OrganizationController extends BaseController
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
-    private function pendingInviteById(int $inviteId, int $orgId): ?array
-    {
-        if ($inviteId <= 0) {
-            return null;
-        }
-        if ($this->inviteHasExtraColumns()) {
-            $sql = 'SELECT i.id, i.email, i.expires_at, i.created_at, i.role_id, r.slug AS role_slug, r.name AS role_name, i.full_name, i.department
-                FROM organization_invites i INNER JOIN roles r ON r.id = i.role_id
-                WHERE i.id = ? AND i.organization_id = ? AND i.accepted_at IS NULL LIMIT 1';
-        } else {
-            $sql = 'SELECT i.id, i.email, i.expires_at, i.created_at, i.role_id, r.slug AS role_slug, r.name AS role_name, NULL AS full_name, NULL AS department
-                FROM organization_invites i INNER JOIN roles r ON r.id = i.role_id
-                WHERE i.id = ? AND i.organization_id = ? AND i.accepted_at IS NULL LIMIT 1';
-        }
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute([$inviteId, $orgId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-
-        return $row ?: null;
-    }
-
     private function saveLogo(int $orgId): ?string
     {
         if (empty($_FILES['logo']['tmp_name']) || !is_uploaded_file($_FILES['logo']['tmp_name'])) {
@@ -312,8 +256,6 @@ class OrganizationController extends BaseController
         }
 
         $roles = $this->db->query('SELECT id, name, slug FROM roles WHERE slug IN (\'admin\',\'maker\',\'reviewer\',\'approver\') ORDER BY FIELD(slug,\'admin\',\'maker\',\'reviewer\',\'approver\')')->fetchAll(\PDO::FETCH_ASSOC);
-        $editInviteId = (int) ($_GET['edit'] ?? 0);
-        $editInvite = $this->pendingInviteById($editInviteId, $orgId);
 
         $this->view('organization/invite', [
             'currentPage' => 'organization',
@@ -324,8 +266,6 @@ class OrganizationController extends BaseController
             'stepper' => $stepper,
             'onboardingStep' => $step,
             'rolesForInvite' => $roles,
-            'departmentOptions' => $this->departmentOptions(),
-            'editInvite' => $editInvite,
         ]);
     }
 
@@ -446,7 +386,7 @@ class OrganizationController extends BaseController
         $orgId = Auth::organizationId();
         $fname = trim($_POST['invite_full_name'] ?? '');
         $mail = trim($_POST['invite_email'] ?? '');
-        $dept = $this->normalizedDepartmentOrEmpty((string) ($_POST['invite_department'] ?? ''));
+        $dept = trim($_POST['invite_department'] ?? '');
         $roleSlug = strtolower(trim($_POST['invite_role'] ?? ''));
 
         if ($fname === '') {
@@ -482,68 +422,13 @@ class OrganizationController extends BaseController
                 $this->db->prepare('INSERT INTO organization_invites (organization_id, email, token, role_id, expires_at, created_by) VALUES (?,?,?,?,?,?)')
                     ->execute([$orgId, $mail, $token, $roleId, $exp, Auth::id()]);
             }
-            $base = $this->publicAbsoluteBaseUrl();
+            $base = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
             $link = $base . '/invite/accept?token=' . urlencode($token);
             $this->finalizeInviteNotification($mail, $fname, $dept, $this->roleDisplayName($roleSlug), $link);
         } catch (\Throwable $e) {
             $_SESSION['flash_error'] = 'Could not send invitation. Try again.';
         }
         $this->redirect('/organization/invite');
-    }
-
-    public function updateInvite(): void
-    {
-        Auth::requireRole('admin');
-        $orgId = Auth::organizationId();
-        $inviteId = (int) ($_POST['invite_id'] ?? 0);
-        $fname = trim($_POST['invite_full_name'] ?? '');
-        $mail = trim($_POST['invite_email'] ?? '');
-        $dept = $this->normalizedDepartmentOrEmpty((string) ($_POST['invite_department'] ?? ''));
-        $roleSlug = strtolower(trim($_POST['invite_role'] ?? ''));
-
-        $existing = $this->pendingInviteById($inviteId, $orgId);
-        if (!$existing) {
-            $_SESSION['flash_error'] = 'Pending invite not found.';
-            $this->redirect('/organization');
-        }
-        if ($fname === '') {
-            $_SESSION['flash_error'] = 'Full name is required.';
-            $this->redirect('/organization/invite?edit=' . $inviteId);
-        }
-        if ($mail === '' || !filter_var($mail, FILTER_VALIDATE_EMAIL)) {
-            $_SESSION['flash_error'] = 'Valid email address is required.';
-            $this->redirect('/organization/invite?edit=' . $inviteId);
-        }
-        if (!in_array($roleSlug, ['admin', 'maker', 'reviewer', 'approver'], true)) {
-            $_SESSION['flash_error'] = 'Please select a role.';
-            $this->redirect('/organization/invite?edit=' . $inviteId);
-        }
-        $exists = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND LOWER(email) = LOWER(?)');
-        $exists->execute([$orgId, $mail]);
-        if ($exists->fetchColumn()) {
-            $_SESSION['flash_error'] = 'A user with this email already exists in your organization.';
-            $this->redirect('/organization/invite?edit=' . $inviteId);
-        }
-
-        $newToken = bin2hex(random_bytes(16));
-        $newExp = date('Y-m-d H:i:s', strtotime('+24 hours'));
-        $roleId = $this->roleIdForSlug($roleSlug);
-
-        try {
-            if ($this->inviteHasExtraColumns()) {
-                $this->db->prepare('UPDATE organization_invites SET full_name=?, department=?, email=?, token=?, role_id=?, expires_at=? WHERE id=? AND organization_id=? AND accepted_at IS NULL')
-                    ->execute([$fname, $dept ?: null, $mail, $newToken, $roleId, $newExp, $inviteId, $orgId]);
-            } else {
-                $this->db->prepare('UPDATE organization_invites SET email=?, token=?, role_id=?, expires_at=? WHERE id=? AND organization_id=? AND accepted_at IS NULL')
-                    ->execute([$mail, $newToken, $roleId, $newExp, $inviteId, $orgId]);
-            }
-            $base = $this->publicAbsoluteBaseUrl();
-            $link = $base . '/invite/accept?token=' . urlencode($newToken);
-            $this->finalizeInviteNotification($mail, $fname, $dept, $this->roleDisplayName($roleSlug), $link);
-        } catch (\Throwable $e) {
-            $_SESSION['flash_error'] = 'Could not update invitation. Try again.';
-        }
-        $this->redirect('/organization');
     }
 
     public function skipInvite(): void
@@ -578,7 +463,7 @@ class OrganizationController extends BaseController
         $token = bin2hex(random_bytes(16));
         $this->db->prepare('UPDATE organization_invites SET token = ?, expires_at = ? WHERE id = ? AND organization_id = ?')
             ->execute([$token, date('Y-m-d H:i:s', strtotime('+24 hours')), $id, $orgId]);
-        $base = $this->publicAbsoluteBaseUrl();
+        $base = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
         $link = $base . '/invite/accept?token=' . urlencode($token);
         $row = $this->loadPendingInviteForEmail($id, $orgId);
         if ($row) {

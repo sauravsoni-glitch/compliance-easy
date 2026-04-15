@@ -25,7 +25,8 @@ function am_flow_name(array $row, string $slot): string {
     return htmlspecialchars($t !== '' ? $t : ($row['approver_name'] ?? '—'));
 }
 $isSingle = function (array $r) {
-    return ($r['workflow_level'] ?? '') === 'Single-Level' || empty($r['reviewer_id']);
+    $wl = $r['workflow_level'] ?? '';
+    return $wl === 'two-level' || $wl === 'Single-Level' || empty($r['reviewer_id']);
 };
 $riskClass = function ($r) {
     $x = strtolower($r['risk_level'] ?? 'medium');
@@ -72,17 +73,29 @@ $riskLabel = function ($r) {
         </a>
     </div>
 
-    <div class="card am-filter-card">
-        <form method="get" action="<?= htmlspecialchars($basePath) ?>/authority-matrix" class="am-filters">
+    <div class="doa-filter-bar">
+        <form method="get" action="<?= htmlspecialchars($basePath) ?>/authority-matrix" class="doa-filter-bar-inner">
             <input type="hidden" name="view" value="<?= htmlspecialchars($view) ?>">
-            <input type="search" name="q" class="form-control am-search" placeholder="Search by compliance area, department, or owner…" value="<?= htmlspecialchars($filterQ ?? '') ?>">
-            <select name="dept" class="form-control">
-                <option value="">All Departments</option>
-                <?php foreach ($departmentOptions ?? [] as $d): ?>
-                <option value="<?= htmlspecialchars($d) ?>" <?= ($filterDept ?? '') === $d ? 'selected' : '' ?>><?= htmlspecialchars($d) ?></option>
-                <?php endforeach; ?>
-            </select>
-            <button type="submit" class="btn btn-secondary">Filter</button>
+            <!-- Search -->
+            <div class="doa-fb-group doa-fb-search">
+                <i class="fas fa-search doa-fb-ico"></i>
+                <input type="search" name="q" class="doa-fb-input" placeholder="Search compliance area, department, or owner…" value="<?= htmlspecialchars($filterQ ?? '') ?>">
+            </div>
+            <!-- Department -->
+            <div class="doa-fb-group">
+                <i class="fas fa-building doa-fb-ico"></i>
+                <select name="dept" class="doa-fb-select">
+                    <option value="">All Departments</option>
+                    <?php foreach ($departmentOptions ?? [] as $d): ?>
+                    <option value="<?= htmlspecialchars($d) ?>" <?= ($filterDept ?? '') === $d ? 'selected' : '' ?>><?= htmlspecialchars($d) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <!-- Actions -->
+            <div class="doa-fb-actions">
+                <button type="submit" class="doa-fb-btn-apply"><i class="fas fa-filter"></i> Apply</button>
+                <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix<?= $view !== 'cards' ? '?view=' . htmlspecialchars($view) : '' ?>" class="doa-fb-btn-reset" title="Clear filters"><i class="fas fa-times"></i></a>
+            </div>
         </form>
     </div>
 
@@ -133,7 +146,7 @@ $riskLabel = function ($r) {
             <div class="am-wf-actions">
                 <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix/view/<?= (int)$row['id'] ?>" class="btn btn-sm btn-outline">View</a>
                 <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix/edit/<?= (int)$row['id'] ?>" class="btn btn-sm btn-outline">Edit</a>
-                <form method="post" action="<?= htmlspecialchars($basePath) ?>/authority-matrix/delete/<?= (int)$row['id'] ?>" class="d-inline" data-app-confirm="Delete this workflow rule?"><button type="submit" class="btn btn-sm btn-link text-danger p-0 border-0 bg-transparent"><i class="fas fa-trash-alt"></i> Delete</button></form>
+                <form method="post" action="<?= htmlspecialchars($basePath) ?>/authority-matrix/delete/<?= (int)$row['id'] ?>" class="d-inline" onsubmit="return confirm('Delete this workflow rule?');"><button type="submit" class="btn btn-sm btn-link text-danger p-0 border-0 bg-transparent"><i class="fas fa-trash-alt"></i> Delete</button></form>
             </div>
         </div>
         <?php endforeach; ?>

@@ -160,13 +160,8 @@ function rp_status_label(string $status): string {
                                     <?php if ($u['status'] === 'pending'): ?>
                                     <span class="rp-dd-item rp-dd-muted">Status: invited (manage in Organization)</span>
                                     <?php else: ?>
-                                    <form method="post" action="<?= htmlspecialchars($basePath) ?>/roles-permissions/toggle-status/<?= (int)$u['id'] ?>" class="rp-dd-form" data-app-confirm="<?= htmlspecialchars($u['status'] === 'active' ? 'Deactivate this user? They will be logged out.' : 'Activate this user?', ENT_QUOTES, 'UTF-8') ?>">
+                                    <form method="post" action="<?= htmlspecialchars($basePath) ?>/roles-permissions/toggle-status/<?= (int)$u['id'] ?>" class="rp-dd-form" onsubmit="return confirm('<?= $u['status'] === 'active' ? 'Deactivate this user? They will be logged out.' : 'Activate this user?' ?>');">
                                         <button type="submit" class="rp-dd-item rp-dd-danger"><?= $u['status'] === 'active' ? 'Deactivate user' : 'Activate user' ?></button>
-                                    </form>
-                                    <?php endif; ?>
-                                    <?php if ((int)($u['id'] ?? 0) !== (int)($viewerId ?? 0)): ?>
-                                    <form method="post" action="<?= htmlspecialchars($basePath) ?>/roles-permissions/delete/<?= (int)$u['id'] ?>" class="rp-dd-form" data-app-confirm="<?= htmlspecialchars('Permanently delete this user from the organization? This cannot be undone.', ENT_QUOTES, 'UTF-8') ?>">
-                                        <button type="submit" class="rp-dd-item rp-dd-danger">Delete user</button>
                                     </form>
                                     <?php endif; ?>
                                 </div>

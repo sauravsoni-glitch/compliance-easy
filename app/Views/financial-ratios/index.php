@@ -42,7 +42,6 @@ function fr_row_badge(string $s): array {
     </div>
     <div class="fr-header-actions">
         <a href="<?= $basePath ?>/financial-ratios/download-template" class="btn btn-secondary"><i class="fas fa-download"></i> Download Template</a>
-        <a href="<?= $basePath ?>/financial-ratios/upload" class="btn btn-primary"><i class="fas fa-upload"></i> Upload Data</a>
     </div>
 </div>
 <?php if ($flashSuccess): ?><div class="alert alert-success"><?= htmlspecialchars($flashSuccess) ?></div><?php endif; ?>
@@ -156,11 +155,22 @@ $block = $bySlug[$activeTab] ?? null;
                 </div>
                 <p class="text-muted text-sm mb-0">Updated: <?= $r['updated_at'] ? date('Y-m-d', strtotime($r['updated_at'])) : '—' ?></p>
             </div>
-            <button type="button" class="btn btn-outline btn-sm fr-history-btn" data-title="<?= htmlspecialchars($r['name']) ?>"
-                data-limit="<?= htmlspecialchars($r['regulatory_limit']) ?>"
-                data-history-b64="<?= htmlspecialchars($histB64) ?>">
-                <i class="fas fa-history"></i> History
-            </button>
+            <div class="fr-ratio-actions">
+                <button type="button" class="btn btn-primary btn-sm fr-upload-btn"
+                    data-ratio-id="<?= $hid ?>"
+                    data-ratio-name="<?= htmlspecialchars($r['name']) ?>"
+                    data-ratio-limit="<?= htmlspecialchars($r['regulatory_limit']) ?>"
+                    data-current-value="<?= htmlspecialchars($r['current_value']) ?>"
+                    data-current-status="<?= htmlspecialchars($r['status'] ?? 'compliant') ?>"
+                    data-return-tab="<?= htmlspecialchars($activeTab) ?>">
+                    <i class="fas fa-upload"></i> Upload
+                </button>
+                <button type="button" class="btn btn-outline btn-sm fr-history-btn" data-title="<?= htmlspecialchars($r['name']) ?>"
+                    data-limit="<?= htmlspecialchars($r['regulatory_limit']) ?>"
+                    data-history-b64="<?= htmlspecialchars($histB64) ?>">
+                    <i class="fas fa-history"></i> History
+                </button>
+            </div>
         </div>
         <?php endforeach; ?>
     </div>
@@ -244,7 +254,7 @@ $block = $bySlug[$activeTab] ?? null;
         </form>
         <div class="modal-footer" style="padding:1rem 1.25rem;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;justify-content:space-between;">
             <?php if ($rem): ?>
-            <form method="post" action="<?= htmlspecialchars($basePath) ?>/financial-ratios/clear-reminder" style="margin:0;" data-app-confirm="Remove this reminder?">
+            <form method="post" action="<?= htmlspecialchars($basePath) ?>/financial-ratios/clear-reminder" style="margin:0;" onsubmit="return confirm('Remove this reminder?');">
                 <input type="hidden" name="category_id" value="<?= $cid ?>">
                 <input type="hidden" name="return_tab" value="<?= htmlspecialchars($activeTab) ?>">
                 <button type="submit" class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);">Remove reminder</button>
@@ -261,6 +271,57 @@ $block = $bySlug[$activeTab] ?? null;
 
 <?php endif; /* block */ ?>
 <?php endif; ?>
+
+<!-- Per-ratio Upload Modal -->
+<div id="fr-upload-modal" class="modal-overlay compliance-modal" style="display:none;" aria-hidden="true">
+    <div class="modal fr-upload-modal-inner" role="dialog" aria-labelledby="fr-upload-title">
+        <div class="modal-header">
+            <div>
+                <h2 class="modal-title" id="fr-upload-title">Upload Ratio Value</h2>
+                <p class="text-muted text-sm mb-0" id="fr-upload-limit"></p>
+            </div>
+            <button type="button" class="modal-close" id="fr-upload-close" aria-label="Close">&times;</button>
+        </div>
+        <form method="post" id="fr-upload-form" action="<?= htmlspecialchars($basePath) ?>/financial-ratios/upload-single/0" enctype="multipart/form-data">
+            <input type="hidden" name="ratio_id" id="fr-upload-ratio-id" value="">
+            <input type="hidden" name="return_tab" id="fr-upload-return-tab" value="<?= htmlspecialchars($activeTab) ?>">
+            <div class="modal-body">
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label">New Value <span class="text-danger">*</span></label>
+                        <input type="text" name="current_value" id="fr-upload-value" class="form-control" required placeholder="e.g. 14.5%">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Status <span class="text-danger">*</span></label>
+                        <select name="status" id="fr-upload-status" class="form-control">
+                            <option value="compliant">Compliant</option>
+                            <option value="watch">Watch</option>
+                            <option value="non_compliant">Non-Compliant</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">As of Date</label>
+                    <input type="date" name="updated_at" class="form-control" value="<?= date('Y-m-d') ?>">
+                </div>
+                <div class="form-group mb-0">
+                    <label class="form-label">Supporting Document <span class="text-muted">(optional)</span></label>
+                    <div class="ci-dropzone fr-upload-dz" id="fr-upload-dz">
+                        <input type="file" name="document" id="fr-upload-file" class="ci-file-input" accept=".pdf,.doc,.docx,.xlsx,.xls,.csv,.txt">
+                        <i class="fas fa-cloud-upload-alt ci-drop-ico" style="font-size:1.5rem;"></i>
+                        <p class="mb-0 text-sm"><strong>Click to upload</strong> or drag and drop</p>
+                        <p class="text-muted text-sm mb-0">PDF, DOC, XLSX, CSV — Max 10MB</p>
+                        <span id="fr-upload-fname" class="ci-file-name"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:1rem 1.25rem;border-top:1px solid var(--border);display:flex;gap:0.5rem;justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" id="fr-upload-cancel">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-upload"></i> Upload</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <div id="fr-history-modal" class="modal-overlay compliance-modal" style="display:none;" aria-hidden="true">
     <div class="modal fr-history-modal-inner" role="dialog">
@@ -381,5 +442,72 @@ $block = $bySlug[$activeTab] ?? null;
             if (el && el.style.display === 'flex') closeModal(id);
         });
     });
+})();
+// Per-ratio upload modal
+(function(){
+    var modal   = document.getElementById('fr-upload-modal');
+    var form    = document.getElementById('fr-upload-form');
+    var ridInp  = document.getElementById('fr-upload-ratio-id');
+    var title   = document.getElementById('fr-upload-title');
+    var limitEl = document.getElementById('fr-upload-limit');
+    var valInp  = document.getElementById('fr-upload-value');
+    var stSel   = document.getElementById('fr-upload-status');
+    var dz      = document.getElementById('fr-upload-dz');
+    var fi      = document.getElementById('fr-upload-file');
+    var fname   = document.getElementById('fr-upload-fname');
+    var basePath = '<?= htmlspecialchars($basePath) ?>';
+
+    function openUpload(btn) {
+        var rid   = btn.getAttribute('data-ratio-id');
+        var name  = btn.getAttribute('data-ratio-name');
+        var limit = btn.getAttribute('data-ratio-limit');
+        var val   = btn.getAttribute('data-current-value');
+        var st    = btn.getAttribute('data-current-status');
+        var tab   = btn.getAttribute('data-return-tab');
+
+        title.textContent    = 'Upload — ' + name;
+        limitEl.textContent  = 'Regulatory limit: ' + limit;
+        ridInp.value         = rid;
+        valInp.value         = val;
+        stSel.value          = st;
+        document.getElementById('fr-upload-return-tab').value = tab;
+        form.action          = basePath + '/financial-ratios/upload-single/' + rid;
+        fname.textContent    = '';
+        if (fi) fi.value = '';
+
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+        setTimeout(function(){ valInp.focus(); }, 80);
+    }
+
+    function closeUpload() {
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+    }
+
+    document.querySelectorAll('.fr-upload-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() { openUpload(this); });
+    });
+
+    document.getElementById('fr-upload-close').addEventListener('click', closeUpload);
+    document.getElementById('fr-upload-cancel').addEventListener('click', closeUpload);
+    modal.addEventListener('click', function(e) { if (e.target === modal) closeUpload(); });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && modal.style.display === 'flex') closeUpload();
+    });
+
+    // Dropzone
+    if (dz && fi) {
+        dz.addEventListener('click', function(e){ if (e.target !== fi) fi.click(); });
+        fi.addEventListener('change', function(){ fname.textContent = this.files[0] ? this.files[0].name : ''; });
+        dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('dragover'); });
+        dz.addEventListener('dragleave', function(){ dz.classList.remove('dragover'); });
+        dz.addEventListener('drop', function(e){
+            e.preventDefault(); dz.classList.remove('dragover');
+            if (e.dataTransfer.files.length){ fi.files = e.dataTransfer.files; fname.textContent = fi.files[0].name; }
+        });
+    }
 })();
 </script>

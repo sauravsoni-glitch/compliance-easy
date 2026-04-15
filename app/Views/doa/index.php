@@ -15,13 +15,7 @@ $qBase = function (array $extra = []) use ($basePath, $filterQ, $filterDept, $fi
 function doa_limit_disp(array $l): string {
     return \App\Controllers\DoaController::formatLimit($l);
 }
-$deptMeta = [
-    'Finance' => ['icon' => 'fa-coins', 'slug' => 'finance'],
-    'HR & Admin' => ['icon' => 'fa-users', 'slug' => 'hr-admin'],
-    'Loan Processing' => ['icon' => 'fa-hand-holding-dollar', 'slug' => 'loan'],
-    'Operations' => ['icon' => 'fa-gears', 'slug' => 'operations'],
-    'Procurement' => ['icon' => 'fa-cart-shopping', 'slug' => 'procurement'],
-];
+$deptIcons = ['Finance' => 'fa-coins', 'Operations' => 'fa-cogs', 'Loan Processing' => 'fa-hand-holding-usd', 'Procurement' => 'fa-shopping-cart', 'HR & Admin' => 'fa-users'];
 ?>
 <div class="doa-page">
     <div class="page-header doa-head">
@@ -30,13 +24,11 @@ $deptMeta = [
             <p class="page-subtitle">Manage monetary approval limits and financial delegation hierarchy across departments.</p>
             <div class="doa-subnav">
                 <a href="<?= htmlspecialchars($basePath) ?>/doa" class="doa-subnav-item <?= ($currentPage ?? '') === 'doa' ? 'active' : '' ?>"><i class="fas fa-th-large"></i> Dashboard</a>
-                <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix" class="doa-subnav-item"><i class="fas fa-th"></i> Authority Matrix</a>
             </div>
         </div>
         <?php if ($isAdmin): ?>
         <div class="doa-head-btns">
             <a href="<?= htmlspecialchars($basePath) ?>/doa/create" class="btn btn-primary"><i class="fas fa-plus"></i> Add Authority Rule</a>
-            <button type="button" class="btn btn-secondary" onclick="document.getElementById('doa-bulk-modal').style.display='flex'"><i class="fas fa-file-upload"></i> Upload DOA Matrix</button>
         </div>
         <?php endif; ?>
     </div>
@@ -57,37 +49,61 @@ $deptMeta = [
             <div><div class="doa-kpi-val"><?= (int)($temporary ?? 0) ?></div><div class="doa-kpi-lbl">Temporary Delegations</div></div>
         </div>
         <div class="doa-kpi doa-kpi-blue">
-            <div class="doa-kpi-ico" aria-hidden="true"><i class="fas fa-money-bill-wave"></i></div>
+            <div class="doa-kpi-ico"><i class="fas fa-rupee-sign"></i></div>
             <div><div class="doa-kpi-val"><?= htmlspecialchars($maxApprovalSlabDisplay ?? '') ?></div><div class="doa-kpi-lbl">Maximum Approval Slab</div></div>
         </div>
     </div>
 
-    <div class="card doa-filter-card">
-        <form method="get" action="<?= htmlspecialchars($basePath) ?>/doa" class="doa-filters">
+    <div class="doa-filter-bar">
+        <form method="get" action="<?= htmlspecialchars($basePath) ?>/doa" class="doa-filter-bar-inner">
             <input type="hidden" name="view" value="<?= htmlspecialchars($view) ?>">
-            <input type="search" name="q" class="form-control doa-search-main" placeholder="Search by department or role..." value="<?= htmlspecialchars($filterQ ?? '') ?>">
-            <select name="dept" class="form-control">
-                <option value="">All Departments</option>
-                <?php foreach ($departments ?? [] as $d): ?>
-                <option value="<?= htmlspecialchars($d) ?>" <?= ($filterDept ?? '') === $d ? 'selected' : '' ?>><?= htmlspecialchars($d) ?></option>
-                <?php endforeach; ?>
-            </select>
-            <input type="text" name="role" class="form-control" placeholder="Role filter" value="<?= htmlspecialchars($filterRole ?? '') ?>">
+            <!-- Search -->
+            <div class="doa-fb-group doa-fb-search">
+                <i class="fas fa-search doa-fb-ico"></i>
+                <input type="search" name="q" class="doa-fb-input" placeholder="Search department or role…" value="<?= htmlspecialchars($filterQ ?? '') ?>">
+            </div>
+            <!-- Department -->
+            <div class="doa-fb-group">
+                <i class="fas fa-building doa-fb-ico"></i>
+                <select name="dept" class="doa-fb-select">
+                    <option value="">All Departments</option>
+                    <?php foreach ($departments ?? [] as $d): ?>
+                    <option value="<?= htmlspecialchars($d) ?>" <?= ($filterDept ?? '') === $d ? 'selected' : '' ?>><?= htmlspecialchars($d) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <!-- Role -->
+            <div class="doa-fb-group">
+                <i class="fas fa-user-tag doa-fb-ico"></i>
+                <input type="text" name="role" class="doa-fb-input" placeholder="Filter by role…" value="<?= htmlspecialchars($filterRole ?? '') ?>">
+            </div>
             <?php if (!empty($extended)): ?>
-            <select name="approval_type" class="form-control">
-                <option value="">All approval types</option>
-                <?php foreach (array_unique(array_merge($approvalTypes ?? [], ['Expense Approval', 'Loan Approval', 'Procurement'])) as $t): ?>
-                <option value="<?= htmlspecialchars($t) ?>" <?= ($filterType ?? '') === $t ? 'selected' : '' ?>><?= htmlspecialchars($t) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <!-- Approval Type -->
+            <div class="doa-fb-group">
+                <i class="fas fa-stamp doa-fb-ico"></i>
+                <select name="approval_type" class="doa-fb-select">
+                    <option value="">All Types</option>
+                    <?php foreach (array_unique(array_merge($approvalTypes ?? [], ['Expense Approval', 'Loan Approval', 'Procurement'])) as $t): ?>
+                    <option value="<?= htmlspecialchars($t) ?>" <?= ($filterType ?? '') === $t ? 'selected' : '' ?>><?= htmlspecialchars($t) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
             <?php endif; ?>
-            <select name="status" class="form-control">
-                <option value="">All Statuses</option>
-                <option value="active" <?= ($filterStatus ?? '') === 'active' ? 'selected' : '' ?>>Active</option>
-                <option value="temporary" <?= ($filterStatus ?? '') === 'temporary' ? 'selected' : '' ?>>Temporary</option>
-                <option value="inactive" <?= ($filterStatus ?? '') === 'inactive' ? 'selected' : '' ?>>Inactive</option>
-            </select>
-            <button type="submit" class="btn btn-secondary">Apply</button>
+            <!-- Status -->
+            <div class="doa-fb-group">
+                <i class="fas fa-circle doa-fb-ico doa-fb-ico-status"></i>
+                <select name="status" class="doa-fb-select">
+                    <option value="">All Statuses</option>
+                    <option value="active"    <?= ($filterStatus ?? '') === 'active'    ? 'selected' : '' ?>>Active</option>
+                    <option value="temporary" <?= ($filterStatus ?? '') === 'temporary' ? 'selected' : '' ?>>Temporary</option>
+                    <option value="inactive"  <?= ($filterStatus ?? '') === 'inactive'  ? 'selected' : '' ?>>Inactive</option>
+                </select>
+            </div>
+            <!-- Actions -->
+            <div class="doa-fb-actions">
+                <button type="submit" class="doa-fb-btn-apply"><i class="fas fa-filter"></i> Apply</button>
+                <a href="<?= htmlspecialchars($basePath) ?>/doa<?= $view !== 'dashboard' ? '?view=' . htmlspecialchars($view) : '' ?>" class="doa-fb-btn-reset" title="Clear filters"><i class="fas fa-times"></i></a>
+            </div>
         </form>
     </div>
 
@@ -101,19 +117,12 @@ $deptMeta = [
         <?php foreach ($byDept ?? [] as $dept => $levels):
             $st = $levels[0]['status'] ?? 'active';
             $exp = $levels[0]['expires_at'] ?? null;
-            $dm = $deptMeta[$dept] ?? null;
-            if ($dm) {
-                $ico = $dm['icon'];
-                $icoMod = $dm['slug'];
-            } else {
-                $ico = 'fa-building';
-                $icoMod = 'default';
-            }
+            $ico = $deptIcons[$dept] ?? 'fa-building';
         ?>
         <div class="doa-dept-card">
             <div class="doa-dept-head">
                 <div class="doa-dept-title">
-                    <span class="doa-dept-ico doa-dept-ico--<?= htmlspecialchars($icoMod) ?>" title="<?= htmlspecialchars($dept) ?>"><i class="fas <?= htmlspecialchars($ico) ?>" aria-hidden="true"></i></span>
+                    <span class="doa-dept-ico"><i class="fas <?= htmlspecialchars($ico) ?>"></i></span>
                     <h3><?= htmlspecialchars($dept) ?></h3>
                 </div>
                 <div class="doa-dept-badges">
@@ -140,7 +149,7 @@ $deptMeta = [
                         <a href="<?= htmlspecialchars($basePath) ?>/doa/view/<?= (int)$l['id'] ?>">View</a>
                         <?php if ($isAdmin): ?>
                         <a href="<?= htmlspecialchars($basePath) ?>/doa/edit/<?= (int)$l['id'] ?>">Edit</a>
-                        <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/delete/<?= (int)$l['id'] ?>" class="d-inline" data-app-confirm="Delete this level?"><button type="submit" class="btn-link text-danger p-0 border-0 bg-transparent">Delete</button></form>
+                        <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/delete/<?= (int)$l['id'] ?>" class="d-inline" onsubmit="return confirm('Delete this level?');"><button type="submit" class="btn-link text-danger p-0 border-0 bg-transparent">Delete</button></form>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -186,7 +195,7 @@ $deptMeta = [
                             <?php if ($isAdmin): ?>
                             <a href="<?= htmlspecialchars($basePath) ?>/doa/edit/<?= (int)$r['id'] ?>" class="btn btn-sm btn-outline">Edit</a>
                             <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/toggle/<?= (int)$r['id'] ?>" class="d-inline"><?php if (($r['status'] ?? '') !== 'temporary'): ?><button type="submit" class="btn btn-sm btn-secondary"><?= ($r['status'] ?? '') === 'active' ? 'Deactivate' : 'Activate' ?></button><?php endif; ?></form>
-                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/delete/<?= (int)$r['id'] ?>" class="d-inline" data-app-confirm="Delete this rule?"><button type="submit" class="btn btn-sm btn-outline text-danger">Delete</button></form>
+                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/delete/<?= (int)$r['id'] ?>" class="d-inline" onsubmit="return confirm('Delete this rule?');"><button type="submit" class="btn btn-sm btn-outline text-danger">Delete</button></form>
                             <?php endif; ?>
                         </td>
                     </tr>
@@ -198,20 +207,3 @@ $deptMeta = [
     <?php endif; ?>
 </div>
 
-<?php if ($isAdmin): ?>
-<div id="doa-bulk-modal" class="modal-overlay compliance-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
-    <div class="modal" style="max-width:520px;" onclick="event.stopPropagation()">
-        <div class="modal-header">
-            <h2 class="modal-title">Upload DOA Matrix (CSV)</h2>
-            <button type="button" class="modal-close" onclick="document.getElementById('doa-bulk-modal').style.display='none'">&times;</button>
-        </div>
-        <form method="post" action="<?= htmlspecialchars($basePath) ?>/doa/bulk-upload" enctype="multipart/form-data" class="modal-body">
-            <p class="text-sm text-muted">Columns: <code>Department, Level, Role, ApprovalType, MinAmount, MaxAmount</code> (use <code>Unlimited</code> for max), <code>Conditions, Status</code></p>
-            <div class="form-group">
-                <input type="file" name="file" class="form-control" accept=".csv,.txt" required>
-            </div>
-            <button type="submit" class="btn btn-primary">Import</button>
-        </form>
-    </div>
-</div>
-<?php endif; ?>

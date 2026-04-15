@@ -2,33 +2,68 @@
 namespace App\Controllers;
 
 use App\Core\Auth;
-use App\Core\AutomationLog;
 use App\Core\BaseController;
-use App\Core\ComplianceCreatedMailReport;
-use App\Core\EmailTemplateVars;
-use App\Core\Mailer;
 
 class ComplianceController extends BaseController
 {
+    private function ensureOverdueRemarkColumns(): void
+    {
+        static $done = false;
+        if ($done) return;
+        try {
+            $this->db->query('SELECT overdue_remark FROM compliances LIMIT 1');
+        } catch (\Throwable $e) {
+            try {
+                $this->db->exec("
+                    ALTER TABLE `compliances`
+                      ADD COLUMN IF NOT EXISTS `overdue_remark` text DEFAULT NULL,
+                      ADD COLUMN IF NOT EXISTS `overdue_remark_by` int unsigned DEFAULT NULL,
+                      ADD COLUMN IF NOT EXISTS `overdue_remark_at` datetime DEFAULT NULL
+                ");
+            } catch (\Throwable $ignored) {}
+        }
+        $done = true;
+    }
+
+    public function saveOverdueRemark(int $id): void
+    {
+        Auth::requireAuth();
+        $orgId = Auth::organizationId();
+        $this->ensureOverdueRemarkColumns();
+
+        $c = $this->loadCompliance($id, $orgId);
+        if (!$c || !Auth::canAccessCompliance($c)) {
+            $_SESSION['flash_error'] = 'Compliance not found or access denied.';
+            $this->redirect('/compliance');
+        }
+
+        $remark = trim($_POST['overdue_remark'] ?? '');
+        if ($remark === '') {
+            $_SESSION['flash_error'] = 'Remark cannot be empty.';
+            $this->redirect('/compliance/view/' . $id . '?tab=overview');
+        }
+
+        try {
+            $this->db->prepare(
+                'UPDATE compliances SET overdue_remark = ?, overdue_remark_by = ?, overdue_remark_at = NOW() WHERE id = ? AND organization_id = ?'
+            )->execute([$remark, Auth::id(), $id, $orgId]);
+        } catch (\Throwable $e) {
+            // Column may not exist yet in edge case
+            $_SESSION['flash_error'] = 'Could not save remark. Please try again.';
+            $this->redirect('/compliance/view/' . $id . '?tab=overview');
+        }
+
+        $_SESSION['flash_success'] = 'Overdue remark saved.';
+        $this->redirect('/compliance/view/' . $id . '?tab=overview');
+    }
+
     private function getAuthorityOptions(): array
     {
-        $stmt = $this->db->query('SELECT id, name FROM authorities ORDER BY id ASC');
-        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-        $seen = [];
-        $out = [];
-        foreach ($rows as $r) {
-            $key = mb_strtolower(trim((string)($r['name'] ?? '')));
-            if ($key === '' || isset($seen[$key])) {
-                continue;
-            }
-            $seen[$key] = true;
-            $out[] = $r;
-        }
-        usort($out, static function (array $a, array $b): int {
-            return strcasecmp((string)$a['name'], (string)$b['name']);
-        });
-
-        return $out;
+        // Ensure IRDAI exists (idempotent)
+        $exists = $this->db->query("SELECT COUNT(*) FROM authorities WHERE name = 'IRDAI'")->fetchColumn();
+        if (!$exists) { $this->db->exec("INSERT INTO authorities (name) VALUES ('IRDAI')"); }
+        $stmt = $this->db->query('SELECT id, name FROM authorities ORDER BY name');
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     private function getUserOptions(): array
@@ -36,179 +71,6 @@ class ComplianceController extends BaseController
         $stmt = $this->db->prepare('SELECT id, full_name FROM users WHERE organization_id = ? AND status = ? ORDER BY full_name');
         $stmt->execute([Auth::organizationId(), 'active']);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
-    }
-
-    /**
-     * Subject/body for "compliance created" workflow mail. Template id t8 in Settings → Notification templates.
-     *
-     * @return array{send: bool, subject: string, body: string}
-     */
-    private function complianceCreatedMailTemplate(int $orgId): array
-    {
-        $defaults = [
-            'subject' => 'New compliance created: {{Compliance_ID}}',
-            'body' => "Hello — a new compliance item was created. The full structured summary is in the email below.",
-        ];
-        $out = ['send' => true, 'subject' => $defaults['subject'], 'body' => $defaults['body']];
-        try {
-            $stmt = $this->db->prepare('SELECT value FROM settings WHERE organization_id = ? AND key_name = ?');
-            $stmt->execute([$orgId, 'ui_email_templates']);
-            $v = $stmt->fetchColumn();
-            if ($v === false || $v === null || $v === '') {
-                return $out;
-            }
-            $d = json_decode((string) $v, true);
-            if (!is_array($d) || empty($d['list']) || !is_array($d['list'])) {
-                return $out;
-            }
-            foreach ($d['list'] as $item) {
-                if (!is_array($item) || ($item['id'] ?? '') !== 't8') {
-                    continue;
-                }
-                if (array_key_exists('enabled', $item) && !$item['enabled']) {
-                    $out['send'] = false;
-
-                    return $out;
-                }
-                $sub = trim((string) ($item['subject'] ?? ''));
-                $bod = trim((string) ($item['body'] ?? ''));
-                if ($sub !== '') {
-                    $out['subject'] = $sub;
-                }
-                if ($bod !== '') {
-                    $out['body'] = $bod;
-                }
-
-                return $out;
-            }
-        } catch (\Throwable $e) {
-            // keep defaults
-        }
-
-        return $out;
-    }
-
-    /**
-     * Mailgun: notify owner, reviewer, and approver (distinct emails) after create.
-     * HTML body is a structured summary; plain part includes intro + full text report.
-     */
-    private function notifyComplianceWorkflowCreated(
-        int $orgId,
-        int $complianceId,
-        int $ownerId,
-        ?int $reviewerId,
-        ?int $approverId,
-        string $complianceCode,
-        string $title,
-        ?string $dueDateRaw,
-        string $department
-    ): void {
-        $tpl = $this->complianceCreatedMailTemplate($orgId);
-        if (!$tpl['send']) {
-            return;
-        }
-        $ids = array_values(array_unique(array_filter([
-            $ownerId,
-            $reviewerId ? (int) $reviewerId : 0,
-            $approverId ? (int) $approverId : 0,
-        ], static function ($v) {
-            return (int) $v > 0;
-        })));
-        if ($ids === []) {
-            return;
-        }
-        $ph = implode(',', array_fill(0, count($ids), '?'));
-        $sql = "SELECT email, full_name FROM users WHERE organization_id = ? AND id IN ($ph) AND email IS NOT NULL AND TRIM(email) <> ''";
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute(array_merge([$orgId], $ids));
-        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-        $recipients = [];
-        $seen = [];
-        foreach ($rows as $row) {
-            $email = trim((string) ($row['email'] ?? ''));
-            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                continue;
-            }
-            $key = strtolower($email);
-            if (isset($seen[$key])) {
-                continue;
-            }
-            $seen[$key] = true;
-            $recipients[] = ['email' => $email, 'name' => (string) ($row['full_name'] ?? '')];
-        }
-        if ($recipients === []) {
-            return;
-        }
-        $dueFmt = $dueDateRaw ? date('M j, Y', strtotime($dueDateRaw)) : '—';
-        $creationFmt = date('M j, Y g:i A');
-        $vars = [
-            'Compliance_ID' => $complianceCode,
-            'Compliance_Title' => $title,
-            'Department' => $department,
-            'Due_Date' => $dueFmt,
-            'Creation_Date' => $creationFmt,
-        ];
-        $subject = EmailTemplateVars::replace($tpl['subject'], $vars);
-        $intro = trim(EmailTemplateVars::replace($tpl['body'], $vars));
-        if ($intro === '') {
-            $intro = 'A new compliance item has been created and you are on the workflow.';
-        }
-
-        $row = $this->loadComplianceRowForCreatedMail($complianceId, $orgId);
-        if ($row === null) {
-            $plain = $intro . "\n\n" . "ID: {$complianceCode}\nTitle: {$title}\nDepartment: {$department}\nDue: {$dueFmt}\nCreated: {$creationFmt}";
-            $send = Mailer::sendComplianceCreatedToRecipients($this->appConfig, $recipients, $subject, $plain);
-        } else {
-            $snapshot = ComplianceCreatedMailReport::fromDatabaseRow($row);
-            $plain = $intro . "\n\n" . ComplianceCreatedMailReport::buildPlainText($snapshot);
-            $html = ComplianceCreatedMailReport::buildHtmlEmail($snapshot);
-            $send = Mailer::sendComplianceCreatedToRecipients(
-                $this->appConfig,
-                $recipients,
-                $subject,
-                $plain,
-                $html
-            );
-        }
-        $logRows = [];
-        foreach ($send['results'] as $r) {
-            $logRows[] = [
-                'cid' => $complianceCode,
-                'title' => $title,
-                'dept' => $department,
-                'rtype' => 'Creation',
-                'to' => (string) ($r['name'] ?? ''),
-                'cc' => '',
-                'dt' => date('Y-m-d H:i'),
-                'ok' => !empty($r['ok']),
-            ];
-        }
-        AutomationLog::appendEntries($this->db, $orgId, $logRows);
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function loadComplianceRowForCreatedMail(int $complianceId, int $orgId): ?array
-    {
-        try {
-            $stmt = $this->db->prepare('
-                SELECT c.*, a.name AS authority_name,
-                    ou.full_name AS owner_name, rv.full_name AS reviewer_name, ap.full_name AS approver_name
-                FROM compliances c
-                LEFT JOIN authorities a ON a.id = c.authority_id
-                LEFT JOIN users ou ON ou.id = c.owner_id
-                LEFT JOIN users rv ON rv.id = c.reviewer_id
-                LEFT JOIN users ap ON ap.id = c.approver_id
-                WHERE c.id = ? AND c.organization_id = ?
-            ');
-            $stmt->execute([$complianceId, $orgId]);
-            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-
-            return $row ?: null;
-        } catch (\Throwable $e) {
-            return null;
-        }
     }
 
     private function logHistory(int $complianceId, string $action, string $description, ?int $userId = null, ?string $comment = null): void
@@ -223,24 +85,63 @@ class ComplianceController extends BaseController
         }
     }
 
-    /** @return array{0:int,1:int} reviewer_id, approver_id */
+    /** @return array{0:int,1:int,2:string} reviewer_id, approver_id, workflow_level */
     private function matrixReviewerApprover(int $orgId, string $department, string $frequency): array
     {
-        $stmt = $this->db->prepare("SELECT reviewer_id, approver_id FROM authority_matrix WHERE organization_id = ? AND department = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
+        $stmt = $this->db->prepare("SELECT reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
         $stmt->execute([$orgId, $department]);
         $r = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($r && (!empty($r['reviewer_id']) || !empty($r['approver_id']))) {
-            return [(int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0)];
+            return [(int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0), (string)($r['workflow_level'] ?? '')];
         }
         $map = ['one-time' => 'One-time', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly', 'annual' => 'Annual', 'yearly' => 'Yearly'];
         $freqLabel = $map[$frequency] ?? ucfirst($frequency);
-        $stmt = $this->db->prepare("SELECT reviewer_id, approver_id FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency LIKE ? AND status = 'active' LIMIT 1");
+        $stmt = $this->db->prepare("SELECT reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency LIKE ? AND status = 'active' LIMIT 1");
         $stmt->execute([$orgId, $department, '%' . $freqLabel . '%']);
         $r = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($r) {
-            return [(int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0)];
+            return [(int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0), (string)($r['workflow_level'] ?? '')];
         }
-        return [0, 0];
+        return [0, 0, ''];
+    }
+
+    /** JSON endpoint: return authority matrix data for a department (used by create form JS) */
+    public function matrixForDept(): void
+    {
+        Auth::requireAuth();
+        $orgId = Auth::organizationId();
+        $dept = trim($_GET['dept'] ?? '');
+        if ($dept === '') { $this->json(['found' => false]); return; }
+
+        $stmt = $this->db->prepare("
+            SELECT am.workflow_level, am.reviewer_id, am.approver_id, am.maker_id,
+                   u1.full_name AS maker_name, u2.full_name AS reviewer_name, u3.full_name AS approver_name
+            FROM authority_matrix am
+            LEFT JOIN users u1 ON u1.id = am.maker_id
+            LEFT JOIN users u2 ON u2.id = am.reviewer_id
+            LEFT JOIN users u3 ON u3.id = am.approver_id
+            WHERE am.organization_id = ? AND am.department = ? AND am.status = 'active'
+            ORDER BY am.id DESC LIMIT 1
+        ");
+        $stmt->execute([$orgId, $dept]);
+        $r = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$r) { $this->json(['found' => false]); return; }
+
+        $wl = $r['workflow_level'] ?? '';
+        // normalise legacy values
+        if (in_array($wl, ['Single-Level', 'two-level'])) $wl = 'two-level';
+        elseif (in_array($wl, ['Two-Level', 'Multi-Level', 'three-level'])) $wl = 'three-level';
+        else $wl = !empty($r['reviewer_id']) ? 'three-level' : 'two-level';
+
+        $this->json([
+            'found'          => true,
+            'workflow'       => $wl,
+            'reviewer_id'    => (int)($r['reviewer_id'] ?? 0),
+            'reviewer_name'  => $r['reviewer_name'] ?? '',
+            'approver_id'    => (int)($r['approver_id'] ?? 0),
+            'approver_name'  => $r['approver_name'] ?? '',
+        ]);
     }
 
     private function loadCompliance(int $id, int $orgId): ?array
@@ -385,12 +286,12 @@ class ComplianceController extends BaseController
             'basePath' => $this->appConfig['url'] ?? '',
             'auth' => [
                 'id' => Auth::id(),
-                'isAdmin' => Auth::isAdminOrItAdmin(),
+                'isAdmin' => Auth::isAdmin(),
                 'isMaker' => Auth::isMaker(),
                 'isReviewer' => Auth::isReviewer(),
                 'isApprover' => Auth::isApprover(),
                 'role' => Auth::role(),
-                'canCreate' => Auth::isAdminOrItAdmin() || Auth::isMaker(),
+                'canCreate' => Auth::isAdmin() || Auth::isMaker(),
             ],
             'items' => $items,
             'total' => $total,
@@ -405,7 +306,7 @@ class ComplianceController extends BaseController
 
     public function createForm(): void
     {
-        Auth::requireRole('admin', 'maker', 'it_admin');
+        Auth::requireRole('admin', 'maker');
         $this->view('compliances/create', [
             'currentPage' => 'compliances-create',
             'pageTitle' => 'Create New Compliance',
@@ -418,7 +319,7 @@ class ComplianceController extends BaseController
 
     public function create(): void
     {
-        Auth::requireRole('admin', 'maker', 'it_admin');
+        Auth::requireRole('admin', 'maker');
         $orgId = Auth::organizationId();
         $title = trim($_POST['title'] ?? '');
         $authorityId = (int)($_POST['authority_id'] ?? 0);
@@ -433,9 +334,10 @@ class ComplianceController extends BaseController
         if (Auth::isMaker() && $ownerId < 1) {
             $ownerId = (int) Auth::id();
         }
-        $reviewerId = (int)($_POST['reviewer_id'] ?? 0);
+        $workflow = in_array($_POST['workflow_type'] ?? '', ['two-level', 'three-level']) ? $_POST['workflow_type'] : 'three-level';
+        $reviewerId = $workflow === 'two-level' ? 0 : (int)($_POST['reviewer_id'] ?? 0);
         $approverId = (int)($_POST['approver_id'] ?? 0);
-        $workflow = 'three-level';
+        // will be overridden below by authority matrix if found
         $evidenceRequired = isset($_POST['evidence_required']) && $_POST['evidence_required'] === '1' ? 1 : 0;
         $evidenceType = trim($_POST['evidence_type'] ?? '');
         $hasEvidenceTypeCol = true;
@@ -465,12 +367,19 @@ class ComplianceController extends BaseController
             $this->redirect('/compliances/create');
         }
 
-        [$mRev, $mApp] = $this->matrixReviewerApprover($orgId, $department, $frequency);
-        if (!$reviewerId && $mRev) {
-            $reviewerId = $mRev;
-        }
-        if (!$approverId && $mApp) {
-            $approverId = $mApp;
+        [$mRev, $mApp, $mWl] = $this->matrixReviewerApprover($orgId, $department, $frequency);
+        if ($mWl !== '') {
+            // normalise legacy values
+            if (in_array($mWl, ['Single-Level', 'two-level'])) $mWl = 'two-level';
+            else $mWl = 'three-level';
+            // authority matrix overrides the submitted workflow
+            $workflow = $mWl;
+            $reviewerId = ($mWl === 'two-level') ? 0 : ($mRev ?: $reviewerId);
+            $approverId = $mApp ?: $approverId;
+        } else {
+            // no matrix — fall back to form values
+            if ($workflow !== 'two-level' && !$reviewerId && $mRev) { $reviewerId = $mRev; }
+            if (!$approverId && $mApp) { $approverId = $mApp; }
         }
 
         $stmt = $this->db->prepare('SELECT COALESCE(MAX(CAST(SUBSTRING(compliance_code, 5) AS UNSIGNED)), 0) + 1 FROM compliances WHERE organization_id = ?');
@@ -539,8 +448,6 @@ class ComplianceController extends BaseController
 
         $this->logHistory($id, 'Compliance Created', 'Compliance item created', Auth::id());
 
-        $this->notifyComplianceWorkflowCreated($orgId, $id, $ownerId, $reviewerId ?: null, $approverId ?: null, $code, $title, $dueDate, $department);
-
         $_SESSION['flash_success'] = 'Compliance saved. ID ' . $code . '. Assigned to maker; visible on dashboard and calendar.' . $uploadNote;
         $this->redirect('/compliance/view/' . $id);
     }
@@ -549,11 +456,13 @@ class ComplianceController extends BaseController
     {
         Auth::requireAuth();
         $orgId = Auth::organizationId();
+        $this->ensureOverdueRemarkColumns();
         $stmt = $this->db->prepare('
             SELECT c.*, a.name AS authority_name,
              (SELECT full_name FROM users WHERE id = c.owner_id) AS owner_name,
              (SELECT full_name FROM users WHERE id = c.reviewer_id) AS reviewer_name,
-             (SELECT full_name FROM users WHERE id = c.approver_id) AS approver_name
+             (SELECT full_name FROM users WHERE id = c.approver_id) AS approver_name,
+             (SELECT full_name FROM users WHERE id = c.overdue_remark_by) AS overdue_remark_by_name
             FROM compliances c
             LEFT JOIN authorities a ON a.id = c.authority_id
             WHERE c.id = ? AND c.organization_id = ?
@@ -634,7 +543,7 @@ class ComplianceController extends BaseController
             'basePath' => $this->appConfig['url'] ?? '',
             'auth' => [
                 'id' => Auth::id(),
-                'isAdmin' => Auth::isAdminOrItAdmin(),
+                'isAdmin' => Auth::isAdmin(),
                 'isReviewer' => Auth::isReviewer(),
                 'isApprover' => Auth::isApprover(),
                 'isMaker' => Auth::isMaker(),
@@ -678,19 +587,23 @@ class ComplianceController extends BaseController
         $code = preg_replace('/[^a-zA-Z0-9_-]/', '_', 'CMP_' . $id);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="compliance_history_' . $code . '.csv"');
+        $toIst = function (?string $dt): string {
+            if (!$dt) return '';
+            return date('Y-m-d H:i:s', strtotime($dt) + 19800); // UTC → IST (+5:30)
+        };
         $out = fopen('php://output', 'w');
-        fputcsv($out, ['Submit for month', 'Submission date', 'Uploaded by', 'Maker completion date', 'Document', 'Status', 'Checker', 'Remark', 'Checker date', 'Escalation']);
+        fputcsv($out, ['Submit for month', 'Submission date (IST)', 'Uploaded by', 'Maker completion date', 'Document', 'Status', 'Checker', 'Remark', 'Checker date (IST)', 'Escalation']);
         foreach ($rows as $r) {
             fputcsv($out, [
                 $r['submit_for_month'] ?? '',
-                $r['submission_date'] ?? '',
+                $toIst($r['submission_date'] ?? null),
                 $r['uploader_name'] ?? '',
                 $r['maker_completion_date'] ?? '',
                 $r['document_name'] ?? '',
                 $r['status'] ?? '',
                 $r['checker_name'] ?? '',
                 $r['checker_remark'] ?? '',
-                $r['checker_date'] ?? '',
+                $toIst($r['checker_date'] ?? null),
                 $r['escalation_level'] ?? '',
             ]);
         }
@@ -700,7 +613,7 @@ class ComplianceController extends BaseController
 
     public function changeAssignment(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $c = $this->loadCompliance($id, $orgId);
         if (!$c) {
@@ -773,7 +686,7 @@ class ComplianceController extends BaseController
 
     public function delete(int $id): void
     {
-        Auth::requireRole('admin', 'it_admin');
+        Auth::requireRole('admin');
         $orgId = Auth::organizationId();
         $stmt = $this->db->prepare('DELETE FROM compliances WHERE id = ? AND organization_id = ?');
         $stmt->execute([$id, $orgId]);
@@ -795,7 +708,7 @@ class ComplianceController extends BaseController
             $this->redirect('/compliance/view/' . $id . '?tab=checklist');
         }
         $uid = Auth::id();
-        if (!Auth::isAdminOrItAdmin()) {
+        if (!Auth::isAdmin()) {
             if (!Auth::isMaker() || (int)$c['owner_id'] !== (int)$uid) {
                 $_SESSION['flash_error'] = 'Only the assigned maker can submit.';
                 $this->redirect('/compliance/view/' . $id);
@@ -833,10 +746,17 @@ class ComplianceController extends BaseController
                 $lastDoc['file_path'], $lastDoc['file_name'], $sid,
             ]);
         }
-        $this->db->prepare("UPDATE compliances SET status = 'submitted' WHERE id = ?")->execute([$id]);
+        $isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
+        $newStatus = $isTwoLevel ? 'under_review' : 'submitted';
+        $this->db->prepare("UPDATE compliances SET status = ? WHERE id = ?")->execute([$newStatus, $id]);
         $name = Auth::user()['full_name'] ?? 'User';
-        $this->logHistory($id, 'Submitted', 'Submitted by ' . $name . ' for reviewer', $uid, $comment ?: null);
-        $_SESSION['flash_success'] = 'Compliance submitted. Awaiting reviewer.';
+        if ($isTwoLevel) {
+            $this->logHistory($id, 'Submitted', 'Submitted by ' . $name . ' — sent directly to approver (two-level workflow)', $uid, $comment ?: null);
+            $_SESSION['flash_success'] = 'Compliance submitted. Awaiting approver.';
+        } else {
+            $this->logHistory($id, 'Submitted', 'Submitted by ' . $name . ' for reviewer', $uid, $comment ?: null);
+            $_SESSION['flash_success'] = 'Compliance submitted. Awaiting reviewer.';
+        }
         $this->redirect('/compliance/view/' . $id . '?tab=checklist');
     }
 
@@ -849,7 +769,7 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Only pending review submissions can be forwarded.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (!Auth::isAdminOrItAdmin()) {
+        if (!Auth::isAdmin()) {
             if (!Auth::isReviewer() || Auth::id() !== (int)($c['reviewer_id'] ?? 0)) {
                 $_SESSION['flash_error'] = 'Only the assigned reviewer can forward.';
                 $this->redirect('/compliance/view/' . $id);
@@ -878,7 +798,7 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Compliance is not awaiting final approval.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (!Auth::isAdminOrItAdmin() && (!Auth::isApprover() || Auth::id() !== (int)$c['approver_id'])) {
+        if (!Auth::isAdmin() && (!Auth::isApprover() || Auth::id() !== (int)$c['approver_id'])) {
             $_SESSION['flash_error'] = 'Only the assigned approver can approve.';
             $this->redirect('/compliance/view/' . $id);
         }
@@ -905,7 +825,7 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Cannot reject in current status.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (!Auth::isAdminOrItAdmin() && (!Auth::isApprover() || Auth::id() !== (int)$c['approver_id'])) {
+        if (!Auth::isAdmin() && (!Auth::isApprover() || Auth::id() !== (int)$c['approver_id'])) {
             $_SESSION['flash_error'] = 'Only the assigned approver can reject.';
             $this->redirect('/compliance/view/' . $id);
         }
@@ -932,11 +852,11 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Rework only from submitted status.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (Auth::isMaker() && !Auth::isAdminOrItAdmin()) {
+        if (Auth::isMaker() && !Auth::isAdmin()) {
             $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
             $this->redirect('/compliance/view/' . $id);
         }
-        if (!Auth::isAdminOrItAdmin() && (!Auth::isReviewer() || Auth::id() !== (int)$c['reviewer_id'])) {
+        if (!Auth::isAdmin() && (!Auth::isReviewer() || Auth::id() !== (int)$c['reviewer_id'])) {
             $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
             $this->redirect('/compliance/view/' . $id);
         }
@@ -963,7 +883,7 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Compliance not found.';
             $this->redirect('/compliance');
         }
-        if (!Auth::isAdminOrItAdmin()) {
+        if (!Auth::isAdmin()) {
             if (!Auth::isMaker() || (int)$c['owner_id'] !== (int)Auth::id()) {
                 $_SESSION['flash_error'] = 'Only the assigned maker can upload documents.';
                 $this->redirect('/compliance/view/' . $id);
@@ -990,17 +910,5 @@ class ComplianceController extends BaseController
         }
         $tab = $_POST['return_tab'] ?? 'checklist';
         $this->redirect('/compliance/view/' . $id . '?tab=' . $tab);
-    }
-
-    private function canEditComplianceRecord(array $c): bool
-    {
-        if (Auth::isAdminOrItAdmin()) {
-            return true;
-        }
-        if (Auth::isMaker() && (int) ($c['owner_id'] ?? 0) === (int) Auth::id()) {
-            return in_array($c['status'] ?? '', ['draft', 'pending', 'rework'], true);
-        }
-
-        return false;
     }
 }

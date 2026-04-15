@@ -77,8 +77,15 @@ function rpt_doc_status(string $st, int $id): string {
         ? '<span class="rpt-pill rpt-pill-uploaded">Uploaded</span>'
         : '<span class="rpt-pill rpt-pill-review">Under Review</span>';
 }
-$frameworkChart = $frameworkChart ?? ['labels' => ['RBI', 'NHB', 'Internal Policy'], 'data' => [0, 0, 0]];
-$sb = $statusBuckets ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0];
+$fw  = $frameworkCounts ?? ['RBI' => 0, 'NHB' => 0, 'SEBI' => 0, 'Internal' => 0];
+$sb  = $statusBuckets ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0];
+$sba = $statusByAuthority ?? [
+    'RBI'      => ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0],
+    'NHB'      => ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0],
+    'SEBI'     => ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0],
+    'IRDAI'    => ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0],
+    'Internal' => ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0],
+];
 ?>
 <div class="rpt-page">
     <div class="rpt-header-row">
@@ -133,22 +140,58 @@ $sb = $statusBuckets ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 
             </div>
         </div>
     </div>
-    <div class="rpt-charts-row">
-        <div class="card rpt-chart-card">
-            <h3 class="card-title">Compliance by Framework</h3>
-            <div class="rpt-chart-wrap"><canvas id="rpt-bar-chart"></canvas></div>
-        </div>
-        <div class="card rpt-chart-card">
-            <h3 class="card-title">Status Distribution</h3>
-            <div class="rpt-chart-wrap rpt-donut-wrap"><canvas id="rpt-donut-chart"></canvas></div>
-            <div class="rpt-donut-legend">
-                <span><i class="rpt-lg rpt-lg-done"></i> Completed</span>
-                <span><i class="rpt-lg rpt-lg-pend"></i> Pending</span>
-                <span><i class="rpt-lg rpt-lg-rev"></i> Under Review</span>
-                <span><i class="rpt-lg rpt-lg-od"></i> Overdue</span>
+    <?php
+    $authMeta = [
+        'RBI'      => ['label' => 'RBI',             'icon' => 'fa-landmark',      'color' => '#dc2626', 'gradient' => 'linear-gradient(135deg,#fef2f2,#fff)'],
+        'NHB'      => ['label' => 'NHB',             'icon' => 'fa-home',          'color' => '#2563eb', 'gradient' => 'linear-gradient(135deg,#eff6ff,#fff)'],
+        'SEBI'     => ['label' => 'SEBI',            'icon' => 'fa-chart-bar',     'color' => '#d97706', 'gradient' => 'linear-gradient(135deg,#fffbeb,#fff)'],
+        'IRDAI'    => ['label' => 'IRDAI',           'icon' => 'fa-shield-alt',    'color' => '#7c3aed', 'gradient' => 'linear-gradient(135deg,#f5f3ff,#fff)'],
+        'Internal' => ['label' => 'Internal Policy', 'icon' => 'fa-file-contract', 'color' => '#059669', 'gradient' => 'linear-gradient(135deg,#ecfdf5,#fff)'],
+    ];
+    $authKeys  = array_keys($authMeta);
+    $totalAuth = count($authKeys);
+    ?>
+    <div class="rpt-authority-pies-grid">
+        <?php foreach ($authMeta as $authKey => $meta):
+            $idx        = array_search($authKey, $authKeys);
+            $isLast     = ($idx === $totalAuth - 1);
+            $isOddLast  = $isLast && ($totalAuth % 2 !== 0);
+            $d          = $sba[$authKey] ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 'overdue' => 0];
+            $total_auth = (int)($fw[$authKey] ?? array_sum($d));
+            $canvasId   = 'rpt-pie-' . strtolower(str_replace(' ', '-', $authKey));
+        ?>
+        <div class="rpt-auth-pie-block<?= $isOddLast ? ' rpt-auth-pie-block-center' : '' ?>">
+            <div class="rpt-authority-pie-card">
+                <!-- Top: icon + label + total -->
+                <div class="rpt-pie-top">
+                    <div class="rpt-pie-top-icon" style="background:<?= $meta['color'] ?>18;color:<?= $meta['color'] ?>;">
+                        <i class="fas <?= $meta['icon'] ?>"></i>
+                    </div>
+                    <div class="rpt-pie-top-info">
+                        <div class="rpt-pie-top-name"><?= htmlspecialchars($meta['label']) ?></div>
+                        <div class="rpt-pie-top-total"><span style="color:<?= $meta['color'] ?>;font-weight:800;"><?= $total_auth ?></span> Total</div>
+                    </div>
+                </div>
+                <!-- Donut -->
+                <div class="rpt-pie-canvas-wrap">
+                    <canvas id="<?= $canvasId ?>"></canvas>
+                    <div class="rpt-pie-center-text">
+                        <span class="rpt-pie-center-num" style="color:<?= $meta['color'] ?>;"><?= $total_auth ?></span>
+                        <span class="rpt-pie-center-lbl">Total</span>
+                    </div>
+                </div>
+                <!-- Legend -->
+                <div class="rpt-pie-legend-v2">
+                    <div class="rpt-pie-leg-item"><span class="rpt-pie-leg-dot" style="background:#059669;"></span><span class="rpt-pie-leg-label">Completed</span><span class="rpt-pie-leg-val"><?= $d['completed'] ?></span></div>
+                    <div class="rpt-pie-leg-item"><span class="rpt-pie-leg-dot" style="background:#f59e0b;"></span><span class="rpt-pie-leg-label">Pending</span><span class="rpt-pie-leg-val"><?= $d['pending'] ?></span></div>
+                    <div class="rpt-pie-leg-item"><span class="rpt-pie-leg-dot" style="background:#3b82f6;"></span><span class="rpt-pie-leg-label">Under Review</span><span class="rpt-pie-leg-val"><?= $d['under_review'] ?></span></div>
+                    <div class="rpt-pie-leg-item"><span class="rpt-pie-leg-dot" style="background:#ef4444;"></span><span class="rpt-pie-leg-label">Overdue</span><span class="rpt-pie-leg-val"><?= $d['overdue'] ?></span></div>
+                </div>
             </div>
         </div>
+        <?php endforeach; ?>
     </div>
+
     <div class="rpt-export-row">
         <a href="<?= htmlspecialchars($basePath) ?>/reports/export?format=csv" class="btn btn-secondary"><i class="fas fa-file-excel"></i> Export to Excel</a>
         <a href="<?= htmlspecialchars($basePath) ?>/reports/export?format=pdf" class="btn btn-secondary" target="_blank"><i class="fas fa-file-pdf"></i> Export to PDF</a>
@@ -156,39 +199,56 @@ $sb = $statusBuckets ?? ['completed' => 0, 'pending' => 0, 'under_review' => 0, 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script>
     (function(){
-        var primary = 'rgb(185, 28, 28)';
-        new Chart(document.getElementById('rpt-bar-chart'), {
-            type: 'bar',
-            data: {
-                labels: <?= json_encode($frameworkChart['labels'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
-                datasets: [{ data: <?= json_encode($frameworkChart['data'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>, backgroundColor: primary, borderRadius: 6 }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    x: { ticks: { maxRotation: 45, minRotation: 0, autoSkip: true } },
-                    y: { beginAtZero: true, ticks: { stepSize: 1 } }
+        var pieColors  = ['#059669','#f59e0b','#3b82f6','#dc2626'];
+        var pieHovers  = ['#047857','#d97706','#2563eb','#b91c1c'];
+        var pieLabels  = ['Completed','Pending','Under Review','Overdue'];
+        var charts     = [
+            <?php foreach ($authMeta as $authKey => $meta):
+                $d = $sba[$authKey] ?? ['completed'=>0,'pending'=>0,'under_review'=>0,'overdue'=>0];
+                $canvasId = 'rpt-pie-' . strtolower(str_replace(' ','-',$authKey));
+            ?>
+            { id:'<?= $canvasId ?>', data:[<?= (int)$d['completed'] ?>,<?= (int)$d['pending'] ?>,<?= (int)$d['under_review'] ?>,<?= (int)$d['overdue'] ?>], color:'<?= $meta['color'] ?>' },
+            <?php endforeach; ?>
+        ];
+
+        charts.forEach(function(c){
+            var canvas = document.getElementById(c.id);
+            if (!canvas) return;
+            var total = c.data.reduce(function(a,b){ return a+b; }, 0);
+            var isEmpty = total === 0;
+            new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: pieLabels,
+                    datasets: [{
+                        data: isEmpty ? [1] : c.data,
+                        backgroundColor: isEmpty ? ['#f1f5f9'] : pieColors,
+                        hoverBackgroundColor: isEmpty ? ['#e2e8f0'] : pieHovers,
+                        borderWidth: 3,
+                        borderColor: '#fff',
+                        hoverOffset: isEmpty ? 0 : 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '68%',
+                    animation: { animateRotate: true, duration: 800 },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            enabled: !isEmpty,
+                            callbacks: {
+                                label: function(ctx){
+                                    var val = ctx.raw;
+                                    var pct = total > 0 ? Math.round(val/total*100) : 0;
+                                    return ' ' + ctx.label + ': ' + val + ' (' + pct + '%)';
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-        });
-        new Chart(document.getElementById('rpt-donut-chart'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Completed', 'Pending', 'Under Review', 'Overdue'],
-                datasets: [{
-                    data: [<?= (int)$sb['completed'] ?>, <?= (int)$sb['pending'] ?>, <?= (int)$sb['under_review'] ?>, <?= (int)$sb['overdue'] ?>],
-                    backgroundColor: ['#059669', '#f59e0b', '#3b82f6', '#dc2626'],
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '62%',
-                plugins: { legend: { display: false } }
-            }
+            });
         });
     })();
     </script>

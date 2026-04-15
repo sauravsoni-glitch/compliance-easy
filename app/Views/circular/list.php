@@ -60,7 +60,7 @@ function ci_status_badge(string $s): array {
             <input type="search" name="q" class="form-control ci-filter-search" placeholder="Search circulars..." value="<?= htmlspecialchars($filterQ ?? '') ?>">
             <select name="authority" class="form-control ci-filter-select">
                 <option value="">All Authorities</option>
-                <?php foreach (['RBI', 'NHB', 'SEBI', 'Internal'] as $a): ?>
+                <?php foreach (['RBI', 'NHB', 'SEBI', 'IRDAI', 'Internal'] as $a): ?>
                 <option value="<?= $a ?>" <?= ($filterAuth ?? '') === $a ? 'selected' : '' ?>><?= $a ?></option>
                 <?php endforeach; ?>
             </select>
@@ -115,7 +115,7 @@ function ci_status_badge(string $s): array {
                         <td>
                             <a href="<?= htmlspecialchars($basePath) ?>/circular-intelligence/view/<?= (int)$row['id'] ?>" class="ci-view-link"><i class="fas fa-eye"></i> View</a>
                             <?php if (!empty($isAdmin) && empty($row['linked_compliance_id']) && ($row['status'] ?? '') !== 'rejected'): ?>
-                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/circular-intelligence/reanalyze/<?= (int)$row['id'] ?>" class="ci-inline-form" data-app-confirm="Re-run AI analysis?">
+                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/circular-intelligence/reanalyze/<?= (int)$row['id'] ?>" class="ci-inline-form" onsubmit="return confirm('Re-run AI analysis?');">
                                 <button type="submit" class="btn btn-link btn-sm p-0">Re-Analyze</button>
                             </form>
                             <?php endif; ?>

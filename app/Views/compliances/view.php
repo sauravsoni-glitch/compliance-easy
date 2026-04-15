@@ -35,12 +35,13 @@ $canMakerAct = !empty($auth['isAdmin']) || (!empty($auth['isMaker']) && $isOwner
 $st = $c['status'];
 
 /* Workflow stage strip */
+$isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
 $makerDone = !in_array($st, ['pending', 'draft', 'rework'], true);
 $reviewerDone = in_array($st, ['under_review', 'completed', 'approved', 'rejected'], true);
 $approverDone = in_array($st, ['completed', 'approved', 'rejected'], true);
 $makerActive = in_array($st, ['pending', 'draft', 'rework'], true);
-$reviewerActive = $st === 'submitted';
-$approverActive = $st === 'under_review';
+$reviewerActive = !$isTwoLevel && $st === 'submitted';
+$approverActive = $st === 'under_review' || ($isTwoLevel && $st === 'submitted');
 ?>
 <div class="compliance-detail-shell">
     <div class="compliance-detail-top">
@@ -64,7 +65,9 @@ $approverActive = $st === 'under_review';
             <div class="cmb-item"><span class="cmb-label">Risk</span><span class="cmb-val"><span class="badge badge-<?= in_array($c['risk_level'], ['critical','high'], true) ? 'danger' : 'warning' ?>"><?= htmlspecialchars(ucfirst($c['risk_level'])) ?></span></span></div>
             <div class="cmb-item"><span class="cmb-label">Priority</span><span class="cmb-val"><span class="badge badge-<?= in_array($c['priority'], ['critical','high'], true) ? 'danger' : 'secondary' ?>"><?= htmlspecialchars(ucfirst($c['priority'])) ?></span></span></div>
             <div class="cmb-item cmb-team"><span class="cmb-label">Maker</span><span class="cmb-val"><?= htmlspecialchars($c['owner_name'] ?? '—') ?></span></div>
+            <?php if (!$isTwoLevel): ?>
             <div class="cmb-item cmb-team"><span class="cmb-label">Reviewer</span><span class="cmb-val"><?= htmlspecialchars($c['reviewer_name'] ?? '—') ?></span></div>
+            <?php endif; ?>
             <div class="cmb-item cmb-team"><span class="cmb-label">Approver</span><span class="cmb-val"><?= htmlspecialchars($c['approver_name'] ?? '—') ?></span></div>
         </div>
         <div class="workflow-stage-strip" aria-label="Workflow stage">
@@ -72,11 +75,13 @@ $approverActive = $st === 'under_review';
                 <span class="wss-icon"><?= $makerDone ? '✓' : ($makerActive ? '●' : '○') ?></span>
                 <span><?= $makerDone ? 'Maker completed' : ($makerActive ? 'Maker — action required' : 'Maker') ?></span>
             </div>
+            <?php if (!$isTwoLevel): ?>
             <span class="wss-arrow">→</span>
             <div class="wss-step <?= $reviewerDone ? 'wss-done' : ($reviewerActive ? 'wss-active' : '') ?>">
                 <span class="wss-icon"><?= $reviewerDone ? '✓' : ($reviewerActive ? '●' : '○') ?></span>
                 <span><?= $reviewerActive ? 'Reviewer — pending' : ($reviewerDone ? 'Reviewer completed' : 'Reviewer pending') ?></span>
             </div>
+            <?php endif; ?>
             <span class="wss-arrow">→</span>
             <div class="wss-step <?= $st === 'rejected' ? 'wss-rejected' : ($approverDone ? 'wss-done' : ($approverActive ? 'wss-active' : '')) ?>">
                 <span class="wss-icon"><?= $st === 'rejected' ? '✗' : ($approverDone ? '✓' : ($approverActive ? '●' : '○')) ?></span>
@@ -101,61 +106,112 @@ $approverActive = $st === 'under_review';
     <a href="?tab=activity" class="compliance-tab <?= $tab === 'activity' ? 'active' : '' ?>">Activity</a>
 </div>
 
+<?php
+$isOverdue = !empty($c['due_date'])
+    && $c['due_date'] < date('Y-m-d')
+    && !in_array($c['status'], ['completed', 'approved', 'rejected'], true);
+?>
 <?php if ($tab === 'overview'): ?>
-<div class="cd-overview-layout">
-    <div class="cd-overview-main">
-        <div class="card cd-overview-card">
-            <div class="cd-card-head">
-                <h3 class="card-title cd-section-title">Compliance overview</h3>
-                <p class="cd-card-lead">Read-only summary. Use <strong>Process checklist</strong> to move the workflow forward.</p>
-            </div>
-            <div class="compliance-overview-grid">
-                <div class="co-cell"><span class="co-label">Authority</span><span class="co-val"><?= htmlspecialchars($c['authority_name'] ?? '—') ?></span></div>
-                <div class="co-cell"><span class="co-label">Department</span><span class="co-val"><?= htmlspecialchars($c['department']) ?></span></div>
-                <div class="co-cell"><span class="co-label">Frequency</span><span class="co-val"><?= htmlspecialchars(freq_label_view($c['frequency'])) ?></span></div>
-                <div class="co-cell"><span class="co-label">Workflow</span><span class="co-val">Maker → Reviewer → Approver</span></div>
-                <?php if (!empty($c['evidence_required'])): ?>
-                <div class="co-cell"><span class="co-label">Evidence required</span><span class="co-val">Yes<?php
-                    $et = $c['evidence_type'] ?? '';
-                    $etl = ['pdf_report' => 'PDF / Report', 'signed_certificate' => 'Signed certificate', 'regulatory_filing' => 'Regulatory filing', 'screenshot' => 'Screenshot / Image', 'spreadsheet' => 'Spreadsheet', 'policy_document' => 'Policy document', 'correspondence' => 'Correspondence', 'audit_trail' => 'Audit trail', 'other' => 'Other'];
-                    if ($et !== '') echo ' — ' . htmlspecialchars($etl[$et] ?? ucfirst(str_replace('_', ' ', $et)));
-                ?></span></div>
-                <?php else: ?>
-                <div class="co-cell"><span class="co-label">Evidence required</span><span class="co-val">No</span></div>
-                <?php endif; ?>
-                <div class="co-cell"><span class="co-label">Status</span><span class="co-val"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $c['status']))) ?></span></div>
-                <div class="co-cell"><span class="co-label">Due date</span><span class="co-val"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
-                <?php if (!empty($c['circular_reference'])): ?>
-                <div class="co-cell co-cell-full"><span class="co-label">Reference</span><span class="co-val"><?= htmlspecialchars($c['circular_reference']) ?></span></div>
-                <?php endif; ?>
-            </div>
-            <?php if (!empty($c['description'])): ?>
-            <div class="cd-desc-block">
-                <span class="co-label">Description</span>
-                <div class="cd-desc-body"><?= nl2br(htmlspecialchars($c['description'])) ?></div>
-            </div>
+<?php if ($isOverdue): ?>
+<?php $overdueDays = (int)((strtotime(date('Y-m-d')) - strtotime($c['due_date'])) / 86400); ?>
+<?php $hasRemark = !empty($c['overdue_remark']); ?>
+<div class="overdue-remark-card">
+    <div class="orc-top">
+        <i class="fas fa-exclamation-circle orc-icon"></i>
+        <span class="orc-label">Overdue by <strong><?= $overdueDays ?> day<?= $overdueDays !== 1 ? 's' : '' ?></strong></span>
+        <?php if ($hasRemark): ?>
+        <button type="button" class="orc-edit-btn" id="orc-edit-toggle"><i class="fas fa-pencil-alt"></i> Edit</button>
+        <?php endif; ?>
+    </div>
+
+    <?php if ($hasRemark): ?>
+    <div class="orc-view" id="orc-view">
+        <span class="orc-remark-text"><?= nl2br(htmlspecialchars($c['overdue_remark'])) ?></span>
+        <span class="orc-who"><i class="far fa-user"></i> <?= htmlspecialchars($c['overdue_remark_by_name'] ?? '—') ?> · <?= !empty($c['overdue_remark_at']) ? date('M j, Y', strtotime($c['overdue_remark_at'])) : '' ?></span>
+    </div>
+    <?php endif; ?>
+
+    <form method="post" action="<?= htmlspecialchars($basePath) ?>/compliances/overdue-remark/<?= (int)$c['id'] ?>" class="orc-form" id="orc-form" <?= $hasRemark ? 'style="display:none;"' : '' ?>>
+        <textarea name="overdue_remark" class="form-control orc-textarea" rows="2"
+            placeholder="Reason for delay — e.g. pending documents, awaiting regulatory clarification…"
+            required><?= htmlspecialchars($c['overdue_remark'] ?? '') ?></textarea>
+        <div class="orc-form-actions">
+            <button type="submit" class="btn orc-btn"><i class="fas fa-save"></i> <?= $hasRemark ? 'Update' : 'Add Remark' ?></button>
+            <?php if ($hasRemark): ?>
+            <button type="button" class="orc-cancel-btn" id="orc-cancel">Cancel</button>
             <?php endif; ?>
         </div>
+    </form>
+</div>
+<script>
+(function(){
+    var toggle = document.getElementById('orc-edit-toggle');
+    var cancel = document.getElementById('orc-cancel');
+    var form   = document.getElementById('orc-form');
+    var view   = document.getElementById('orc-view');
+    if (toggle && form && view) {
+        toggle.addEventListener('click', function(){
+            view.style.display  = 'none';
+            form.style.display  = '';
+            toggle.style.display = 'none';
+            form.querySelector('textarea').focus();
+        });
+    }
+    if (cancel && form && view) {
+        cancel.addEventListener('click', function(){
+            view.style.display  = '';
+            form.style.display  = 'none';
+            toggle.style.display = '';
+        });
+    }
+})();
+</script>
+<?php endif; ?>
+<div class="card">
+    <h3 class="card-title">Compliance overview</h3>
+    <p class="text-muted text-sm mb-3">Read-only summary. Use <strong>Process checklist</strong> to move the workflow forward.</p>
+    <div class="compliance-overview-grid">
+        <div><span class="co-label">Authority</span><span class="co-val"><?= htmlspecialchars($c['authority_name'] ?? '—') ?></span></div>
+        <div><span class="co-label">Department</span><span class="co-val"><?= htmlspecialchars($c['department']) ?></span></div>
+        <div><span class="co-label">Frequency</span><span class="co-val"><?= htmlspecialchars(freq_label_view($c['frequency'])) ?></span></div>
+        <div><span class="co-label">Workflow</span><span class="co-val"><?= $isTwoLevel ? 'Two Level (Maker → Approver)' : 'Three Level (Maker → Reviewer → Approver)' ?></span></div>
+        <?php if (!empty($c['evidence_required'])): ?>
+        <div><span class="co-label">Evidence required</span><span class="co-val">Yes<?php
+            $et = $c['evidence_type'] ?? '';
+            $etl = ['pdf_report' => 'PDF / Report', 'signed_certificate' => 'Signed certificate', 'regulatory_filing' => 'Regulatory filing', 'screenshot' => 'Screenshot / Image', 'spreadsheet' => 'Spreadsheet', 'policy_document' => 'Policy document', 'correspondence' => 'Correspondence', 'audit_trail' => 'Audit trail', 'other' => 'Other'];
+            if ($et !== '') echo ' — ' . htmlspecialchars($etl[$et] ?? ucfirst(str_replace('_', ' ', $et)));
+        ?></span></div>
+        <?php else: ?>
+        <div><span class="co-label">Evidence required</span><span class="co-val">No</span></div>
+        <?php endif; ?>
+        <div><span class="co-label">Status</span><span class="co-val"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $c['status']))) ?></span></div>
+        <div><span class="co-label">Due date</span><span class="co-val"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
     </div>
-    <aside class="cd-overview-aside">
-        <div class="card cd-side-card">
-            <h3 class="card-title cd-section-title">Assigned users</h3>
-            <ul class="assigned-users-list">
-                <li><span class="au-role">Maker</span><span class="au-name"><?= htmlspecialchars($c['owner_name'] ?? '—') ?></span></li>
-                <li><span class="au-role">Reviewer</span><span class="au-name"><?= htmlspecialchars($c['reviewer_name'] ?? '—') ?></span></li>
-                <li><span class="au-role">Approver</span><span class="au-name"><?= htmlspecialchars($c['approver_name'] ?? '—') ?></span></li>
-            </ul>
-        </div>
-        <div class="card cd-side-card">
-            <h3 class="card-title cd-section-title">Important dates</h3>
-            <div class="important-dates-grid">
-                <div class="id-tile"><i class="far fa-calendar-alt" aria-hidden="true"></i><span class="id-label">Start</span><span class="id-date"><?= $c['start_date'] ? date('M j, Y', strtotime($c['start_date'])) : '—' ?></span></div>
-                <div class="id-tile id-tile-due"><i class="far fa-clock" aria-hidden="true"></i><span class="id-label">Due</span><span class="id-date"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
-                <div class="id-tile"><i class="fas fa-bell" aria-hidden="true"></i><span class="id-label">Reminder</span><span class="id-date"><?= $c['reminder_date'] ? date('M j, Y', strtotime($c['reminder_date'])) : '—' ?></span></div>
-                <div class="id-tile"><i class="far fa-file-alt" aria-hidden="true"></i><span class="id-label">Created</span><span class="id-date"><?= date('M j, Y', strtotime($c['created_at'])) ?></span></div>
-            </div>
-        </div>
-    </aside>
+    <?php if (!empty($c['circular_reference'])): ?>
+    <p class="mt-2"><span class="co-label">Reference</span> <?= htmlspecialchars($c['circular_reference']) ?></p>
+    <?php endif; ?>
+    <?php if (!empty($c['description'])): ?>
+    <p class="mt-3"><span class="co-label d-block mb-1">Description</span><?= nl2br(htmlspecialchars($c['description'])) ?></p>
+    <?php endif; ?>
+</div>
+<div class="card">
+    <h3 class="card-title">Assigned users</h3>
+    <ul class="assigned-users-list">
+        <li><strong>Maker</strong> <?= htmlspecialchars($c['owner_name'] ?? '—') ?></li>
+        <?php if (!$isTwoLevel): ?>
+        <li><strong>Reviewer</strong> <?= htmlspecialchars($c['reviewer_name'] ?? '—') ?></li>
+        <?php endif; ?>
+        <li><strong>Approver</strong> <?= htmlspecialchars($c['approver_name'] ?? '—') ?></li>
+    </ul>
+</div>
+<div class="card">
+    <h3 class="card-title">Important dates</h3>
+    <div class="important-dates-row">
+        <div class="id-item"><i class="far fa-calendar-alt text-muted"></i><div><span class="id-label">Start</span><span class="id-date"><?= $c['start_date'] ? date('M j, Y', strtotime($c['start_date'])) : '—' ?></span></div></div>
+        <div class="id-item id-item-due"><i class="far fa-clock text-danger"></i><div><span class="id-label">Due</span><span class="id-date"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div></div>
+        <div class="id-item id-item-rem"><i class="fas fa-exclamation-triangle text-warning"></i><div><span class="id-label">Reminder</span><span class="id-date"><?= $c['reminder_date'] ? date('M j, Y', strtotime($c['reminder_date'])) : '—' ?></span></div></div>
+        <div class="id-item"><i class="far fa-calendar"></i><div><span class="id-label">Created</span><span class="id-date"><?= date('M j, Y', strtotime($c['created_at'])) ?></span></div></div>
+    </div>
 </div>
 
 <?php elseif ($tab === 'checklist'): ?>
@@ -164,11 +220,18 @@ $s1 = true;
 $s2 = $makerDone;
 $s3 = $reviewerDone;
 $s4 = in_array($st, ['completed', 'approved'], true);
-$steps = [
-    ['n' => 'Maker', 'd' => 'Upload evidence & submit to reviewer', 'done' => $s2 && !in_array($st, ['pending', 'draft', 'rework'], true), 'cur' => in_array($st, ['pending', 'draft', 'rework'], true)],
-    ['n' => 'Reviewer', 'd' => 'Approve & forward or request rework', 'done' => $s3 && $st !== 'submitted', 'cur' => $st === 'submitted'],
-    ['n' => 'Approver', 'd' => 'Final approve or reject', 'done' => in_array($st, ['completed', 'approved', 'rejected'], true), 'cur' => $st === 'under_review'],
-];
+if ($isTwoLevel) {
+    $steps = [
+        ['n' => 'Maker', 'd' => 'Upload evidence & submit to approver', 'done' => $s2 && !in_array($st, ['pending', 'draft', 'rework'], true), 'cur' => in_array($st, ['pending', 'draft', 'rework'], true)],
+        ['n' => 'Approver', 'd' => 'Final approve or reject', 'done' => in_array($st, ['completed', 'approved', 'rejected'], true), 'cur' => $st === 'under_review'],
+    ];
+} else {
+    $steps = [
+        ['n' => 'Maker', 'd' => 'Upload evidence & submit to reviewer', 'done' => $s2 && !in_array($st, ['pending', 'draft', 'rework'], true), 'cur' => in_array($st, ['pending', 'draft', 'rework'], true)],
+        ['n' => 'Reviewer', 'd' => 'Approve & forward or request rework', 'done' => $s3 && $st !== 'submitted', 'cur' => $st === 'submitted'],
+        ['n' => 'Approver', 'd' => 'Final approve or reject', 'done' => in_array($st, ['completed', 'approved', 'rejected'], true), 'cur' => $st === 'under_review'],
+    ];
+}
 $doneC = count(array_filter($steps, function ($x) { return $x['done']; }));
 $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
 ?>
@@ -193,15 +256,40 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
 <?php if (in_array($st, ['pending', 'draft', 'rework'], true) && $canMakerAct): ?>
 <div class="card workflow-action-card">
     <h3 class="card-title">Step 1 — Maker</h3>
-    <p class="text-muted">Upload documents, set completion date, add a comment, then submit.</p>
-    <form method="post" action="<?= $basePath ?>/compliances/upload-document/<?= (int)$c['id'] ?>" enctype="multipart/form-data" class="mb-3">
-        <input type="hidden" name="return_tab" value="checklist">
-        <label class="form-label">Upload document</label>
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
-            <input type="file" name="document" class="form-control" style="max-width:280px" accept=".pdf,.doc,.docx,.xls,.xlsx" required>
-            <button type="submit" class="btn btn-secondary"><i class="fas fa-upload"></i> Upload</button>
+    <p class="text-muted">Upload documents, set completion date, add a comment, then submit<?= $isTwoLevel ? ' directly to approver' : ' to reviewer' ?>.</p>
+
+    <?php if (!empty($documents)): ?>
+    <div class="form-group">
+        <label class="form-label">Uploaded documents</label>
+        <div class="maker-doc-list">
+            <?php foreach ($documents as $d): ?>
+            <div class="maker-doc-item">
+                <span class="maker-doc-icon"><i class="far fa-file-alt"></i></span>
+                <span class="maker-doc-name"><?= htmlspecialchars($d['file_name']) ?></span>
+                <span class="maker-doc-meta"><?= date('d M Y', strtotime($d['uploaded_at'])) ?></span>
+                <div class="maker-doc-actions">
+                    <a href="<?= $basePath ?>/uploads/<?= htmlspecialchars($d['file_path']) ?>" target="_blank" class="btn btn-sm btn-secondary" title="View"><i class="fas fa-eye"></i> View</a>
+                    <a href="<?= $basePath ?>/uploads/<?= htmlspecialchars($d['file_path']) ?>" download class="btn btn-sm btn-secondary" title="Download"><i class="fas fa-download"></i></a>
+                </div>
+            </div>
+            <?php endforeach; ?>
         </div>
+    </div>
+    <?php endif; ?>
+
+    <form method="post" action="<?= $basePath ?>/compliances/upload-document/<?= (int)$c['id'] ?>" enctype="multipart/form-data" class="mb-3" id="maker-upload-form">
+        <input type="hidden" name="return_tab" value="checklist">
+        <label class="form-label"><?= !empty($documents) ? 'Upload updated document' : 'Upload document' ?></label>
+        <div class="ci-dropzone" id="maker-upload-dz">
+            <input type="file" name="document" id="maker-upload-file" class="ci-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx" required>
+            <i class="fas fa-cloud-upload-alt ci-drop-ico"></i>
+            <p class="mb-1"><strong>Click to upload</strong> or drag and drop</p>
+            <p class="text-muted text-sm mb-0">PDF, DOC, DOCX, XLS, XLSX</p>
+            <span id="maker-upload-name" class="ci-file-name"></span>
+        </div>
+        <button type="submit" class="btn btn-secondary mt-2"><i class="fas fa-upload"></i> Upload</button>
     </form>
+
     <form method="post" action="<?= $basePath ?>/compliances/submit/<?= (int)$c['id'] ?>">
         <div class="form-group">
             <label class="form-label">Completion date</label>
@@ -209,14 +297,30 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         </div>
         <div class="form-group">
             <label class="form-label">Comment</label>
-            <textarea name="maker_comment" class="form-control" rows="3" placeholder="Explain what was completed for reviewers"></textarea>
+            <textarea name="maker_comment" class="form-control" rows="3" placeholder="Explain what was completed for <?= $isTwoLevel ? 'the approver' : 'reviewers' ?>"></textarea>
         </div>
         <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Submit compliance</button>
     </form>
 </div>
+<script>
+(function(){
+    var dz = document.getElementById('maker-upload-dz');
+    var fi = document.getElementById('maker-upload-file');
+    var nm = document.getElementById('maker-upload-name');
+    if (!dz || !fi) return;
+    dz.addEventListener('click', function(e){ if (e.target !== fi) fi.click(); });
+    fi.addEventListener('change', function(){ nm.textContent = this.files[0] ? this.files[0].name : ''; });
+    dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', function(){ dz.classList.remove('dragover'); });
+    dz.addEventListener('drop', function(e){
+        e.preventDefault(); dz.classList.remove('dragover');
+        if (e.dataTransfer.files.length) { fi.files = e.dataTransfer.files; nm.textContent = fi.files[0].name; }
+    });
+})();
+</script>
 <?php endif; ?>
 
-<?php if ($st === 'submitted' && ($auth['isAdmin'] || ($auth['isReviewer'] && (int)$auth['id'] === (int)($c['reviewer_id'] ?? 0)))): ?>
+<?php if (!$isTwoLevel && $st === 'submitted' && ($auth['isAdmin'] || ($auth['isReviewer'] && (int)$auth['id'] === (int)($c['reviewer_id'] ?? 0)))): ?>
 <div class="card workflow-action-card">
     <h3 class="card-title">Step 2 — Reviewer</h3>
     <?php if (!empty($documents)): ?>
@@ -232,7 +336,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         </div>
         <button type="submit" class="btn btn-primary">Approve &amp; forward to approver</button>
     </form>
-    <form method="post" action="<?= $basePath ?>/compliances/rework/<?= (int)$c['id'] ?>" data-app-confirm="Send back to maker for rework?">
+    <form method="post" action="<?= $basePath ?>/compliances/rework/<?= (int)$c['id'] ?>" onsubmit="return confirm('Send back to maker for rework?');">
         <div class="form-group">
             <label class="form-label">Rework reason</label>
             <textarea name="review_comment" class="form-control" rows="2" required placeholder="What needs to be fixed?"></textarea>
@@ -244,7 +348,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
 
 <?php if ($st === 'under_review' && ($auth['isAdmin'] || ($auth['isApprover'] && (int)$auth['id'] === (int)($c['approver_id'] ?? 0)))): ?>
 <div class="card workflow-action-card">
-    <h3 class="card-title">Step 3 — Approver</h3>
+    <h3 class="card-title"><?= $isTwoLevel ? 'Step 2' : 'Step 3' ?> — Approver</h3>
     <form method="post" action="<?= $basePath ?>/compliances/approve/<?= (int)$c['id'] ?>" class="mb-3">
         <div class="form-group">
             <label class="form-label">Final comment</label>
@@ -252,7 +356,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         </div>
         <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Approve &amp; close</button>
     </form>
-    <form method="post" action="<?= $basePath ?>/compliances/reject/<?= (int)$c['id'] ?>" data-app-confirm="Reject this compliance?">
+    <form method="post" action="<?= $basePath ?>/compliances/reject/<?= (int)$c['id'] ?>" onsubmit="return confirm('Reject this compliance?');">
         <div class="form-group">
             <label class="form-label">Rejection reason</label>
             <textarea name="final_comment" class="form-control" rows="2" required></textarea>
@@ -465,6 +569,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
                     </select>
                 </div>
                 <div class="form-row-2-modal">
+                    <?php if (!$isTwoLevel): ?>
                     <div class="form-group mb-0">
                         <label class="form-label">Reviewer</label>
                         <select name="reviewer_id" class="form-control">
@@ -474,6 +579,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    <?php endif; ?>
                     <div class="form-group mb-0">
                         <label class="form-label">Approver</label>
                         <select name="approver_id" class="form-control">

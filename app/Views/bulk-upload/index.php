@@ -99,7 +99,7 @@ $fileIcon = function (string $name) {
   document.getElementById('bu-dropzone').addEventListener('click', function(e){ if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') fi.click(); });
   form.addEventListener('submit', function(e){
     var f = fi.files[0];
-    if (f && f.size > 50*1024*1024) { e.preventDefault(); (window.appAlert||alert)('File exceeds 50MB'); return false; }
+    if (f && f.size > 50*1024*1024) { e.preventDefault(); alert('File exceeds 50MB'); return false; }
     var sb = document.getElementById('bu-submit-btn');
     if (sb) { sb.disabled = true; sb.textContent = 'Uploading...'; }
   });

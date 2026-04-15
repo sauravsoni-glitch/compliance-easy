@@ -16,7 +16,7 @@
                 <div class="form-group">
                     <label class="form-label">Authority</label>
                     <select name="authority" class="form-control">
-                        <?php foreach (['RBI', 'NHB', 'SEBI', 'Internal'] as $a): ?>
+                        <?php foreach (['RBI', 'NHB', 'SEBI', 'IRDAI', 'Internal'] as $a): ?>
                         <option value="<?= $a ?>"><?= $a ?></option>
                         <?php endforeach; ?>
                     </select>

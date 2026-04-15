@@ -3,8 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#f3f4f6">
-    <style>html{background-color:#f3f4f6}</style>
     <title><?= htmlspecialchars($pageTitle ?? 'Compliance') ?> - Easy Home Finance</title>
     <link rel="stylesheet" href="<?= htmlspecialchars($basePath ?? '', ENT_QUOTES, 'UTF-8') ?>/assets/css/app.css?v=<?= rawurlencode((string)($assetVersion ?? '1')) ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -14,9 +12,7 @@
     $navRole = (string)($user['role_slug'] ?? '');
     $navAdmin = ($navRole === 'admin');
     $navMaker = ($navRole === 'maker');
-    /** Legacy IT role (separate app): treat like admin for navigation to base modules. */
-    $navPrivileged = $navAdmin || ($navRole === 'it_admin');
-    $navCanCreate = $navPrivileged || $navMaker;
+    $navCanCreate = $navAdmin || $navMaker;
     ?>
     <div class="app-layout">
         <aside class="sidebar">
@@ -53,13 +49,13 @@
                         <i class="fas fa-brain"></i>
                         <span>Circular Intelligence</span>
                     </a>
-                    <?php if ($navPrivileged): ?>
+                    <?php if ($navAdmin): ?>
                     <a href="<?= $basePath ?? '' ?>/doa" class="nav-item <?= ($currentPage ?? '') === 'doa' ? 'active' : '' ?>">
                         <i class="fas fa-users"></i>
                         <span>Delegation of Authority (DOA)</span>
                     </a>
                     <?php endif; ?>
-                    <?php if ($navPrivileged): ?>
+                    <?php if ($navAdmin): ?>
                     <a href="<?= $basePath ?? '' ?>/authority-matrix" class="nav-item <?= ($currentPage ?? '') === 'authority-matrix' ? 'active' : '' ?>">
                         <i class="fas fa-th"></i>
                         <span>Authority Matrix</span>
@@ -112,7 +108,7 @@
             <header class="top-header">
                 <form action="<?= $basePath ?? '' ?>/compliance" method="get" class="header-search" role="search">
                     <i class="fas fa-search"></i>
-                    <input type="search" name="search" placeholder="Search compliances…" class="search-input" value="<?= htmlspecialchars($_GET['search'] ?? '') ?>">
+                    <input type="search" name="search" placeholder="Search compliances..." class="search-input" value="<?= htmlspecialchars($_GET['search'] ?? '') ?>">
                 </form>
                 <div class="header-actions">
                     <div class="header-dropdown-wrap">
@@ -146,7 +142,7 @@
                         </button>
                         <div id="panel-user-menu" class="header-dropdown-panel header-dropdown-panel-user" aria-hidden="true">
                             <a href="<?= $basePath ?? '' ?>/organization" class="panel-item"><i class="fas fa-user"></i> View Profile</a>
-                            <a href="<?= $basePath ?? '' ?>/settings<?= $navPrivileged ? '' : '?tab=security' ?>" class="panel-item"><i class="fas fa-key"></i> Change Password</a>
+                            <a href="<?= $basePath ?? '' ?>/settings<?= $navAdmin ? '' : '?tab=security' ?>" class="panel-item"><i class="fas fa-key"></i> Change Password</a>
                             <a href="<?= $basePath ?? '' ?>/logout" class="panel-item"><i class="fas fa-sign-out-alt"></i> Logout</a>
                         </div>
                     </div>
@@ -155,16 +151,6 @@
             <main class="content-area">
                 <?= $content ?? '' ?>
             </main>
-        </div>
-    </div>
-    <div id="app-confirm-overlay" class="app-confirm-overlay" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
-        <div class="app-confirm-card">
-            <h2 id="app-confirm-title" class="app-confirm-title">Confirm</h2>
-            <p id="app-confirm-message" class="app-confirm-message"></p>
-            <div class="app-confirm-actions">
-                <button type="button" class="btn btn-secondary" id="app-confirm-cancel">Cancel</button>
-                <button type="button" class="btn btn-primary" id="app-confirm-ok">OK</button>
-            </div>
         </div>
     </div>
     <script src="<?= htmlspecialchars($basePath ?? '', ENT_QUOTES, 'UTF-8') ?>/assets/js/app.js?v=<?= rawurlencode((string)($assetVersion ?? '1')) ?>"></script>

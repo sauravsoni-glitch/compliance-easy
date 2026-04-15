@@ -2,6 +2,9 @@
 
 namespace App\Core;
 
+use PHPMailer\PHPMailer\Exception as PhpMailerException;
+use PHPMailer\PHPMailer\PHPMailer;
+
 final class Mailer
 {
     private static function config(): array
@@ -26,217 +29,57 @@ final class Mailer
         if (empty($cfg['enabled'])) {
             return [false, null];
         }
+        $from = trim((string) ($cfg['from_email'] ?? ''));
+        if ($from === '') {
+            return [false, 'MAIL_FROM must be set'];
+        }
 
         $subject = 'You have been invited to Easy Home Finance';
-        [$htmlBody, $altBody] = self::inviteBody($toEmail, $toName, $inviteLink, $roleLabel, $department);
-        return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody);
-    }
+        [$htmlBody, $altBody] = self::inviteBody($toName, $inviteLink, $roleLabel, $department);
+        $provider = strtolower((string) ($cfg['provider'] ?? 'smtp'));
 
-    /**
-     * Password reset link. Set MAIL_FROM in production (no logged-in user when sending from worker).
-     *
-     * @return array{0:bool,1:?string}
-     */
-    public static function sendPasswordReset(
-        array $appConfig,
-        string $toEmail,
-        string $toName,
-        string $resetLink
-    ): array {
-        $cfg = self::config();
-        if (empty($cfg['enabled'])) {
-            return [false, 'Mail is disabled'];
+        if ($provider === 'mailgun') {
+            return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody);
         }
-        $subject = 'Reset your Easy Home Finance password';
-        $safeName = htmlspecialchars($toName !== '' ? $toName : 'there', ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $safeLink = htmlspecialchars($resetLink, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $htmlBody = '<div style="background:#f3f4f6;padding:24px 12px;font-family:Segoe UI,system-ui,Roboto,sans-serif;">'
-            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">'
-            . '<tr><td style="padding:24px 22px 8px;">'
-            . '<h1 style="margin:0 0 8px;font-size:20px;color:#111827;">Password reset</h1>'
-            . '<p style="margin:0;font-size:15px;line-height:1.55;color:#374151;">Hi ' . $safeName . ', we received a request to reset your password. The link below is valid for <strong>1 hour</strong>.</p>'
-            . '</td></tr>'
-            . '<tr><td style="padding:8px 22px 20px;text-align:center;">'
-            . '<a href="' . $safeLink . '" style="display:inline-block;padding:14px 28px;background:#111827;color:#fff !important;text-decoration:none;border-radius:10px;font-size:15px;font-weight:700;">Reset password</a>'
-            . '</td></tr>'
-            . '<tr><td style="padding:0 22px 22px;font-size:12px;color:#6b7280;line-height:1.5;">If you did not request this, you can ignore this email. Your password will not change.</td></tr>'
-            . '</table></div>';
-        $plain = "Password reset\n\nUse this link (valid 1 hour):\n{$resetLink}\n\nIf you did not request this, ignore this email.\n";
-
-        return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $plain);
-    }
-
-    /**
-     * Notify owner / reviewer / approver after a compliance is created (Mailgun).
-     * Sends one message per recipient; failures are logged only (does not throw).
-     *
-     * @param array<int, array{email: string, name: string}> $recipients Distinct recipients (email => ...)
-     * @return array{ok: int, fail: int, results: list<array{email: string, name: string, ok: bool, error: ?string}>}
-     */
-    public static function sendComplianceCreatedToRecipients(
-        array $appConfig,
-        array $recipients,
-        string $subject,
-        string $plainBody,
-        ?string $htmlBody = null
-    ): array {
-        return self::sendNotificationToRecipients($appConfig, $recipients, $subject, $plainBody, [], $htmlBody);
-    }
-
-    /**
-     * Generic notification sender (Mailgun) for multiple recipients.
-     *
-     * @param array<int, array{email: string, name: string}> $recipients
-     * @param list<array{email: string, name?: string}> $ccRecipients Used only when there is exactly one primary recipient (e.g. reminder to owner with CC).
-     * @return array{ok: int, fail: int, results: list<array{email: string, name: string, ok: bool, error: ?string}>}
-     */
-    public static function sendNotificationToRecipients(
-        array $appConfig,
-        array $recipients,
-        string $subject,
-        string $plainBody,
-        array $ccRecipients = [],
-        ?string $htmlBody = null
-    ): array {
-        $cfg = self::config();
-        $results = [];
-        $ok = 0;
-        $fail = 0;
-        if ($recipients === []) {
-            return ['ok' => 0, 'fail' => 0, 'results' => []];
-        }
-        if (empty($cfg['enabled'])) {
-            foreach ($recipients as $r) {
-                $email = trim((string) ($r['email'] ?? ''));
-                $name = trim((string) ($r['name'] ?? ''));
-                $results[] = ['email' => $email, 'name' => $name, 'ok' => false, 'error' => 'Mail is disabled in config'];
-                $fail++;
+        if ($provider === 'auto') {
+            [$ok, $err] = self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody);
+            if ($ok) {
+                return [true, null];
             }
 
-            return ['ok' => $ok, 'fail' => $fail, 'results' => $results];
-        }
-        $htmlOut = $htmlBody ?? (
-            '<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.5;color:#111827;">'
-            . nl2br(htmlspecialchars($plainBody, ENT_QUOTES | ENT_HTML5, 'UTF-8'), false)
-            . '</div>'
-        );
-        $ccHeader = '';
-        if (count($recipients) === 1 && $ccRecipients !== []) {
-            $ccHeader = self::formatCcHeader($ccRecipients);
-        }
-        foreach ($recipients as $r) {
-            $email = trim((string) ($r['email'] ?? ''));
-            $name = trim((string) ($r['name'] ?? ''));
-            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $results[] = ['email' => $email, 'name' => $name, 'ok' => false, 'error' => 'Invalid or missing email'];
-                $fail++;
-                continue;
-            }
-            [$sent, $err] = self::sendViaMailgun($cfg, $appConfig, $email, $name, $subject, $htmlOut, $plainBody, $ccHeader);
-            if ($sent) {
-                $ok++;
-                $results[] = ['email' => $email, 'name' => $name, 'ok' => true, 'error' => null];
-            } else {
-                $fail++;
-                $results[] = ['email' => $email, 'name' => $name, 'ok' => false, 'error' => $err];
-            }
+            return self::sendViaSmtp($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, $err);
         }
 
-        return ['ok' => $ok, 'fail' => $fail, 'results' => $results];
+        return self::sendViaSmtp($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, null);
     }
 
     /**
-     * Workspace invite: form-style HTML + plain text (email-client friendly tables).
-     *
      * @return array{0:string,1:string}
      */
-    private static function inviteBody(string $toEmail, string $toName, string $inviteLink, string $roleLabel, string $department): array
+    private static function inviteBody(string $toName, string $inviteLink, string $roleLabel, string $department): array
     {
         $safeName = htmlspecialchars($toName !== '' ? $toName : 'there', ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $safeEmail = htmlspecialchars($toEmail, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $safeLink = htmlspecialchars($inviteLink, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $safeRole = htmlspecialchars($roleLabel, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $deptVal = $department !== '' ? htmlspecialchars($department, ENT_QUOTES | ENT_HTML5, 'UTF-8') : '<span style="color:#9ca3af;">—</span>';
-        $deptPlain = $department !== '' ? $department : '—';
-
-        $row = static function (string $label, string $valueHtml): string {
-            return '<tr>'
-                . '<td style="padding:12px 16px;width:38%;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;vertical-align:top;border-top:1px solid #e5e7eb;background:#fafafa;">' . $label . '</td>'
-                . '<td style="padding:12px 16px;font-size:15px;color:#111827;font-weight:600;vertical-align:top;border-top:1px solid #e5e7eb;">' . $valueHtml . '</td>'
-                . '</tr>';
-        };
-
-        $inner = '
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;font-family:Segoe UI,system-ui,Roboto,Helvetica,Arial,sans-serif;">
-  <tr>
-    <td style="background:linear-gradient(135deg,#1f2937 0%,#111827 50%,#7f1d1d 100%);border-radius:14px 14px 0 0;padding:26px 24px;color:#fff;">
-      <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.88;">Workspace invitation</div>
-      <h1 style="margin:10px 0 4px;font-size:21px;line-height:1.3;font-weight:700;">You&rsquo;re invited to Easy Home Finance</h1>
-      <p style="margin:0;font-size:14px;opacity:0.9;line-height:1.5;">Hi ' . $safeName . ', use the secure link below to finish setup and access the <strong>compliance workspace</strong>.</p>
-    </td>
-  </tr>
-  <tr>
-    <td style="background:#fff;padding:0;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 14px 14px;overflow:hidden;">
-      <div style="padding:18px 20px 8px;font-size:11px;font-weight:700;letter-spacing:0.06em;color:#6b7280;text-transform:uppercase;">Invitation details <span style="font-weight:600;color:#9ca3af;">(read-only summary)</span></div>
-      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-        ' . $row('Product', '<span style="font-weight:600;">Easy Home Finance</span> <span style="color:#6b7280;font-weight:500;">— Compliance &amp; reporting</span>') . '
-        ' . $row('Invitee name', $safeName) . '
-        ' . $row('Invitee email', '<span style="word-break:break-all;">' . $safeEmail . '</span>') . '
-        ' . $row('Assigned role', $safeRole . ' <span style="display:block;margin-top:6px;font-size:13px;font-weight:500;color:#6b7280;">Controls what you can do with compliance items (create, review, approve, admin).</span>') . '
-        ' . $row('Department', $deptVal) . '
-        ' . $row('Link valid for', '<span style="color:#b91c1c;font-weight:700;">24 hours</span> <span style="color:#6b7280;font-weight:500;">from when this email was sent</span>') . '
-      </table>
-      <div style="padding:22px 20px 10px;text-align:center;">
-        <a href="' . $safeLink . '" style="display:inline-block;padding:14px 28px;background:#111827;color:#fff !important;text-decoration:none;border-radius:10px;font-size:15px;font-weight:700;letter-spacing:0.02em;">Join workspace</a>
-      </div>
-      <div style="padding:0 20px 22px;">
-        <p style="margin:0 0 8px;font-size:12px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Or copy invitation link</p>
-        <p style="margin:0;padding:12px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;word-break:break-all;color:#374151;line-height:1.5;">' . $safeLink . '</p>
-      </div>
-      <div style="padding:14px 20px 20px;background:#f3f4f6;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;line-height:1.55;">
-        If you did not expect this invitation, you can ignore this message. For help, contact your organization administrator.
-      </div>
-    </td>
-  </tr>
-</table>';
-
-        $html = '<div style="background:#f3f4f6;padding:24px 12px;">' . $inner . '</div>';
-
-        $text = "WORKSPACE INVITATION — Easy Home Finance (Compliance)\n"
-            . str_repeat('=', 48) . "\n\n"
-            . 'Hi ' . ($toName !== '' ? $toName : 'there') . ",\n\n"
-            . "You've been invited to the compliance workspace.\n\n"
-            . "INVITATION DETAILS\n"
-            . "- Invitee name: " . ($toName !== '' ? $toName : '—') . "\n"
-            . "- Invitee email: {$toEmail}\n"
-            . "- Assigned role: {$roleLabel}\n"
-            . "- Department: {$deptPlain}\n"
-            . "- Link expires: 24 hours from send\n\n"
-            . "JOIN (open in browser):\n{$inviteLink}\n\n"
-            . "If you did not expect this, ignore this email.\n";
+        $deptLine = $department !== ''
+            ? '<p><strong>Department:</strong> ' . htmlspecialchars($department, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>'
+            : '';
+        $html = '<p>Hi ' . $safeName . ',</p>'
+            . '<p>You have been invited to collaborate on <strong>Easy Home Finance</strong>.</p>'
+            . '<p>Your role: <strong>' . $safeRole . '</strong></p>'
+            . $deptLine
+            . '<p><a href="' . $safeLink . '" style="display:inline-block;padding:12px 20px;background:#111827;color:#fff;text-decoration:none;border-radius:8px;">Join workspace</a></p>'
+            . '<p style="color:#6b7280;font-size:14px;">Or copy this link:<br>' . $safeLink . '</p>'
+            . '<p style="color:#6b7280;font-size:14px;">This link expires in 24 hours.</p>';
+        $text = "Hi,\n\nYou have been invited to Easy Home Finance.\nRole: {$roleLabel}\n\nJoin: {$inviteLink}\n";
 
         return [$html, $text];
     }
 
     /**
-     * @param list<array{email: string, name?: string}> $ccRecipients
+     * @return array{0:bool,1:?string}
      */
-    private static function formatCcHeader(array $ccRecipients): string
-    {
-        $parts = [];
-        foreach ($ccRecipients as $c) {
-            $em = trim((string) ($c['email'] ?? ''));
-            if ($em === '' || !filter_var($em, FILTER_VALIDATE_EMAIL)) {
-                continue;
-            }
-            $nm = trim((string) ($c['name'] ?? ''));
-            $parts[] = $nm !== '' ? $nm . ' <' . $em . '>' : $em;
-        }
-
-        return implode(', ', $parts);
-    }
-
-    private static function sendViaMailgun(
+    private static function sendViaSmtp(
         array $cfg,
         array $appConfig,
         string $toEmail,
@@ -244,34 +87,77 @@ final class Mailer
         string $subject,
         string $htmlBody,
         string $altBody,
-        string $ccHeader = ''
+        ?string $mailgunError
+    ): array {
+        if (!class_exists(PHPMailer::class)) {
+            return [false, 'PHPMailer not installed. Run: composer install'];
+        }
+        $from = trim((string) ($cfg['from_email'] ?? ''));
+        $user = trim((string) ($cfg['username'] ?? ''));
+        $pass = preg_replace('/\s+/', '', (string) ($cfg['password'] ?? ''));
+        if ($from === '' || $user === '' || $pass === '') {
+            if ($mailgunError !== null) {
+                return [false, 'Mailgun failed and SMTP credentials are missing. Mailgun error: ' . $mailgunError];
+            }
+
+            return [false, 'MAIL_FROM, MAIL_USERNAME, and MAIL_PASSWORD must be set'];
+        }
+
+        $mail = new PHPMailer(true);
+        try {
+            $mail->isSMTP();
+            $mail->Host = (string) ($cfg['host'] ?? 'smtp.gmail.com');
+            $mail->SMTPAuth = true;
+            $mail->Username = $user;
+            $mail->Password = $pass;
+            $enc = (string) ($cfg['encryption'] ?? 'tls');
+            if ($enc === 'ssl') {
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+            } else {
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            }
+            $mail->Port = (int) ($cfg['port'] ?? 587);
+            $mail->CharSet = 'UTF-8';
+            $mail->setFrom($from, (string) ($cfg['from_name'] ?? 'Easy Home Finance'));
+            $mail->addAddress($toEmail, $toName !== '' ? $toName : $toEmail);
+            $mail->isHTML(true);
+            $mail->Subject = $subject;
+            $mail->Body = $htmlBody;
+            $mail->AltBody = $altBody;
+            $mail->send();
+
+            return [true, null];
+        } catch (PhpMailerException $e) {
+            $msg = $mail->ErrorInfo ?: $e->getMessage();
+            if (!empty($appConfig['debug'])) {
+                error_log('Mailer::sendWorkspaceInvite: ' . $msg);
+            }
+
+            return [false, $msg];
+        }
+    }
+
+    /**
+     * @return array{0:bool,1:?string}
+     */
+    private static function sendViaMailgun(
+        array $cfg,
+        array $appConfig,
+        string $toEmail,
+        string $toName,
+        string $subject,
+        string $htmlBody,
+        string $altBody
     ): array {
         if (!function_exists('curl_init')) {
-            self::logMailgun($cfg, [
-                'ok' => false,
-                'error' => 'Mailgun requires PHP curl extension',
-            ]);
             return [false, 'Mailgun requires PHP curl extension'];
         }
         $domain = trim((string) ($cfg['mailgun_domain'] ?? ''));
         $apiKey = trim((string) ($cfg['mailgun_api_key'] ?? ''));
         $endpoint = rtrim((string) ($cfg['mailgun_endpoint'] ?? 'https://api.mailgun.net'), '/');
         $fromEmail = trim((string) ($cfg['from_email'] ?? ''));
-        if ($fromEmail === '') {
-            $authUser = Auth::user();
-            if (is_array($authUser)) {
-                $fromEmail = trim((string) ($authUser['email'] ?? ''));
-            }
-        }
         if ($domain === '' || $apiKey === '' || $fromEmail === '') {
-            self::logMailgun($cfg, [
-                'ok' => false,
-                'error' => 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and From email (MAIL_FROM / from_email or logged-in user) must be set',
-                'from' => $fromEmail,
-                'to' => $toEmail,
-                'subject' => $subject,
-            ]);
-            return [false, 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and From email must be set'];
+            return [false, 'MAILGUN_DOMAIN, MAILGUN_API_KEY, and MAIL_FROM must be set'];
         }
 
         $to = $toName !== '' ? $toName . ' <' . $toEmail . '>' : $toEmail;
@@ -281,30 +167,18 @@ final class Mailer
 
         $ch = curl_init($url);
         if ($ch === false) {
-            self::logMailgun($cfg, [
-                'ok' => false,
-                'error' => 'Could not initialize Mailgun request',
-                'from' => $from,
-                'to' => $to,
-                'subject' => $subject,
-                'url' => $url,
-            ]);
             return [false, 'Could not initialize Mailgun request'];
-        }
-        $post = [
-            'from' => $from,
-            'to' => $to,
-            'subject' => $subject,
-            'html' => $htmlBody,
-            'text' => $altBody,
-        ];
-        if ($ccHeader !== '') {
-            $post['cc'] = $ccHeader;
         }
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $post,
+            CURLOPT_POSTFIELDS => [
+                'from' => $from,
+                'to' => $to,
+                'subject' => $subject,
+                'html' => $htmlBody,
+                'text' => $altBody,
+            ],
             CURLOPT_USERPWD => 'api:' . $apiKey,
             CURLOPT_TIMEOUT => 20,
         ]);
@@ -314,15 +188,6 @@ final class Mailer
         curl_close($ch);
 
         if ($raw === false) {
-            self::logMailgun($cfg, [
-                'ok' => false,
-                'error' => 'Mailgun request failed: ' . $curlErr,
-                'from' => $from,
-                'to' => $to,
-                'subject' => $subject,
-                'url' => $url,
-                'http_status' => $status,
-            ]);
             return [false, 'Mailgun request failed: ' . $curlErr];
         }
         if ($status < 200 || $status >= 300) {
@@ -330,50 +195,10 @@ final class Mailer
             if (strlen($body) > 350) {
                 $body = substr($body, 0, 350) . '...';
             }
-            self::logMailgun($cfg, [
-                'ok' => false,
-                'error' => 'Mailgun HTTP ' . $status,
-                'from' => $from,
-                'to' => $to,
-                'subject' => $subject,
-                'url' => $url,
-                'http_status' => $status,
-                'response' => $body,
-            ]);
 
             return [false, 'Mailgun HTTP ' . $status . ': ' . $body];
         }
 
-        self::logMailgun($cfg, [
-            'ok' => true,
-            'from' => $from,
-            'to' => $to,
-            'subject' => $subject,
-            'url' => $url,
-            'http_status' => $status,
-            'response' => trim((string) $raw),
-        ]);
-
         return [true, null];
-    }
-
-    private static function logMailgun(array $cfg, array $event): void
-    {
-        $path = (string) ($cfg['mailgun_log_path'] ?? '');
-        if ($path === '') {
-            $path = dirname(__DIR__, 2) . '/storage/logs/mailgun.log';
-        }
-
-        $dir = dirname($path);
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0775, true);
-        }
-
-        $line = [
-            'ts' => date('c'),
-            'event' => 'mailgun_send',
-        ] + $event;
-
-        @file_put_contents($path, json_encode($line, JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND);
     }
 }
