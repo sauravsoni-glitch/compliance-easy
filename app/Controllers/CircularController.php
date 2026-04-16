@@ -641,14 +641,14 @@ class CircularController extends BaseController
         }
 
         if ($hasEv) {
-            $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, start_date, due_date, expected_date, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, start_date, due_date, expected_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
             $ins->execute([
                 $orgId, $cmpCode, $title, $authId, $circularRef, $dept, $risk, $pri, $freq, $desc, $penalty,
                 $ownerId, $reviewerId, $approverId, $workflow === 'three-level' ? 'three-level' : 'two-level',
                 1, 'Supporting Documentation', json_encode([]), $c['circular_date'] ?: date('Y-m-d'), $due, $exp, 'pending', Auth::id(),
             ]);
         } else {
-            $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, start_date, due_date, expected_date, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, start_date, due_date, expected_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
             $ins->execute([
                 $orgId, $cmpCode, $title, $authId, $circularRef, $dept, $risk, $pri, $freq, $desc, $penalty,
                 $ownerId, $reviewerId, $approverId, $workflow === 'three-level' ? 'three-level' : 'two-level',

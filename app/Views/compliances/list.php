@@ -187,6 +187,7 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
                     <th>Framework</th>
                     <th>Department</th>
                     <th>Priority</th>
+                    <th>Created Date</th>
                     <th>Due Date</th>
                     <th>Status</th>
                     <th>Action</th>
@@ -248,6 +249,7 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
                     <td><?= htmlspecialchars($row['authority_name'] ?? '—') ?></td>
                     <td><?= htmlspecialchars($row['department']) ?></td>
                     <td><span class="badge <?= $pcls ?>"><?= htmlspecialchars($plab) ?></span></td>
+                    <td><?= !empty($row['created_at']) ? date('M j, Y', strtotime($row['created_at'])) : '—' ?></td>
                     <td><?= !empty($row['due_date']) ? date('M j, Y', strtotime($row['due_date'])) : '—' ?></td>
                     <td><span class="badge <?= $scls ?>"><?= htmlspecialchars($slab) ?></span></td>
                     <td class="compliance-list-actions">
@@ -259,7 +261,7 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($items)): ?>
-                <tr><td colspan="8" class="text-muted">No compliances found.</td></tr>
+                <tr><td colspan="9" class="text-muted">No compliances found.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>

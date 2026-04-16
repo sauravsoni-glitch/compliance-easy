@@ -693,10 +693,10 @@ class BulkUploadController extends BaseController
                     $num = (int) $stmt->fetchColumn();
                     $code = 'CMP-' . str_pad((string) $num, 3, '0', STR_PAD_LEFT);
                     if ($hasEt) {
-                        $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, due_date, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                        $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, due_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
                         $ins->execute([$orgId, $code, $payload['title'], $authId, $payload['department'], $payload['risk'], $payload['priority'], $payload['frequency'], $payload['maker_id'], $payload['reviewer_id'] ?: null, $payload['approver_id'] ?: null, 'three-level', 0, null, '[]', $payload['due_date'], 'pending', Auth::id()]);
                     } else {
-                        $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, due_date, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                        $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, due_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
                         $ins->execute([$orgId, $code, $payload['title'], $authId, $payload['department'], $payload['risk'], $payload['priority'], $payload['frequency'], $payload['maker_id'], $payload['reviewer_id'] ?: null, $payload['approver_id'] ?: null, 'three-level', 0, '[]', $payload['due_date'], 'pending', Auth::id()]);
                     }
                 } elseif ($module === 'doa') {
@@ -911,10 +911,10 @@ class BulkUploadController extends BaseController
             $code = 'CMP-' . str_pad((string) $num, 3, '0', STR_PAD_LEFT);
             try {
                 if ($hasEt) {
-                    $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, due_date, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                    $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, due_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
                     $ins->execute([$orgId, $code, $title, $authId, $dept, $risk, $prio, $freq, $mk, $rv ?: null, $ap ?: null, 'three-level', 0, null, '[]', $due, 'pending', Auth::id()]);
                 } else {
-                    $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, due_date, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                    $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, due_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
                     $ins->execute([$orgId, $code, $title, $authId, $dept, $risk, $prio, $freq, $mk, $rv ?: null, $ap ?: null, 'three-level', 0, '[]', $due, 'pending', Auth::id()]);
                 }
                 $ok++;
