@@ -152,6 +152,23 @@ class ComplianceController extends BaseController
         return $row ?: null;
     }
 
+    /** Due date / priority edit: admin, or assigned maker in draft/pending/rework. */
+    private function canEditComplianceRecord(array $c): bool
+    {
+        if (!Auth::canAccessCompliance($c)) {
+            return false;
+        }
+        if (Auth::isAdmin()) {
+            return true;
+        }
+        $st = $c['status'] ?? '';
+        if (!in_array($st, ['draft', 'pending', 'rework'], true)) {
+            return false;
+        }
+
+        return Auth::isMaker() && (int) ($c['owner_id'] ?? 0) === (int) Auth::id();
+    }
+
     public function redirectToComplianceList(): void
     {
         Auth::requireAuth();
