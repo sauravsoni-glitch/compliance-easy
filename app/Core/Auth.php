@@ -189,4 +189,46 @@ class Auth
 
         return self::complianceScopeSql($p);
     }
+
+    /** Session map: compliance_id => unix time user opened it from the header bell (?seen=1). */
+    private const HEADER_NOTIF_READ_KEY = 'header_notif_read';
+
+    /**
+     * After the user opens an alert from the bell, hide it from the badge until the row changes.
+     *
+     * @param positive-int $complianceId
+     */
+    public static function markHeaderNotificationRead(int $complianceId): void
+    {
+        self::init();
+        if ($complianceId < 1) {
+            return;
+        }
+        if (!isset($_SESSION[self::HEADER_NOTIF_READ_KEY]) || !is_array($_SESSION[self::HEADER_NOTIF_READ_KEY])) {
+            $_SESSION[self::HEADER_NOTIF_READ_KEY] = [];
+        }
+        $_SESSION[self::HEADER_NOTIF_READ_KEY][$complianceId] = time();
+    }
+
+    /**
+     * @param positive-int $complianceId
+     */
+    public static function headerNotificationIsUnread(int $complianceId, ?string $complianceUpdatedAt): bool
+    {
+        self::init();
+        $map = $_SESSION[self::HEADER_NOTIF_READ_KEY] ?? [];
+        if (!is_array($map) || !isset($map[$complianceId])) {
+            return true;
+        }
+        $readAt = (int) $map[$complianceId];
+        if ($readAt < 1) {
+            return true;
+        }
+        if ($complianceUpdatedAt === null || $complianceUpdatedAt === '') {
+            return false;
+        }
+        $updated = strtotime((string) $complianceUpdatedAt);
+
+        return $updated !== false && $updated > $readAt;
+    }
 }

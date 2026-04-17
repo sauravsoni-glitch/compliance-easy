@@ -272,28 +272,16 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         </div>
         <h4 class="st-subhead mt-3">Department Escalation Configuration</h4>
         <?php
-        $expanded = ['finance', 'compliance'];
+        // Show every department's level editor — the "Escalate To" dropdown of real users
+        // should be picker-able for all departments, not just Finance + Compliance.
         foreach ($depts as $slug => $d):
-            $isExp = in_array($slug, $expanded, true);
-            $useG = !empty($d['use_global']);
+            $isExp = true;
         ?>
         <div class="st-dept-card <?= $isExp ? 'st-dept-expanded' : '' ?>">
             <div class="st-dept-head">
                 <div>
                     <strong><?= htmlspecialchars($d['name'] ?? $slug) ?></strong>
-                    <?php if ($useG && !$isExp): ?>
-                    <span class="text-muted text-sm"> — Using Global</span>
-                    <?php else: ?>
                     <span class="st-pill st-pill-admin" style="font-size:11px;margin-left:0.5rem;">Active</span>
-                    <?php endif; ?>
-                </div>
-                <div class="st-dept-head-actions">
-                    <label class="st-switch st-switch-sm" title="On = use global matrix for this department">
-                        <span class="text-muted text-sm mr-1">Global</span>
-                        <input type="hidden" name="esc[<?= htmlspecialchars($slug) ?>][use_global]" value="0">
-                        <input type="checkbox" name="esc[<?= htmlspecialchars($slug) ?>][use_global]" value="1" <?= $useG ? 'checked' : '' ?>>
-                        <span class="st-slider"></span>
-                    </label>
                 </div>
             </div>
             <?php if ($isExp): ?>
@@ -309,8 +297,22 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                         <tr>
                             <td><?= $i + 1 ?></td>
                             <td><input type="number" class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][d]" value="<?= htmlspecialchars((string)($L['d'] ?? '')) ?>" min="0"></td>
-                            <td><input type="text" class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][to]" value="<?= htmlspecialchars($L['to'] ?? '') ?>"></td>
-                            <td><input type="text" class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][tpl]" value="<?= htmlspecialchars($L['tpl'] ?? '') ?>"></td>
+                            <td>
+                                <?php $selectedTo = (int) ($L['to'] ?? 0); ?>
+                                <select class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][to]">
+                                    <option value="0">— pick a user —</option>
+                                    <?php foreach ($orgUsers as $u):
+                                        if (($u['status'] ?? '') !== 'active') continue;
+                                        $uid = (int) $u['id'];
+                                    ?>
+                                    <option value="<?= $uid ?>" <?= $selectedTo === $uid ? 'selected' : '' ?>><?= htmlspecialchars(($u['full_name'] ?? '') . ' — ' . ($u['email'] ?? '')) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                            <td>
+                                <span class="text-sm"><?= htmlspecialchars($L['tpl'] ?? '') ?></span>
+                                <input type="hidden" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][tpl]" value="<?= htmlspecialchars($L['tpl'] ?? '') ?>">
+                            </td>
                         </tr>
                         <?php endfor; ?>
                     </tbody>
@@ -319,7 +321,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
             <?php endif; ?>
         </div>
         <?php endforeach; ?>
-        <p class="text-muted text-sm st-fallback-note"><strong>Fallback:</strong> Departments marked “Using Global” follow the global escalation matrix. High-risk items follow accelerated rules when enabled.</p>
+        <p class="text-muted text-sm st-fallback-note"><strong>Note:</strong> Department-wise escalation is active for all departments. High-risk items follow accelerated rules when enabled.</p>
         <div class="st-actions-right">
             <button type="submit" class="btn btn-primary">Save Escalation Settings</button>
         </div>
@@ -372,21 +374,52 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         <div class="table-wrap">
             <table class="data-table st-pre-dept-table">
                 <thead>
-                    <tr><th>Department</th><th>Compliance Owner</th><th>Reporting Manager</th><th>Department Head</th><th>Escalation</th></tr>
+                    <tr><th>Department</th><th>Compliance Owner</th><th>Reporting Manager</th><th>Department Head</th></tr>
                 </thead>
                 <tbody>
+                    <?php
+                    $activeUsers = array_values(array_filter($orgUsers, static function ($u) {
+                        return (($u['status'] ?? '') === 'active');
+                    }));
+                    $userIdByName = [];
+                    foreach ($activeUsers as $u) {
+                        $nm = trim((string) ($u['full_name'] ?? ''));
+                        if ($nm !== '') {
+                            $userIdByName[strtolower($nm)] = (int) ($u['id'] ?? 0);
+                        }
+                    }
+                    ?>
                     <?php foreach (($preDue['depts'] ?? []) as $i => $pd): ?>
                     <tr>
                         <td><strong><?= htmlspecialchars($pd['name']) ?></strong></td>
-                        <td><input type="text" class="form-control form-control-sm" name="pre_dept[<?= $i ?>][owner]" value="<?= htmlspecialchars($pd['owner'] ?? '') ?>"></td>
-                        <td><input type="text" class="form-control form-control-sm" name="pre_dept[<?= $i ?>][mgr]" value="<?= htmlspecialchars($pd['mgr'] ?? '') ?>"></td>
-                        <td><input type="text" class="form-control form-control-sm" name="pre_dept[<?= $i ?>][head]" value="<?= htmlspecialchars($pd['head'] ?? '') ?>"></td>
+                        <?php
+                        $selectedOwnerId = (int) ($pd['owner_id'] ?? ($userIdByName[strtolower(trim((string) ($pd['owner'] ?? '')))] ?? 0));
+                        $selectedMgrId = (int) ($pd['mgr_id'] ?? ($userIdByName[strtolower(trim((string) ($pd['mgr'] ?? '')))] ?? 0));
+                        $selectedHeadId = (int) ($pd['head_id'] ?? ($userIdByName[strtolower(trim((string) ($pd['head'] ?? '')))] ?? 0));
+                        ?>
                         <td>
-                            <label class="st-switch st-switch-sm">
-                                <input type="hidden" name="pre_dept[<?= $i ?>][esc]" value="0">
-                                <input type="checkbox" name="pre_dept[<?= $i ?>][esc]" value="1" <?= !empty($pd['esc']) ? 'checked' : '' ?>>
-                                <span class="st-slider"></span>
-                            </label>
+                            <select class="form-control form-control-sm" name="pre_dept[<?= $i ?>][owner_id]">
+                                <option value="0">— Select user —</option>
+                                <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
+                                <option value="<?= $uid ?>" <?= $selectedOwnerId === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                        <td>
+                            <select class="form-control form-control-sm" name="pre_dept[<?= $i ?>][mgr_id]">
+                                <option value="0">— Select user —</option>
+                                <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
+                                <option value="<?= $uid ?>" <?= $selectedMgrId === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                        <td>
+                            <select class="form-control form-control-sm" name="pre_dept[<?= $i ?>][head_id]">
+                                <option value="0">— Select user —</option>
+                                <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
+                                <option value="<?= $uid ?>" <?= $selectedHeadId === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
+                                <?php endforeach; ?>
+                            </select>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -395,7 +428,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         </div>
         <h4 class="st-subhead">Email Template</h4>
         <div class="st-var-tags">
-            <?php foreach (['{{Compliance Name}}', '{{Compliance ID}}', '{{Department}}', '{{Due Date}}', '{{Days Remaining}}', '{{Assigned To}}'] as $tag): ?>
+            <?php foreach (['{{Compliance Name}}', '{{Compliance ID}}', '{{Department}}', '{{Due Date}}', '{{Days Remaining}}', '{{Assigned To}}', '{{Owner_Name}}', '{{Reviewer_Name}}', '{{Approver_Name}}'] as $tag): ?>
             <button type="button" class="btn btn-sm btn-secondary st-var-btn" data-tag="<?= htmlspecialchars($tag) ?>"><?= htmlspecialchars($tag) ?></button>
             <?php endforeach; ?>
         </div>
@@ -546,7 +579,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     </div>
                 </div>
                 <div class="st-var-tags flex-wrap">
-                    <?php foreach (['{{Compliance_ID}}', '{{Compliance_Title}}', '{{Department}}', '{{Due_Date}}', '{{Expected_Date}}', '{{Days_Overdue}}', '{{Risk_Level}}', '{{Escalation_Level}}', '{{Owner_Name}}', '{{Approver_Name}}'] as $tag): ?>
+                    <?php foreach (['{{Compliance_ID}}', '{{Compliance_Title}}', '{{Department}}', '{{Due_Date}}', '{{Expected_Date}}', '{{Days_Overdue}}', '{{Risk_Level}}', '{{Escalation_Level}}', '{{Owner_Name}}', '{{Reviewer_Name}}', '{{Approver_Name}}'] as $tag): ?>
                     <button type="button" class="btn btn-sm btn-secondary st-ins-tpl"><?= htmlspecialchars($tag) ?></button>
                     <?php endforeach; ?>
                 </div>

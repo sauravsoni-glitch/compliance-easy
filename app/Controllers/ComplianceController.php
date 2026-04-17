@@ -478,6 +478,11 @@ class ComplianceController extends BaseController
             $this->redirect('/compliance');
         }
 
+        $seen = $_GET['seen'] ?? '';
+        if ($seen !== '' && $seen !== '0' && strtolower((string) $seen) !== 'false') {
+            Auth::markHeaderNotificationRead($id);
+        }
+
         $tab = preg_replace('/[^a-z]/', '', $_GET['tab'] ?? 'overview') ?: 'overview';
 
         $stmt = $this->db->prepare('

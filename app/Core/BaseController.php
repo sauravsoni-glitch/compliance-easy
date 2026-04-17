@@ -101,7 +101,7 @@ abstract class BaseController
         }
         [$rb, $rbP] = Auth::complianceScopeSql('');
         $stmt = $this->db->prepare("
-            SELECT COUNT(*) FROM compliances WHERE organization_id = ? AND ($rb)
+            SELECT id, updated_at FROM compliances WHERE organization_id = ? AND ($rb)
             AND (
                 (due_date < CURDATE() AND status NOT IN ('approved', 'completed', 'rejected'))
                 OR (status = 'rework')
@@ -109,7 +109,14 @@ abstract class BaseController
             )
         ");
         $stmt->execute(array_merge([$orgId], $rbP));
-        return (int) $stmt->fetchColumn();
+        $n = 0;
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if (Auth::headerNotificationIsUnread((int) $row['id'], $row['updated_at'] ?? null)) {
+                $n++;
+            }
+        }
+
+        return $n;
     }
 
     protected function getNotifications(): array
@@ -134,10 +141,21 @@ abstract class BaseController
                 OR (risk_level IN ('high', 'critical') AND status NOT IN ('approved', 'completed'))
             )
             ORDER BY due_date ASC
-            LIMIT 15
+            LIMIT 60
         ");
         $stmt->execute(array_merge([$orgId], $rbP));
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if (!Auth::headerNotificationIsUnread((int) $row['id'], $row['updated_at'] ?? null)) {
+                continue;
+            }
+            $out[] = $row;
+            if (count($out) >= 15) {
+                break;
+            }
+        }
+
+        return $out;
     }
 
     /** Web/DB segment under upload_path (e.g. upload_history). */

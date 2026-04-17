@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\BaseController;
+use App\Core\PreDueAutomationService;
 
 class SettingsController extends BaseController
 {
@@ -45,42 +46,60 @@ class SettingsController extends BaseController
 
     private function defaultEscalation(): array
     {
+        // Same 4-level template sequence for every department. "to" defaults to 0
+        // so admin must explicitly pick a user from the dropdown for each level.
+        $standardLevels = [
+            ['d' => 0,  'to' => 0, 'tpl' => 'Escalation Level 1'],
+            ['d' => 3,  'to' => 0, 'tpl' => 'Escalation Level 2'],
+            ['d' => 7,  'to' => 0, 'tpl' => 'Escalation Level 2'],
+            ['d' => 14, 'to' => 0, 'tpl' => 'High Risk Escalation'],
+        ];
+        $deptNames = [
+            'finance'     => 'Finance',
+            'compliance'  => 'Compliance',
+            'legal'       => 'Legal',
+            'operations'  => 'Operations',
+            'it'          => 'IT',
+            'risk'        => 'Risk Management',
+            'hr'          => 'Human Resources',
+            'treasury'    => 'Treasury',
+            'credit'      => 'Credit',
+            'collections' => 'Collections',
+        ];
+        $depts = [];
+        foreach ($deptNames as $slug => $name) {
+            $depts[$slug] = [
+                'name' => $name,
+                'use_global' => false,
+                'active' => true,
+                'levels' => $standardLevels,
+            ];
+        }
         return [
             'enable_dept' => true,
             'accelerated_high_risk' => true,
-            'depts' => [
-                'finance' => [
-                    'name' => 'Finance',
-                    'use_global' => false,
-                    'active' => true,
-                    'levels' => [
-                        ['d' => 0, 'to' => 'Owner (Maker)', 'tpl' => 'Escalation Level 1'],
-                        ['d' => 3, 'to' => 'Finance Approver', 'tpl' => 'Escalation Level 2'],
-                        ['d' => 7, 'to' => 'Finance Head', 'tpl' => 'Escalation Level 2'],
-                        ['d' => 14, 'to' => 'Compliance Admin', 'tpl' => 'High Risk Escalation'],
-                    ],
-                ],
-                'compliance' => [
-                    'name' => 'Compliance',
-                    'use_global' => false,
-                    'active' => true,
-                    'levels' => [
-                        ['d' => 0, 'to' => 'Owner (Maker)', 'tpl' => 'Escalation Level 1'],
-                        ['d' => 2, 'to' => 'Department Checker', 'tpl' => 'Escalation Level 2'],
-                        ['d' => 5, 'to' => 'Department Approver', 'tpl' => 'High Risk Escalation'],
-                        ['d' => 10, 'to' => 'Compliance Admin', 'tpl' => 'High Risk Escalation'],
-                    ],
-                ],
-                'legal' => ['name' => 'Legal', 'use_global' => true, 'active' => true, 'levels' => []],
-                'operations' => ['name' => 'Operations', 'use_global' => true, 'active' => true, 'levels' => []],
-                'it' => ['name' => 'IT', 'use_global' => true, 'active' => true, 'levels' => []],
-                'risk' => ['name' => 'Risk Management', 'use_global' => true, 'active' => true, 'levels' => []],
-                'hr' => ['name' => 'Human Resources', 'use_global' => true, 'active' => true, 'levels' => []],
-                'treasury' => ['name' => 'Treasury', 'use_global' => true, 'active' => true, 'levels' => []],
-                'credit' => ['name' => 'Credit', 'use_global' => true, 'active' => true, 'levels' => []],
-                'collections' => ['name' => 'Collections', 'use_global' => true, 'active' => true, 'levels' => []],
-            ],
+            'depts' => $depts,
         ];
+    }
+
+    private function normalizeEscalation(array $current, array $defaults): array
+    {
+        $out = $current;
+        $out['enable_dept'] = array_key_exists('enable_dept', $out) ? !empty($out['enable_dept']) : !empty($defaults['enable_dept']);
+        $out['accelerated_high_risk'] = array_key_exists('accelerated_high_risk', $out) ? !empty($out['accelerated_high_risk']) : !empty($defaults['accelerated_high_risk']);
+        $out['depts'] = is_array($out['depts'] ?? null) ? $out['depts'] : [];
+
+        foreach (($defaults['depts'] ?? []) as $slug => $defDept) {
+            $curDept = is_array($out['depts'][$slug] ?? null) ? $out['depts'][$slug] : [];
+            $out['depts'][$slug] = [
+                'name' => $curDept['name'] ?? $defDept['name'],
+                'use_global' => false,
+                'active' => array_key_exists('active', $curDept) ? !empty($curDept['active']) : !empty($defDept['active']),
+                'levels' => (is_array($curDept['levels'] ?? null) && !empty($curDept['levels'])) ? $curDept['levels'] : ($defDept['levels'] ?? []),
+            ];
+        }
+
+        return $out;
     }
 
     private function defaultPreDue(): array
@@ -226,7 +245,9 @@ class SettingsController extends BaseController
         }
 
         $notifications = $this->getJson($orgId, self::KEYS['notifications'], $this->defaultNotifications());
-        $escalation = $this->getJson($orgId, self::KEYS['escalation'], $this->defaultEscalation());
+        $escalationDefaults = $this->defaultEscalation();
+        $escalation = $this->getJson($orgId, self::KEYS['escalation'], $escalationDefaults);
+        $escalation = $this->normalizeEscalation($escalation, $escalationDefaults);
         $preDue = $this->getJson($orgId, self::KEYS['pre_due'], $this->defaultPreDue());
         $templates = $this->getJson($orgId, self::KEYS['templates'], $this->defaultTemplates());
         $logs = $this->getJson($orgId, self::KEYS['logs'], $this->defaultLogs());
@@ -377,30 +398,38 @@ class SettingsController extends BaseController
             'accelerated_high_risk' => !empty($_POST['accelerated_high_risk']),
             'depts' => [],
         ];
+        // Pre-fetch the set of valid active user_ids in this org so we can validate
+        // every "Escalate To" pick (rejects 0 / cross-org / inactive ids).
+        $userIdStmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND status = ' . "'active'");
+        $userIdStmt->execute([$orgId]);
+        $validUserIds = array_map('intval', $userIdStmt->fetchAll(\PDO::FETCH_COLUMN));
         foreach ($base['depts'] as $slug => $def) {
             $row = $esc[$slug] ?? [];
-            $useGlobal = !empty($row['use_global']);
+            $useGlobal = false;
             $levels = [];
-            if (!$useGlobal && !empty($row['levels']) && is_array($row['levels'])) {
+            if (!empty($row['levels']) && is_array($row['levels'])) {
                 foreach ($row['levels'] as $L) {
                     if (!is_array($L)) {
                         continue;
                     }
+                    // "to" is now the user_id of the person to escalate to (0 = unset).
+                    $toUid = (int) ($L['to'] ?? 0);
+                    if ($toUid > 0 && !in_array($toUid, $validUserIds, true)) {
+                        $toUid = 0; // foreign / inactive id — reject silently
+                    }
                     $levels[] = [
                         'd' => max(0, (int) ($L['d'] ?? 0)),
-                        'to' => trim($L['to'] ?? ''),
+                        'to' => $toUid,
                         'tpl' => trim($L['tpl'] ?? ''),
                     ];
                 }
             }
-            if ($useGlobal) {
-                $levels = [];
-            } elseif (empty($levels)) {
+            if (empty($levels)) {
                 $levels = $def['levels'] ?? [];
             }
             $out['depts'][$slug] = [
                 'name' => $def['name'],
-                'use_global' => $useGlobal,
+                'use_global' => false,
                 'active' => true,
                 'levels' => $levels,
             ];
@@ -416,6 +445,16 @@ class SettingsController extends BaseController
         $orgId = Auth::organizationId();
         $base = $this->defaultPreDue();
         $pre = $this->getJson($orgId, self::KEYS['pre_due'], $base);
+        $uStmt = $this->db->prepare('SELECT id, full_name FROM users WHERE organization_id = ? AND status = ?');
+        $uStmt->execute([$orgId, 'active']);
+        $activeUsers = $uStmt->fetchAll(\PDO::FETCH_ASSOC);
+        $activeUserMap = [];
+        foreach ($activeUsers as $u) {
+            $uid = (int) ($u['id'] ?? 0);
+            if ($uid > 0) {
+                $activeUserMap[$uid] = (string) ($u['full_name'] ?? '');
+            }
+        }
         $pre['enabled'] = !empty($_POST['pre_enabled']);
         $pre['daily_time'] = preg_match('/^\d{2}:\d{2}$/', $_POST['daily_time'] ?? '') ? $_POST['daily_time'] : '09:00';
         $pre['first'] = max(0, (int) ($_POST['first_days'] ?? 7));
@@ -428,11 +467,27 @@ class SettingsController extends BaseController
         if (is_array($postDepts)) {
             foreach ($base['depts'] as $i => $d) {
                 $pd = $postDepts[$i] ?? [];
+                $ownerId = (int) ($pd['owner_id'] ?? 0);
+                $mgrId = (int) ($pd['mgr_id'] ?? 0);
+                $headId = (int) ($pd['head_id'] ?? 0);
+                if (!isset($activeUserMap[$ownerId])) {
+                    $ownerId = 0;
+                }
+                if (!isset($activeUserMap[$mgrId])) {
+                    $mgrId = 0;
+                }
+                if (!isset($activeUserMap[$headId])) {
+                    $headId = 0;
+                }
                 $depts[] = [
                     'name' => $d['name'],
-                    'owner' => trim($pd['owner'] ?? $d['owner']),
-                    'mgr' => trim($pd['mgr'] ?? $d['mgr']),
-                    'head' => trim($pd['head'] ?? $d['head']),
+                    'owner_id' => $ownerId,
+                    'mgr_id' => $mgrId,
+                    'head_id' => $headId,
+                    // Keep labels for backward compatibility with existing UI/log usages.
+                    'owner' => $ownerId > 0 ? ($activeUserMap[$ownerId] ?? '') : '',
+                    'mgr' => $mgrId > 0 ? ($activeUserMap[$mgrId] ?? '') : '',
+                    'head' => $headId > 0 ? ($activeUserMap[$headId] ?? '') : '',
                     'esc' => !empty($pd['esc']),
                 ];
             }
@@ -443,22 +498,13 @@ class SettingsController extends BaseController
         $this->setJson($orgId, self::KEYS['pre_due'], $pre);
         $action = $_POST['pre_action'] ?? 'save';
         if ($action === 'test') {
-            $_SESSION['flash_success'] = 'Test email queued (demo — configure SMTP to send real mail).';
+            $runner = new PreDueAutomationService($this->db, $this->appConfig);
+            $r = $runner->runForOrganization($orgId);
+            $_SESSION['flash_success'] = 'Pre-due reminder run completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.';
         } elseif ($action === 'trigger') {
-            $_SESSION['flash_success'] = 'Manual trigger recorded (demo).';
-            $logs = $this->getJson($orgId, self::KEYS['logs'], $this->defaultLogs());
-            array_unshift($logs['entries'], [
-                'cid' => 'CMP-MANUAL',
-                'title' => 'Manual pre-due run',
-                'dept' => '—',
-                'rtype' => 'First',
-                'to' => Auth::user()['full_name'] ?? 'Admin',
-                'cc' => '',
-                'dt' => date('Y-m-d H:i'),
-                'ok' => true,
-            ]);
-            $logs['entries'] = array_slice($logs['entries'], 0, 50);
-            $this->setJson($orgId, self::KEYS['logs'], $logs);
+            $runner = new PreDueAutomationService($this->db, $this->appConfig);
+            $r = $runner->runForOrganization($orgId);
+            $_SESSION['flash_success'] = 'Manual pre-due trigger completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.';
         } else {
             $_SESSION['flash_success'] = 'Pre-due reminder configuration saved.';
         }

@@ -121,7 +121,7 @@
                         <div id="panel-notifications" class="header-dropdown-panel" aria-hidden="true">
                             <div class="panel-title">Notifications</div>
                             <?php foreach ($notifications ?? [] as $n): ?>
-                            <a href="<?= $basePath ?? '' ?>/compliance/view/<?= (int)$n['id'] ?>" class="panel-item">
+                            <a href="<?= $basePath ?? '' ?>/compliance/view/<?= (int)$n['id'] ?>?seen=1" class="panel-item">
                                 <span class="panel-item-icon <?= $n['type'] === 'overdue' ? 'text-danger' : 'text-warning' ?>"><i class="fas fa-<?= $n['type'] === 'overdue' ? 'clock' : 'exclamation-triangle' ?>"></i></span>
                                 <span><?= htmlspecialchars($n['compliance_code']) ?>: <?= htmlspecialchars(mb_substr($n['title'], 0, 35)) ?><?= mb_strlen($n['title']) > 35 ? '…' : '' ?></span>
                             </a>

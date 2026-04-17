@@ -50,6 +50,40 @@ final class Mailer
     }
 
     /**
+     * Generic single-recipient mail sender used by automations.
+     *
+     * @return array{0:bool,1:?string} [sent, errorMessage]
+     */
+    public static function sendGeneric(
+        array $appConfig,
+        string $toEmail,
+        string $toName,
+        string $subject,
+        string $htmlBody,
+        string $altBody,
+        array $ccEmails = []
+    ): array {
+        $cfg = self::config();
+        if (empty($cfg['enabled'])) {
+            return [false, null];
+        }
+        $provider = strtolower((string) ($cfg['provider'] ?? 'smtp'));
+        if ($provider === 'mailgun') {
+            return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, $ccEmails);
+        }
+        if ($provider === 'auto') {
+            [$ok, $err] = self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, $ccEmails);
+            if ($ok) {
+                return [true, null];
+            }
+
+            return self::sendViaSmtp($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, $err, $ccEmails);
+        }
+
+        return self::sendViaSmtp($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, null, $ccEmails);
+    }
+
+    /**
      * @return array{0:string,1:string}
      */
     private static function inviteBody(string $toEmail, string $toName, string $inviteLink, string $roleLabel, string $department): array
@@ -126,7 +160,8 @@ final class Mailer
         string $subject,
         string $htmlBody,
         string $altBody,
-        ?string $mailgunError
+        ?string $mailgunError,
+        array $ccEmails = []
     ): array {
         if (!class_exists(PHPMailer::class)) {
             return [false, 'PHPMailer not installed. Run: composer install'];
@@ -159,6 +194,12 @@ final class Mailer
             $mail->CharSet = 'UTF-8';
             $mail->setFrom($from, (string) ($cfg['from_name'] ?? 'Easy Home Finance'));
             $mail->addAddress($toEmail, $toName !== '' ? $toName : $toEmail);
+            foreach ($ccEmails as $cc) {
+                $cc = trim((string) $cc);
+                if ($cc !== '' && filter_var($cc, FILTER_VALIDATE_EMAIL)) {
+                    $mail->addCC($cc);
+                }
+            }
             $mail->isHTML(true);
             $mail->Subject = $subject;
             $mail->Body = $htmlBody;
@@ -186,7 +227,8 @@ final class Mailer
         string $toName,
         string $subject,
         string $htmlBody,
-        string $altBody
+        string $altBody,
+        array $ccEmails = []
     ): array {
         if (!function_exists('curl_init')) {
             return [false, 'Mailgun requires PHP curl extension'];
@@ -204,9 +246,26 @@ final class Mailer
         }
 
         $to = $toName !== '' ? $toName . ' <' . $toEmail . '>' : $toEmail;
+        $ccList = [];
+        foreach ($ccEmails as $cc) {
+            $cc = trim((string) $cc);
+            if ($cc !== '' && filter_var($cc, FILTER_VALIDATE_EMAIL)) {
+                $ccList[] = $cc;
+            }
+        }
         $fromName = trim((string) ($cfg['from_name'] ?? 'Easy Home Finance'));
         $from = $fromName !== '' ? $fromName . ' <' . $fromEmail . '>' : $fromEmail;
         $url = $endpoint . '/v3/' . rawurlencode($domain) . '/messages';
+        $postFields = [
+            'from' => $from,
+            'to' => $to,
+            'subject' => $subject,
+            'html' => $htmlBody,
+            'text' => $altBody,
+        ];
+        if (!empty($ccList)) {
+            $postFields['cc'] = implode(',', $ccList);
+        }
 
         $ch = curl_init($url);
         if ($ch === false) {
@@ -215,13 +274,7 @@ final class Mailer
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => [
-                'from' => $from,
-                'to' => $to,
-                'subject' => $subject,
-                'html' => $htmlBody,
-                'text' => $altBody,
-            ],
+            CURLOPT_POSTFIELDS => $postFields,
             CURLOPT_USERPWD => 'api:' . $apiKey,
             CURLOPT_TIMEOUT => 20,
         ]);
