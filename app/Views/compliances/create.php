@@ -40,10 +40,12 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 </div>
                 <div class="form-group">
                     <label class="form-label">Applicable Department *</label>
-                    <input type="text" name="department" id="dept-input" class="form-control" list="dept-suggestions" placeholder="Select or type department" value="<?= htmlspecialchars($_POST['department'] ?? '') ?>" required autocomplete="off">
-                    <datalist id="dept-suggestions">
-                        <option value="Legal"><option value="Finance"><option value="Operations"><option value="Risk"><option value="IT"><option value="Compliance">
-                    </datalist>
+                    <select name="department" id="dept-input" class="form-control" required>
+                        <option value="">Select Department</option>
+                        <?php foreach (['Legal', 'Finance', 'Operations', 'Risk', 'IT', 'Compliance'] as $dept): ?>
+                        <option value="<?= htmlspecialchars($dept) ?>" <?= ($_POST['department'] ?? '') === $dept ? 'selected' : '' ?>><?= htmlspecialchars($dept) ?></option>
+                        <?php endforeach; ?>
+                    </select>
                     <p class="form-help" id="matrix-dept-hint" style="display:none;color:var(--primary);margin-top:0.35rem;"></p>
                 </div>
                 <div class="form-group">
