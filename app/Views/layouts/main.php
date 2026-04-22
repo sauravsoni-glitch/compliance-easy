@@ -13,6 +13,7 @@
     $navAdmin = ($navRole === 'admin');
     $navMaker = ($navRole === 'maker');
     $navCanCreate = $navAdmin || $navMaker;
+    $navTab = (string)($_GET['tab'] ?? '');
     ?>
     <div class="app-layout">
         <aside class="sidebar">
@@ -60,11 +61,20 @@
                         <i class="fas fa-th"></i>
                         <span>Authority Matrix</span>
                     </a>
+                    <?php endif; ?>
+                    <?php if ($navAdmin): ?>
                     <a href="<?= $basePath ?? '' ?>/bulk-upload" class="nav-item <?= ($currentPage ?? '') === 'bulk-upload' ? 'active' : '' ?>">
                         <i class="fas fa-upload"></i>
                         <span>Bulk Upload</span>
                     </a>
                     <?php endif; ?>
+                </div>
+                <div class="nav-section">
+                    <span class="nav-section-title">IT COMPLIANCE</span>
+                    <a href="<?= $basePath ?? '' ?>/itrisk/dashboard?tab=assessment" class="nav-item <?= ($currentPage ?? '') === 'itrisk' ? 'active' : '' ?>">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Operational risk</span>
+                    </a>
                 </div>
                 <?php if (!empty($user['id'])): ?>
                 <div class="nav-section">

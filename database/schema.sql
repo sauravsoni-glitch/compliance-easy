@@ -519,6 +519,32 @@ CREATE TABLE IF NOT EXISTS `financial_ratio_category_reminders` (
   CONSTRAINT `frr_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `it_risks` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `organization_id` int unsigned NOT NULL,
+  `risk_id` varchar(50) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `description` text,
+  `category` varchar(100) DEFAULT NULL,
+  `impact` enum('Low','Medium','High') NOT NULL DEFAULT 'Low',
+  `likelihood` enum('Low','Medium','High') NOT NULL DEFAULT 'Low',
+  `risk_score` int NOT NULL DEFAULT 1,
+  `department` varchar(100) NOT NULL,
+  `linked_compliance_id` int unsigned DEFAULT NULL,
+  `status` enum('Open','In Progress','Under Review','Closed') NOT NULL DEFAULT 'Open',
+  `created_by` int unsigned NOT NULL,
+  `assigned_to` int unsigned DEFAULT NULL,
+  `reviewer_id` int unsigned DEFAULT NULL,
+  `approver_id` int unsigned DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `org_risk_id` (`organization_id`,`risk_id`),
+  KEY `organization_id` (`organization_id`),
+  KEY `linked_compliance_id` (`linked_compliance_id`),
+  CONSTRAINT `it_risks_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Seed default organization and demo users (run database/seed_demo_users.php to set passwords: admin123, maker123, Reviewer@123, Approver@123)
 INSERT INTO `organizations` (`id`, `name`, `industry`, `registration_number`, `address`, `contact_email`, `onboarding_step`) VALUES
 (1, 'Easy Home Finance', 'NBFC', 'REG001', 'Sample Address', 'admin@easyhome.com', 3);
