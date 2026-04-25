@@ -11,7 +11,7 @@ if exist "C:\xampp\php\php.exe" (
   echo Starting http://localhost:8000 ...
   echo Open: http://localhost:8000
   echo Press Ctrl+C to stop.
-  "C:\xampp\php\php.exe" -S localhost:8000 -t public
+  "C:\xampp\php\php.exe" -S localhost:8000 -t public public/index.php
 ) else (
   where php >nul 2>&1
   if errorlevel 1 (
@@ -20,6 +20,6 @@ if exist "C:\xampp\php\php.exe" (
     exit /b 1
   )
   echo Starting http://localhost:8000 ...
-  php -S localhost:8000 -t public
+  php -S localhost:8000 -t public public/index.php
 )
 pause

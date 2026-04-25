@@ -1,0 +1,4 @@
+-- Optional: add delegation_notes for DOA step 2 (“Discuss”).
+-- The application adds this column automatically via DoaEngine::ensureDoaRulesDelegationNotes().
+-- Manual one-liner (ignore error if column already exists):
+-- ALTER TABLE `doa_rules` ADD COLUMN `delegation_notes` text NULL AFTER `status`;

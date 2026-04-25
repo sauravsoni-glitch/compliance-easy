@@ -17,4 +17,5 @@ if (-not $phpExe) {
 $env:APP_URL = 'http://localhost:8000'
 Write-Host 'Open: http://localhost:8000' -ForegroundColor Green
 Write-Host 'Press Ctrl+C to stop.' -ForegroundColor Yellow
-& $phpExe -S localhost:8000 -t public
+# Router script required so paths like /login and /doa hit the app (not 404)
+& $phpExe -S localhost:8000 -t public public/index.php

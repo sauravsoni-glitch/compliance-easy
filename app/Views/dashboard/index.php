@@ -71,6 +71,69 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
     </div>
 </div>
 
+<div class="card mb-3">
+    <div class="card-header">
+        <h3 class="card-title">Delivery Health</h3>
+    </div>
+    <div class="stats-grid mb-0">
+        <div class="stat-card success stat-card-clickable" data-modal="modal-ontime-month" title="Click to view on-time completions this month">
+            <div class="stat-icon"><i class="fas fa-bolt"></i></div>
+            <div>
+                <div class="stat-value"><?= (int)($onTimeCompletedMonth ?? 0) ?></div>
+                <div class="stat-label">On-Time Completed (This Month)</div>
+            </div>
+        </div>
+        <div class="stat-card success stat-card-clickable" data-modal="modal-ontime-6m" title="Click to view on-time completions in last 6 months">
+            <div class="stat-icon"><i class="fas fa-history"></i></div>
+            <div>
+                <div class="stat-value"><?= (int)($onTimeCompleted6Months ?? 0) ?></div>
+                <div class="stat-label">On-Time Completed (Last 6 Months)</div>
+            </div>
+        </div>
+        <div class="stat-card danger stat-card-clickable" data-modal="modal-overdue-tasks" title="Click to view overdue tasks">
+            <div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div>
+            <div>
+                <div class="stat-value"><?= (int)($overdueCount ?? 0) ?></div>
+                <div class="stat-label">Overdue Tasks</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">
+        <h3 class="card-title">Monthly Delay Signal</h3>
+    </div>
+    <p class="text-muted text-sm mb-2">Checks if the same department or compliance is delayed in each of the last 6 months.</p>
+    <div class="d-flex flex-wrap gap-2">
+        <?php if (!empty($persistentDelayDepartment)): ?>
+        <div class="alert alert-danger mb-0" style="flex:1;min-width:260px;">
+            <strong>Department delayed every month:</strong>
+            <?= htmlspecialchars((string)$persistentDelayDepartment['department']) ?>
+            <span class="text-sm">(<?= (int)$persistentDelayDepartment['delay_instances'] ?> delays)</span>
+        </div>
+        <?php else: ?>
+        <div class="alert alert-success mb-0" style="flex:1;min-width:260px;">
+            <strong>No department</strong> is delayed in all last 6 months.
+        </div>
+        <?php endif; ?>
+
+        <?php if (!empty($persistentDelayCompliance)): ?>
+        <div class="alert alert-danger mb-0" style="flex:1;min-width:260px;">
+            <strong>Compliance delayed every month:</strong>
+            <a href="<?= $basePath ?>/compliance/view/<?= (int)$persistentDelayCompliance['id'] ?>">
+                <?= htmlspecialchars((string)$persistentDelayCompliance['compliance_code']) ?>
+            </a>
+            <span class="text-sm">(<?= (int)$persistentDelayCompliance['delay_instances'] ?> delays)</span>
+        </div>
+        <?php else: ?>
+        <div class="alert alert-success mb-0" style="flex:1;min-width:260px;">
+            <strong>No compliance</strong> is delayed in all last 6 months.
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
+
 <div class="dashboard-grid">
     <div class="dashboard-main">
         <div class="chart-row">
@@ -118,6 +181,51 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
             <?php else: ?>
             <p class="text-muted mb-0">No recent activity.</p>
             <?php endif; ?>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Delayed Departments (Last 6 Months)</h3>
+            </div>
+            <p class="text-muted text-sm mb-2">Departments with recurring monthly late completions.</p>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>Department</th><th>Delayed Months</th><th>Delay Instances</th></tr></thead>
+                    <tbody>
+                        <?php foreach (($departmentDelayHotspots ?? []) as $d): ?>
+                        <tr>
+                            <td><?= htmlspecialchars((string)($d['department'] ?? 'Unspecified')) ?></td>
+                            <td><span class="badge badge-warning"><?= (int)($d['delayed_months'] ?? 0) ?></span></td>
+                            <td><?= (int)($d['delay_instances'] ?? 0) ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                        <?php if (empty($departmentDelayHotspots ?? [])): ?><tr><td colspan="3" class="text-muted">No recurring department delay pattern detected.</td></tr><?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Delayed Compliances (Last 6 Months)</h3>
+            </div>
+            <p class="text-muted text-sm mb-2">Compliance items repeatedly delayed across months.</p>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>Compliance</th><th>Delayed Months</th><th>Delay Instances</th><th></th></tr></thead>
+                    <tbody>
+                        <?php foreach (($complianceDelayHotspots ?? []) as $cHot): ?>
+                        <tr>
+                            <td><?= htmlspecialchars((string)($cHot['compliance_code'] ?? '')) ?> — <?= htmlspecialchars((string)($cHot['title'] ?? '')) ?></td>
+                            <td><span class="badge badge-warning"><?= (int)($cHot['delayed_months'] ?? 0) ?></span></td>
+                            <td><?= (int)($cHot['delay_instances'] ?? 0) ?></td>
+                            <td><a href="<?= $basePath ?>/compliance/view/<?= (int)($cHot['id'] ?? 0) ?>" class="btn btn-sm btn-secondary">Open</a></td>
+                        </tr>
+                        <?php endforeach; ?>
+                        <?php if (empty($complianceDelayHotspots ?? [])): ?><tr><td colspan="4" class="text-muted">No recurring compliance delay pattern detected.</td></tr><?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <?php if (!empty($myTasks)): ?>
@@ -285,24 +393,34 @@ function renderKpiModal(string $id, string $title, array $list, string $viewAllU
             <a href="<?= htmlspecialchars($viewAllUrl) ?>" class="btn btn-primary btn-sm">View All</a>
             <button type="button" class="modal-close" data-close="<?= $id ?>">&times;</button>
         </div>
-        <div class="modal-body table-wrap">
-            <table class="data-table">
+        <div class="modal-body">
+            <div class="kpi-modal-meta text-muted text-sm mb-2"><?= count($list) ?> item<?= count($list) === 1 ? '' : 's' ?> shown</div>
+            <div class="table-wrap kpi-modal-table-wrap">
+            <table class="data-table kpi-modal-table">
                 <thead><tr><th>ID</th><th>Title</th><th>Framework</th><th>Status</th><th>Risk</th><th>Due Date</th><th>Owner</th></tr></thead>
                 <tbody>
                     <?php foreach ($list as $r): ?>
                     <tr>
-                        <td><?= htmlspecialchars($r['compliance_code'] ?? '') ?></td>
-                        <td><a href="<?= $basePath ?>/compliance/view/<?= (int)($r['id'] ?? 0) ?>"><?= htmlspecialchars($r['title'] ?? '') ?></a></td>
-                        <td><?= htmlspecialchars($r['framework'] ?? '—') ?></td>
-                        <td><span class="badge badge-<?= in_array($r['status'] ?? '', ['approved','completed']) ? 'success' : (($r['status'] ?? '') === 'rejected' ? 'danger' : 'warning') ?>"><?= htmlspecialchars($r['status'] ?? '') ?></span></td>
-                        <td><span class="badge badge-<?= in_array($r['risk_level'] ?? '', ['high','critical']) ? 'danger' : 'secondary' ?>"><?= htmlspecialchars($r['risk_level'] ?? '—') ?></span></td>
+                        <td class="kpi-code-cell"><?= htmlspecialchars((string)($r['compliance_code'] ?? '')) ?></td>
+                        <td class="kpi-title-cell"><a href="<?= $basePath ?>/compliance/view/<?= (int)($r['id'] ?? 0) ?>"><?= htmlspecialchars((string)($r['title'] ?? '')) ?></a></td>
+                        <td><?= htmlspecialchars((string)($r['framework'] ?? '—')) ?></td>
+                        <?php
+                        $statusRaw = (string)($r['status'] ?? '');
+                        $statusBadgeClass = in_array($statusRaw, ['approved', 'completed'], true) ? 'badge-success' : ($statusRaw === 'rejected' ? 'badge-danger' : 'badge-warning');
+                        $statusLabel = str_replace('_', ' ', $statusRaw);
+                        $riskRaw = (string)($r['risk_level'] ?? '');
+                        $riskBadgeClass = in_array($riskRaw, ['high', 'critical'], true) ? 'badge-danger' : 'badge-secondary';
+                        ?>
+                        <td><span class="badge <?= $statusBadgeClass ?>"><?= htmlspecialchars(ucfirst($statusLabel)) ?></span></td>
+                        <td><span class="badge <?= $riskBadgeClass ?>"><?= htmlspecialchars($riskRaw !== '' ? ucfirst($riskRaw) : '—') ?></span></td>
                         <td><?= !empty($r['due_date']) ? date('M d, Y', strtotime($r['due_date'])) : '—' ?></td>
-                        <td><?= htmlspecialchars($r['owner_name'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars((string)($r['owner_name'] ?? '—')) ?></td>
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($list)): ?><tr><td colspan="7">No items.</td></tr><?php endif; ?>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 </div>
@@ -312,6 +430,9 @@ renderKpiModal('modal-pending', 'Pending Submissions', $pendingList ?? [], $base
 renderKpiModal('modal-approved', 'Approved Compliances', $approvedList ?? [], $basePath . '/compliance?filter=approved', $basePath);
 renderKpiModal('modal-rejected', 'Rejected Compliances', $rejectedList ?? [], $basePath . '/compliance?filter=rejected', $basePath);
 renderKpiModal('modal-upcoming', 'Upcoming Due Dates', $upcomingDueList ?? [], $basePath . '/compliance?from=' . date('Y-m-d') . '&to=' . date('Y-m-d', strtotime('+7 days')), $basePath);
+renderKpiModal('modal-ontime-month', 'On-Time Completed (This Month)', $onTimeMonthList ?? [], $basePath . '/compliance?filter=approved&from=' . date('Y-m-01') . '&to=' . date('Y-m-t'), $basePath);
+renderKpiModal('modal-ontime-6m', 'On-Time Completed (Last 6 Months)', $onTime6MonthsList ?? [], $basePath . '/compliance?filter=approved&from=' . date('Y-m-01', strtotime('-5 months')) . '&to=' . date('Y-m-t'), $basePath);
+renderKpiModal('modal-overdue-tasks', 'Overdue Tasks', $overdueTasksList ?? [], $basePath . '/compliance?filter=overdue', $basePath);
 ?>
 
 <script>

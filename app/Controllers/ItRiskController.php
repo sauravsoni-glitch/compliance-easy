@@ -214,10 +214,10 @@ class ItRiskController extends BaseController
         $this->ensureSchema();
         $orgId = (int) Auth::organizationId();
         [$whereArr, $baseParams] = $this->baseWhere($orgId);
-        $tab = trim($_GET['tab'] ?? 'assessment');
+        $tab = trim($_GET['tab'] ?? 'it-dashboard');
         $tabAllowed = ['it-dashboard','identification','assessment','controls','kris','incidents','anomalies','compliance','resilience','lessons','upload'];
         if (!in_array($tab, $tabAllowed, true)) {
-            $tab = 'assessment';
+            $tab = 'it-dashboard';
         }
         $q = trim($_GET['q'] ?? '');
         $category = trim($_GET['category'] ?? '');

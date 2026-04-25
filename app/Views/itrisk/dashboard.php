@@ -18,6 +18,29 @@ $kriStatusOpts = $kriStatusOptions ?? [];
 $itDashboard = $itDashboard ?? [];
 $modalEnabledTabs = ['identification', 'assessment', 'controls', 'kris'];
 $canOpenRiskModal = in_array($activeTab, $modalEnabledTabs, true);
+$canOpenIncidentModal = $activeTab === 'incidents';
+$canOpenAnomalyModal = $activeTab === 'anomalies';
+$canOpenComplianceModal = $activeTab === 'compliance';
+$canOpenResilienceModal = $activeTab === 'resilience';
+$canOpenLessonsModal = $activeTab === 'lessons';
+$incidentRows = $incidentRows ?? [];
+$complianceTrackRows = $complianceTrackRows ?? [];
+$resilienceRows = $resilienceRows ?? [];
+$lessonRows = $lessonRows ?? [];
+$uploadHistoryRows = $uploadHistoryRows ?? [
+    ['id' => 'UP001', 'file_name' => 'risk_data_oct2023.csv', 'type' => 'Risk Data', 'uploaded_at' => '2023-10-15 10:30', 'records' => '42', 'status' => 'Completed', 'uploaded_by' => 'John Smith'],
+    ['id' => 'UP002', 'file_name' => 'control_mapping_q3.xlsx', 'type' => 'Control Data', 'uploaded_at' => '2023-09-28 15:45', 'records' => '87', 'status' => 'Completed', 'uploaded_by' => 'Mary Johnson'],
+    ['id' => 'UP003', 'file_name' => 'incident_log_nov.xlsx', 'type' => 'Incident Data', 'uploaded_at' => '2023-11-05 09:15', 'records' => '12', 'status' => 'Completed', 'uploaded_by' => 'Robert Davis'],
+    ['id' => 'UP004', 'file_name' => 'kri_metrics_q4.csv', 'type' => 'KRI Data', 'uploaded_at' => '2023-11-10 16:20', 'records' => '35', 'status' => 'Failed', 'uploaded_by' => 'Sarah Wilson'],
+    ['id' => 'UP005', 'file_name' => 'compliance_updates_nov.xlsx', 'type' => 'Compliance Data', 'uploaded_at' => '2023-11-15 11:05', 'records' => '28', 'status' => 'Completed', 'uploaded_by' => 'James Brown'],
+];
+$anomalyRows = $anomalyRows ?? [
+    ['id' => 'ANO-001', 'type' => 'Transaction', 'description' => 'Unusual pattern of high-value transaction attempts', 'severity' => 'Critical', 'status' => 'Open', 'confidence' => 'High', 'detected_on' => '2023-11-15 10:30'],
+    ['id' => 'ANO-002', 'type' => 'System Access', 'description' => 'Multiple failed login attempts from unusual locations', 'severity' => 'Critical', 'status' => 'Investigating', 'confidence' => 'High', 'detected_on' => '2023-11-14 23:15'],
+    ['id' => 'ANO-003', 'type' => 'Customer Behavior', 'description' => 'Sudden increase in transaction volume for flagged segment', 'severity' => 'Medium', 'status' => 'Resolved', 'confidence' => 'Medium', 'detected_on' => '2023-11-13 14:45'],
+    ['id' => 'ANO-004', 'type' => 'Transaction', 'description' => 'Pattern of small transactions followed by large withdrawal', 'severity' => 'High', 'status' => 'Open', 'confidence' => 'Medium', 'detected_on' => '2023-11-12 08:20'],
+    ['id' => 'ANO-005', 'type' => 'Process', 'description' => 'KYC documentation completion rate significantly dropped', 'severity' => 'Medium', 'status' => 'Investigating', 'confidence' => 'High', 'detected_on' => '2023-11-11 16:10'],
+];
 $compliances = $compliances ?? [];
 $flashSuccess = $_SESSION['flash_success'] ?? null;
 $flashError = $_SESSION['flash_error'] ?? null;
@@ -25,11 +48,23 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
 ?>
 <div class="page-header" style="margin-bottom:0.5rem;">
     <div>
-        <h1 class="page-title"><?= $activeTab === 'it-dashboard' ? 'IT Dashboard' : 'IT Risk' ?></h1>
-        <p class="page-subtitle"><?= $activeTab === 'it-dashboard' ? 'Monitor IT compliance, risk posture, controls, and KRIs from one place.' : 'Identify and classify IT/InfoSec risks across the organization.' ?></p>
+        <h1 class="page-title"><?= $activeTab === 'it-dashboard' ? 'IT Dashboard' : ($activeTab === 'incidents' ? 'Incident Management' : ($activeTab === 'anomalies' ? 'Anomaly Detection' : ($activeTab === 'compliance' ? 'Compliance Tracking' : ($activeTab === 'resilience' ? 'Resilience Management' : ($activeTab === 'lessons' ? 'Lessons Learned' : ($activeTab === 'upload' ? 'Data Upload' : 'IT Risk')))))) ?></h1>
+        <p class="page-subtitle"><?= $activeTab === 'it-dashboard' ? 'Monitor IT compliance, risk posture, controls, and KRIs from one place.' : ($activeTab === 'incidents' ? 'Track, manage, and report operational incidents.' : ($activeTab === 'anomalies' ? 'AI-powered detection of unusual patterns that might indicate risks' : ($activeTab === 'compliance' ? 'Monitor and manage compliance with regulatory requirements' : ($activeTab === 'resilience' ? 'Build and monitor organizational resilience to operational risks' : ($activeTab === 'lessons' ? 'Capture key findings to improve controls and prevent recurrence' : ($activeTab === 'upload' ? 'Upload and manage operational risk data in bulk' : 'Identify and classify IT/InfoSec risks across the organization.')))))) ?></p>
     </div>
     <?php if ($activeTab === 'it-dashboard'): ?>
     <a href="<?= htmlspecialchars($basePath) ?>/compliances/create" class="btn btn-primary"><i class="fas fa-plus"></i> Create IT Compliance</a>
+    <?php elseif ($canOpenLessonsModal): ?>
+    <button type="button" class="btn btn-primary" id="open-lesson-modal"><i class="fas fa-lightbulb"></i> Add Lesson</button>
+    <?php elseif ($activeTab === 'upload'): ?>
+    <button type="button" class="btn btn-primary"><i class="fas fa-upload"></i> Upload Data</button>
+    <?php elseif ($canOpenComplianceModal): ?>
+    <button type="button" class="btn btn-primary" id="open-compliance-modal"><i class="fas fa-clipboard-check"></i> Add Requirement</button>
+    <?php elseif ($canOpenResilienceModal): ?>
+    <button type="button" class="btn btn-primary" id="open-resilience-modal"><i class="fas fa-shield-alt"></i> Add Plan</button>
+    <?php elseif ($canOpenIncidentModal): ?>
+    <button type="button" class="btn btn-primary" id="open-incident-modal"><i class="fas fa-flag"></i> Report Incident</button>
+    <?php elseif ($canOpenAnomalyModal): ?>
+    <button type="button" class="btn btn-primary" id="open-anomaly-modal"><i class="fas fa-plus"></i> Add Anomaly</button>
     <?php elseif ($canOpenRiskModal): ?>
     <button type="button" class="btn btn-primary" id="open-risk-modal"><i class="fas fa-plus"></i> <?= $activeTab === 'controls' ? 'Add Control' : ($activeTab === 'kris' ? 'Add KRI' : 'Add Risk') ?></button>
     <?php endif; ?>
@@ -99,6 +134,18 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
         </div>
         <?php if ($activeTab === 'it-dashboard'): ?>
         <a href="<?= htmlspecialchars($basePath) ?>/itrisk/dashboard?tab=identification" class="btn btn-primary btn-sm"><i class="fas fa-project-diagram"></i> Open Risks</a>
+        <?php elseif ($canOpenLessonsModal): ?>
+        <button type="button" class="btn btn-primary btn-sm" id="open-lesson-modal-2"><i class="fas fa-lightbulb"></i> Add Lesson</button>
+        <?php elseif ($activeTab === 'upload'): ?>
+        <button type="button" class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Upload Data</button>
+        <?php elseif ($canOpenComplianceModal): ?>
+        <button type="button" class="btn btn-primary btn-sm" id="open-compliance-modal-2"><i class="fas fa-clipboard-check"></i> Track Compliance</button>
+        <?php elseif ($canOpenResilienceModal): ?>
+        <button type="button" class="btn btn-primary btn-sm" id="open-resilience-modal-2"><i class="fas fa-shield-alt"></i> Add Plan</button>
+        <?php elseif ($canOpenIncidentModal): ?>
+        <button type="button" class="btn btn-primary btn-sm" id="open-incident-modal-2"><i class="fas fa-flag"></i> Report Incident</button>
+        <?php elseif ($canOpenAnomalyModal): ?>
+        <button type="button" class="btn btn-primary btn-sm" id="open-anomaly-modal-2"><i class="fas fa-plus"></i> Add Anomaly</button>
         <?php elseif ($canOpenRiskModal): ?>
         <button type="button" class="btn btn-primary btn-sm" id="open-risk-modal-2"><i class="fas fa-shield-alt"></i> <?= $activeTab === 'controls' ? 'Add Control' : ($activeTab === 'kris' ? 'Add KRI' : 'Assess Risk') ?></button>
         <?php endif; ?>
@@ -108,20 +155,62 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
     <div class="page-header" style="margin-bottom:0.5rem;">
         <div>
             <h3 class="card-title" style="margin-bottom:0.15rem;">
-                <?= $activeTab === 'it-dashboard' ? 'IT Compliance Overview' : ($activeTab === 'assessment' ? 'Risk Assessment' : ($activeTab === 'controls' ? 'Control Management' : ($activeTab === 'kris' ? 'Key Risk Indicators' : 'Risk Identification'))) ?>
+                <?= $activeTab === 'it-dashboard' ? 'IT Compliance Overview' : ($activeTab === 'incidents' ? 'Incident Management' : ($activeTab === 'anomalies' ? 'Anomaly Detection' : ($activeTab === 'compliance' ? 'Compliance Tracking' : ($activeTab === 'resilience' ? 'Resilience Management' : ($activeTab === 'lessons' ? 'Lessons Learned' : ($activeTab === 'upload' ? 'Data Upload' : ($activeTab === 'assessment' ? 'Risk Assessment' : ($activeTab === 'controls' ? 'Control Management' : ($activeTab === 'kris' ? 'Key Risk Indicators' : 'Risk Identification'))))))))) ?>
             </h3>
             <p class="text-muted text-sm mb-0">
-                <?= $activeTab === 'it-dashboard'
-                    ? 'Track the overall health of IT compliance and operational risk controls.'
-                    : ($activeTab === 'assessment'
-                    ? 'Analyze and evaluate identified risks across the organization'
-                    : ($activeTab === 'controls' ? 'Define and monitor controls to mitigate operational risks' : ($activeTab === 'kris' ? 'Monitor critical operational risk indicators across departments' : 'Identify and classify operational risks across the organization'))) ?>
+                <?php if ($activeTab === 'it-dashboard'): ?>
+                    Track the overall health of IT compliance and operational risk controls.
+                <?php elseif ($activeTab === 'incidents'): ?>
+                    Track, manage, and report operational incidents
+                <?php elseif ($activeTab === 'anomalies'): ?>
+                    AI-powered detection of unusual patterns that might indicate risks
+                <?php elseif ($activeTab === 'compliance'): ?>
+                    Monitor and manage compliance with regulatory requirements
+                <?php elseif ($activeTab === 'resilience'): ?>
+                    Build and monitor organizational resilience to operational risks
+                <?php elseif ($activeTab === 'lessons'): ?>
+                    Capture key learnings from incidents and operational events
+                <?php elseif ($activeTab === 'upload'): ?>
+                    Upload and manage operational risk data in bulk
+                <?php elseif ($activeTab === 'assessment'): ?>
+                    Analyze and evaluate identified risks across the organization
+                <?php elseif ($activeTab === 'controls'): ?>
+                    Define and monitor controls to mitigate operational risks
+                <?php elseif ($activeTab === 'kris'): ?>
+                    Monitor critical operational risk indicators across departments
+                <?php else: ?>
+                    Identify and classify operational risks across the organization
+                <?php endif; ?>
             </p>
         </div>
         <div style="display:flex;gap:0.5rem;">
             <?php if ($activeTab === 'it-dashboard'): ?>
             <a href="<?= htmlspecialchars($basePath) ?>/itrisk/dashboard?tab=controls" class="btn btn-secondary btn-sm"><i class="fas fa-shield-alt"></i> Controls</a>
             <a href="<?= htmlspecialchars($basePath) ?>/itrisk/dashboard?tab=kris" class="btn btn-primary btn-sm"><i class="fas fa-chart-line"></i> KRIs</a>
+            <?php elseif ($canOpenLessonsModal): ?>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-filter"></i> Show Filters</button>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-download"></i> Export Lessons</button>
+            <button type="button" class="btn btn-primary btn-sm" id="open-lesson-modal-3"><i class="fas fa-plus"></i> Add Lesson</button>
+            <?php elseif ($activeTab === 'upload'): ?>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-filter"></i> Filters</button>
+            <button type="button" class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Upload Data</button>
+            <?php elseif ($canOpenComplianceModal): ?>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-filter"></i> Show Filters</button>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-download"></i> Export</button>
+            <button type="button" class="btn btn-primary btn-sm" id="open-compliance-modal-3"><i class="fas fa-plus"></i> Add Requirement</button>
+            <?php elseif ($canOpenResilienceModal): ?>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-filter"></i> Show Filters</button>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-file-alt"></i> Generate Report</button>
+            <button type="button" class="btn btn-primary btn-sm" id="open-resilience-modal-3"><i class="fas fa-plus"></i> Add Plan</button>
+            <?php elseif ($canOpenIncidentModal): ?>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-filter"></i> Show Filters</button>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-file-import"></i> Import Incidents</button>
+            <button type="button" class="btn btn-primary btn-sm" id="open-incident-modal-3"><i class="fas fa-flag"></i> Report Incident</button>
+            <?php elseif ($canOpenAnomalyModal): ?>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-filter"></i> Show Filters</button>
+            <button type="button" class="btn btn-secondary btn-sm"><i class="fas fa-download"></i> Export Data</button>
+            <button type="button" class="btn btn-primary btn-sm" id="open-anomaly-modal-3"><i class="fas fa-plus"></i> Add Anomaly</button>
+            <button type="button" class="btn btn-primary btn-sm"><i class="fas fa-sync-alt"></i> Run Detection</button>
             <?php elseif ($canOpenRiskModal): ?>
             <button type="button" class="btn btn-secondary btn-sm"><i class="far fa-file"></i> <?= $activeTab === 'controls' ? 'Import Controls' : ($activeTab === 'kris' ? 'Export Data' : 'Import') ?></button>
             <button type="button" class="btn btn-primary btn-sm" id="open-risk-modal-3"><i class="fas fa-plus"></i> <?= $activeTab === 'assessment' ? 'Add Assessment' : ($activeTab === 'controls' ? 'Add Control' : ($activeTab === 'kris' ? 'Add KRI' : 'Add Risk')) ?></button>
@@ -177,6 +266,186 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
                 </table>
             </div>
         </div>
+    </div>
+    <?php else: ?>
+    <?php if ($activeTab === 'upload'): ?>
+    <div class="form-row-2" style="margin-bottom:0.75rem;">
+        <div class="card" style="padding:1rem;">
+            <h4 style="margin:0 0 0.75rem 0;"><i class="fas fa-file-upload"></i> Upload Files</h4>
+            <div style="border:1px dashed #cbd5e1;border-radius:8px;padding:1.5rem;text-align:center;background:#fafcff;">
+                <div style="font-size:2rem;color:#64748b;"><i class="far fa-file-alt"></i></div>
+                <div style="font-weight:600;margin-top:0.35rem;">Drag and drop files here</div>
+                <div class="text-muted text-sm" style="margin-bottom:0.6rem;">Supported formats: CSV, Excel, JSON (max 10MB)</div>
+                <button type="button" class="btn btn-secondary btn-sm">Browse Files</button>
+            </div>
+        </div>
+        <div class="card" style="padding:1rem;">
+            <h4 style="margin:0 0 0.75rem 0;"><i class="fas fa-download"></i> Download Templates</h4>
+            <div class="text-muted text-sm" style="margin-bottom:0.6rem;">Download standard templates for data uploads</div>
+            <div style="display:grid;gap:0.45rem;">
+                <button type="button" class="btn btn-outline btn-sm"><i class="far fa-file"></i> Risk Data Template</button>
+                <button type="button" class="btn btn-outline btn-sm"><i class="far fa-file"></i> Control Data Template</button>
+                <button type="button" class="btn btn-outline btn-sm"><i class="far fa-file"></i> Incident Data Template</button>
+                <button type="button" class="btn btn-outline btn-sm"><i class="far fa-file"></i> KRI Data Template</button>
+            </div>
+        </div>
+    </div>
+    <div class="card" style="padding:0.9rem;">
+        <h3 style="margin:0 0 0.75rem 0;text-align:center;">Upload History</h3>
+        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.6rem;">
+            <input type="search" class="form-control" placeholder="Search uploads..." style="max-width:280px;">
+            <span class="text-muted text-sm"><i class="fas fa-filter"></i> Filters:</span>
+            <select class="form-control" style="max-width:130px;"><option>All Types</option></select>
+            <select class="form-control" style="max-width:130px;"><option>All Status</option></select>
+            <button type="button" class="btn btn-outline btn-sm">Clear Filters</button>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead><tr><th>ID</th><th>File Name</th><th>Type</th><th>Upload Date</th><th>Records</th><th>Status</th><th>Uploaded By</th><th>Actions</th></tr></thead>
+                <tbody>
+                    <?php foreach ($uploadHistoryRows as $up): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($up['id']) ?></td>
+                        <td><?= htmlspecialchars($up['file_name']) ?></td>
+                        <td><?= htmlspecialchars($up['type']) ?></td>
+                        <td><?= htmlspecialchars($up['uploaded_at']) ?></td>
+                        <td><?= htmlspecialchars($up['records']) ?></td>
+                        <td><span class="badge <?= ($up['status'] === 'Completed') ? 'badge-success' : 'badge-danger' ?>"><?= htmlspecialchars($up['status']) ?></span></td>
+                        <td><?= htmlspecialchars($up['uploaded_by']) ?></td>
+                        <td><div style="display:flex;gap:0.35rem;align-items:center;white-space:nowrap;"><a href="javascript:void(0)" class="btn btn-sm btn-outline-secondary" title="View"><i class="fas fa-eye"></i></a><a href="javascript:void(0)" class="btn btn-sm btn-secondary" title="Download"><i class="fas fa-download"></i></a></div></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <?php elseif ($activeTab === 'lessons'): ?>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>Lesson Title</th><th>Category</th><th>Impact</th><th>Status</th><th>Documented By</th><th>Actions</th></tr></thead>
+            <tbody>
+                <?php foreach ($lessonRows as $ls): ?>
+                <tr>
+                    <td><?= htmlspecialchars($ls['title'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($ls['category'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($ls['impact'] ?? 'Medium') ?></td>
+                    <td><?= htmlspecialchars($ls['status'] ?? 'Pending') ?></td>
+                    <td><?= htmlspecialchars($ls['documented_by'] ?? '—') ?></td>
+                    <td><div style="display:flex;gap:0.35rem;align-items:center;white-space:nowrap;"><a href="javascript:void(0)" class="btn btn-sm btn-outline-secondary" title="View"><i class="fas fa-eye"></i></a><a href="javascript:void(0)" class="btn btn-sm btn-secondary" title="Edit"><i class="fas fa-pen"></i></a><button type="button" class="btn btn-sm btn-danger" title="Delete" disabled><i class="fas fa-trash"></i></button></div></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($lessonRows)): ?><tr><td colspan="6" class="text-muted text-center">No lessons found. Add a lesson to get started.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php elseif ($activeTab === 'compliance'): ?>
+    <div class="stats-grid dashboard-kpi" style="margin-bottom:0.75rem;">
+        <div class="stat-card success"><div><div class="stat-value"><?= count(array_filter($complianceTrackRows, function($x){ return ($x['status'] ?? '') === 'Compliant'; })) ?></div><div class="stat-label">Compliant</div></div></div>
+        <div class="stat-card danger"><div><div class="stat-value"><?= count(array_filter($complianceTrackRows, function($x){ return ($x['status'] ?? '') === 'Non-Compliant'; })) ?></div><div class="stat-label">Non-Compliant</div></div></div>
+        <div class="stat-card primary"><div><div class="stat-value"><?= count(array_filter($complianceTrackRows, function($x){ return ($x['status'] ?? '') === 'In Progress'; })) ?></div><div class="stat-label">In Progress</div></div></div>
+        <div class="stat-card warning"><div><div class="stat-value"><?= count(array_filter($complianceTrackRows, function($x){ return !empty($x['due_date']) && strtotime((string)$x['due_date']) <= strtotime('last day of this month'); })) ?></div><div class="stat-label">Due This Month</div></div></div>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>Regulation</th><th>Description</th><th>Department</th><th>Due Date</th><th>Status</th><th>Notes</th><th>Actions</th></tr></thead>
+            <tbody>
+                <?php foreach ($complianceTrackRows as $cr): ?>
+                <tr>
+                    <td><?= htmlspecialchars($cr['regulation'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($cr['description'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($cr['department'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($cr['due_date'] ?? '—') ?></td>
+                    <td><span class="badge <?= ($cr['status'] ?? '') === 'Compliant' ? 'badge-success' : (($cr['status'] ?? '') === 'Non-Compliant' ? 'badge-danger' : 'badge-primary') ?>"><?= htmlspecialchars($cr['status'] ?? 'In Progress') ?></span></td>
+                    <td><?= htmlspecialchars($cr['notes'] ?? '—') ?></td>
+                    <td><div style="display:flex;gap:0.35rem;align-items:center;white-space:nowrap;"><a href="javascript:void(0)" class="btn btn-sm btn-outline-secondary" title="View"><i class="fas fa-eye"></i></a><a href="javascript:void(0)" class="btn btn-sm btn-secondary" title="Edit"><i class="fas fa-pen"></i></a><button type="button" class="btn btn-sm btn-danger" title="Delete" disabled><i class="fas fa-trash"></i></button></div></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($complianceTrackRows)): ?><tr><td colspan="7" class="text-muted text-center">No compliance requirements found.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php elseif ($activeTab === 'resilience'): ?>
+    <div class="stats-grid dashboard-kpi" style="margin-bottom:0.75rem;">
+        <div class="stat-card primary"><div><div class="stat-value"><?= count($resilienceRows) > 0 ? round((count(array_filter($resilienceRows, function($r){ return ($r['status'] ?? '') === 'Approved'; })) / max(1,count($resilienceRows))) * 100) : 0 ?>%</div><div class="stat-label">Resilience Score</div><div class="text-muted text-sm"><?= count(array_filter($resilienceRows, function($r){ return ($r['status'] ?? '') === 'Approved'; })) ?>/<?= count($resilienceRows) ?> plans approved</div></div></div>
+        <div class="stat-card success"><div><div class="stat-value"><?= count($resilienceRows) > 0 ? round((count(array_filter($resilienceRows, function($r){ return !empty($r['last_tested']); })) / max(1,count($resilienceRows))) * 100) : 0 ?>%</div><div class="stat-label">Recovery Readiness</div><div class="text-muted text-sm"><?= count(array_filter($resilienceRows, function($r){ return !empty($r['last_tested']); })) ?>/<?= count($resilienceRows) ?> plans tested</div></div></div>
+        <div class="stat-card warning"><div><div class="stat-value">0.0 hrs</div><div class="stat-label">Avg Recovery Time</div><div class="text-muted text-sm">Based on <?= count($resilienceRows) ?> plans</div></div></div>
+        <div class="stat-card danger"><div><div class="stat-value"><?= count(array_filter($resilienceRows, function($r){ return ($r['status'] ?? '') !== 'Approved'; })) ?></div><div class="stat-label">Resilience Gaps</div><div class="text-muted text-sm">Plans needing attention</div></div></div>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>ID</th><th>Plan Name</th><th>Type</th><th>Owner</th><th>Last Tested</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+                <?php foreach ($resilienceRows as $rr): ?>
+                <tr>
+                    <td><?= htmlspecialchars($rr['plan_id'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($rr['plan_name'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($rr['plan_type'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($rr['owner'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($rr['last_tested'] ?? '—') ?></td>
+                    <td><span class="badge <?= ($rr['status'] ?? '') === 'Approved' ? 'badge-success' : (($rr['status'] ?? '') === 'Under Review' ? 'badge-info' : 'badge-warning') ?>"><?= htmlspecialchars($rr['status'] ?? 'Draft') ?></span></td>
+                    <td><div style="display:flex;gap:0.35rem;align-items:center;white-space:nowrap;"><a href="javascript:void(0)" class="btn btn-sm btn-outline-secondary" title="View"><i class="fas fa-eye"></i></a><a href="javascript:void(0)" class="btn btn-sm btn-secondary" title="Edit"><i class="fas fa-pen"></i></a><button type="button" class="btn btn-sm btn-danger" title="Delete" disabled><i class="fas fa-trash"></i></button></div></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($resilienceRows)): ?><tr><td colspan="7" class="text-muted text-center">No resilience plans found.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php elseif ($activeTab === 'incidents'): ?>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Severity</th><th>Status</th><th>Reported By</th><th>Reported Date</th><th>Actions</th></tr></thead>
+            <tbody>
+                <?php foreach ($incidentRows as $inc): ?>
+                <tr>
+                    <td><?= htmlspecialchars($inc['incident_id'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($inc['title'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($inc['category'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($inc['severity'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($inc['status'] ?? 'Open') ?></td>
+                    <td><?= htmlspecialchars($inc['reported_by'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($inc['reported_at'] ?? '—') ?></td>
+                    <td><div style="display:flex;gap:0.35rem;align-items:center;white-space:nowrap;"><a href="javascript:void(0)" class="btn btn-sm btn-outline-secondary" title="View"><i class="fas fa-eye"></i></a><a href="javascript:void(0)" class="btn btn-sm btn-secondary" title="Edit"><i class="fas fa-pen"></i></a><button type="button" class="btn btn-sm btn-danger" title="Delete" disabled><i class="fas fa-trash"></i></button></div></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($incidentRows)): ?><tr><td colspan="8" class="text-muted text-center">No incidents found. Report a new incident to get started.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php elseif ($activeTab === 'anomalies'): ?>
+    <div class="stats-grid dashboard-kpi" style="margin-bottom:0.75rem;">
+        <div class="stat-card danger"><div><div class="stat-value">0</div><div class="stat-label">Transaction Anomalies</div><div class="text-danger text-sm">0 Critical</div></div></div>
+        <div class="stat-card warning"><div><div class="stat-value">0</div><div class="stat-label">System Access</div><div class="text-warning text-sm">0 Critical</div></div></div>
+        <div class="stat-card primary"><div><div class="stat-value">0</div><div class="stat-label">Customer Behavior</div><div class="text-primary text-sm">0 Critical</div></div></div>
+        <div class="stat-card success"><div><div class="stat-value">0</div><div class="stat-label">Process Deviations</div><div class="text-success text-sm">0 Critical</div></div></div>
+    </div>
+    <div class="card" style="padding:1rem;margin-bottom:0.8rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;"><div style="font-weight:600;">Anomaly Trend</div><span class="badge badge-secondary">Last 30 days</span></div>
+        <div style="height:180px;border:1px dashed #dbe2ea;border-radius:8px;"></div>
+        <div style="display:flex;justify-content:center;gap:1rem;margin-top:0.5rem;font-size:0.92rem;">
+            <span style="color:#ef4444;"><i class="fas fa-square"></i> Transaction Anomalies</span>
+            <span style="color:#f59e0b;"><i class="fas fa-square"></i> System Access Anomalies</span>
+            <span style="color:#3b82f6;"><i class="fas fa-square"></i> Customer Behavior Anomalies</span>
+            <span style="color:#10b981;"><i class="fas fa-square"></i> Process Deviations</span>
+        </div>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>ID</th><th>Type</th><th>Description</th><th>Severity</th><th>Status</th><th>Confidence</th><th>Detected On</th><th>Actions</th></tr></thead>
+            <tbody>
+                <?php foreach ($anomalyRows as $a): ?>
+                <tr>
+                    <td><?= htmlspecialchars($a['id']) ?></td>
+                    <td><?= htmlspecialchars($a['type']) ?></td>
+                    <td><?= htmlspecialchars($a['description']) ?></td>
+                    <td><span class="badge <?= ($a['severity'] === 'Critical') ? 'badge-danger' : (($a['severity'] === 'High') ? 'badge-warning' : 'badge-success') ?>"><?= htmlspecialchars($a['severity']) ?></span></td>
+                    <td><span class="badge <?= ($a['status'] === 'Resolved') ? 'badge-success' : (($a['status'] === 'Investigating') ? 'badge-info' : 'badge-primary') ?>"><?= htmlspecialchars($a['status']) ?></span></td>
+                    <td><?= htmlspecialchars($a['confidence']) ?></td>
+                    <td><?= htmlspecialchars($a['detected_on']) ?></td>
+                    <td><div style="display:flex;gap:0.35rem;align-items:center;white-space:nowrap;"><a href="javascript:void(0)" class="btn btn-sm btn-outline-secondary" title="View"><i class="fas fa-eye"></i></a><a href="javascript:void(0)" class="btn btn-sm btn-secondary" title="Edit"><i class="fas fa-pen"></i></a><button type="button" class="btn btn-sm btn-danger" title="Delete" disabled><i class="fas fa-trash"></i></button></div></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
     </div>
     <?php else: ?>
     <form method="get" id="risk-filter-form" action="<?= htmlspecialchars($basePath) ?>/itrisk/dashboard" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
@@ -394,6 +663,7 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
     </div>
     <?php endif; ?>
     <?php endif; ?>
+    <?php endif; ?>
 </div>
 
 <?php if ($canOpenRiskModal): ?>
@@ -460,6 +730,104 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
     </div>
 </div>
 <?php endif; ?>
+<?php if ($canOpenIncidentModal): ?>
+<div id="incident-modal" class="modal-overlay compliance-modal" style="display:none;" aria-hidden="true">
+    <div class="modal compliance-edit-modal" role="dialog" aria-labelledby="incident-modal-title" style="width:min(760px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
+        <div class="modal-header"><h2 class="modal-title" id="incident-modal-title">Report New Incident</h2><button type="button" class="modal-close" id="close-incident-modal" aria-label="Close">&times;</button></div>
+        <form method="post" action="javascript:void(0)" style="display:flex;flex-direction:column;min-height:0;flex:1;">
+            <div style="overflow:auto;padding:1rem 1.25rem 0.5rem 1.25rem;flex:1;min-height:0;">
+                <div class="form-group"><label class="form-label">Incident Title</label><input type="text" class="form-control" placeholder="Brief description of the incident"></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">Category</label><select class="form-control"><option>Select category</option><option>Operational</option><option>Security</option><option>Compliance</option><option>Process</option></select></div><div class="form-group"><label class="form-label">Severity</label><select class="form-control"><option>Select severity</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select></div></div>
+                <div class="form-group"><label class="form-label">Reported By</label><input type="text" class="form-control" placeholder="Name of person reporting"></div>
+                <div class="form-group"><label class="form-label">Incident Description</label><textarea class="form-control" rows="3" placeholder="Provide detailed description of the incident"></textarea></div>
+                <div class="form-group"><label class="form-label">Impacted Services/Systems</label><input type="text" class="form-control" placeholder="List all impacted services"></div>
+                <div class="form-group"><label class="form-label">Immediate Actions Taken</label><textarea class="form-control" rows="2" placeholder="Describe any immediate actions taken"></textarea></div>
+            </div>
+            <div class="modal-footer" style="padding:0.75rem 1.25rem;border-top:1px solid #e5e7eb;background:#fff;display:flex;justify-content:flex-end;gap:0.5rem;"><button type="button" class="btn btn-secondary" id="cancel-incident-modal">Cancel</button><button type="submit" class="btn btn-primary">Report Incident</button></div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+<?php if ($canOpenAnomalyModal): ?>
+<div id="anomaly-modal" class="modal-overlay compliance-modal" style="display:none;" aria-hidden="true">
+    <div class="modal compliance-edit-modal" role="dialog" aria-labelledby="anomaly-modal-title" style="width:min(760px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
+        <div class="modal-header"><h2 class="modal-title" id="anomaly-modal-title">Add Risk Anomaly</h2><button type="button" class="modal-close" id="close-anomaly-modal" aria-label="Close">&times;</button></div>
+        <form method="post" action="javascript:void(0)" style="display:flex;flex-direction:column;min-height:0;flex:1;">
+            <div style="overflow:auto;padding:1rem 1.25rem 0.5rem 1.25rem;flex:1;min-height:0;">
+                <div class="form-group"><label class="form-label">Type</label><select class="form-control"><option>Select type</option><option>Transaction</option><option>System Access</option><option>Customer Behavior</option><option>Process</option></select></div>
+                <div class="form-group"><label class="form-label">Description</label><textarea class="form-control" rows="3" placeholder="Enter anomaly description"></textarea></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">Severity</label><select class="form-control"><option>Select severity</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select></div><div class="form-group"><label class="form-label">Status</label><select class="form-control"><option>Select status</option><option>Open</option><option>Investigating</option><option>Resolved</option></select></div></div>
+                <div class="form-group"><label class="form-label">Confidence</label><select class="form-control"><option>Select confidence</option><option>High</option><option>Medium</option><option>Low</option></select></div>
+            </div>
+            <div class="modal-footer" style="padding:0.75rem 1.25rem;border-top:1px solid #e5e7eb;background:#fff;display:flex;justify-content:flex-end;gap:0.5rem;"><button type="button" class="btn btn-secondary" id="cancel-anomaly-modal">Cancel</button><button type="submit" class="btn btn-primary">Add Anomaly</button></div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+<?php if ($canOpenComplianceModal): ?>
+<div id="compliance-modal" class="modal-overlay compliance-modal" style="display:none;" aria-hidden="true">
+    <div class="modal compliance-edit-modal" role="dialog" aria-labelledby="compliance-modal-title" style="width:min(760px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
+        <div class="modal-header"><h2 class="modal-title" id="compliance-modal-title">Add Compliance Requirement</h2><button type="button" class="modal-close" id="close-compliance-modal" aria-label="Close">&times;</button></div>
+        <form method="post" action="javascript:void(0)" style="display:flex;flex-direction:column;min-height:0;flex:1;">
+            <div style="overflow:auto;padding:1rem 1.25rem 0.5rem 1.25rem;flex:1;min-height:0;">
+                <div class="form-group"><label class="form-label">Related Risk ID</label><input type="text" class="form-control" placeholder="Enter related risk identifier (optional)"></div>
+                <div class="form-group"><label class="form-label">Regulation Name</label><input type="text" class="form-control" placeholder="e.g., RBI Master Direction, SEBI Guidelines"></div>
+                <div class="form-group"><label class="form-label">Requirement Description</label><textarea class="form-control" rows="3" placeholder="Describe the specific compliance requirement"></textarea></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">Responsible Department</label><input type="text" class="form-control" placeholder="Enter department name"></div><div class="form-group"><label class="form-label">Due Date</label><input type="date" class="form-control"></div></div>
+                <div class="form-group"><label class="form-label">Compliance Status</label><select class="form-control"><option>Select status</option><option>Compliant</option><option>Non-Compliant</option><option>In Progress</option></select></div>
+                <div class="form-group"><label class="form-label">Evidence Location</label><input type="text" class="form-control" placeholder="Location of supporting documents/evidence"></div>
+                <div class="form-group"><label class="form-label">Assessment Notes</label><textarea class="form-control" rows="2" placeholder="Notes from compliance assessment"></textarea></div>
+                <div class="form-group"><label class="form-label">Remediation Plan</label><textarea class="form-control" rows="2" placeholder="Plan to address any compliance gaps"></textarea></div>
+            </div>
+            <div class="modal-footer" style="padding:0.75rem 1.25rem;border-top:1px solid #e5e7eb;background:#fff;display:flex;justify-content:flex-end;gap:0.5rem;"><button type="button" class="btn btn-secondary" id="cancel-compliance-modal">Cancel</button><button type="submit" class="btn btn-primary">Add Requirement</button></div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+<?php if ($canOpenResilienceModal): ?>
+<div id="resilience-modal" class="modal-overlay compliance-modal" style="display:none;" aria-hidden="true">
+    <div class="modal compliance-edit-modal" role="dialog" aria-labelledby="resilience-modal-title" style="width:min(760px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
+        <div class="modal-header"><h2 class="modal-title" id="resilience-modal-title">Add Resilience Plan</h2><button type="button" class="modal-close" id="close-resilience-modal" aria-label="Close">&times;</button></div>
+        <form method="post" action="javascript:void(0)" style="display:flex;flex-direction:column;min-height:0;flex:1;">
+            <div style="overflow:auto;padding:1rem 1.25rem 0.5rem 1.25rem;flex:1;min-height:0;">
+                <div class="form-group"><label class="form-label">Related Risk ID</label><input type="text" class="form-control" placeholder="Enter related risk identifier (optional)"></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">Plan Name</label><input type="text" class="form-control" placeholder="Enter plan name"></div><div class="form-group"><label class="form-label">Plan Type</label><select class="form-control"><option>Select plan type</option><option>Business Continuity</option><option>Disaster Recovery</option><option>Incident Response</option><option>Crisis Management</option></select></div></div>
+                <div class="form-group"><label class="form-label">Description</label><textarea class="form-control" rows="2" placeholder="Describe the purpose and scope of this resilience plan"></textarea></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">Recovery Time Objective (hours)</label><input type="number" step="0.1" class="form-control" placeholder="e.g., 2"></div><div class="form-group"><label class="form-label">Recovery Point Objective (hours)</label><input type="number" step="0.1" class="form-control" placeholder="e.g., 4"></div></div>
+                <div class="form-group"><label class="form-label">Activation Triggers (comma-separated)</label><input type="text" class="form-control" placeholder="e.g., system outage, natural disaster, security breach"></div>
+                <div class="form-group"><label class="form-label">Recovery Objectives</label><textarea class="form-control" rows="2" placeholder="Define what constitutes successful recovery"></textarea></div>
+                <div class="form-group"><label class="form-label">Key Personnel (comma-separated)</label><input type="text" class="form-control" placeholder="e.g., John Doe - IT Manager, Jane Smith - Operations Head"></div>
+                <div class="form-group"><label class="form-label">Critical Resources (comma-separated)</label><input type="text" class="form-control" placeholder="e.g., Primary servers, Backup facility, Communication systems"></div>
+                <div class="form-group"><label class="form-label">Communication Plan</label><textarea class="form-control" rows="2" placeholder="Define communication procedures during activation"></textarea></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">Testing Schedule</label><input type="text" class="form-control" placeholder="e.g., Quarterly, Semi-annual"></div><div class="form-group"><label class="form-label">Plan Owner</label><input type="text" class="form-control" placeholder="Enter responsible person"></div></div>
+                <div class="form-group"><label class="form-label">Approval Status</label><select class="form-control"><option>Select status</option><option>Draft</option><option>Under Review</option><option>Approved</option></select></div>
+            </div>
+            <div class="modal-footer" style="padding:0.75rem 1.25rem;border-top:1px solid #e5e7eb;background:#fff;display:flex;justify-content:flex-end;gap:0.5rem;"><button type="button" class="btn btn-secondary" id="cancel-resilience-modal">Cancel</button><button type="submit" class="btn btn-primary">Add Plan</button></div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+<?php if ($canOpenLessonsModal): ?>
+<div id="lesson-modal" class="modal-overlay compliance-modal" style="display:none;" aria-hidden="true">
+    <div class="modal compliance-edit-modal" role="dialog" aria-labelledby="lesson-modal-title" style="width:min(760px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
+        <div class="modal-header"><h2 class="modal-title" id="lesson-modal-title">Add New Lesson</h2><button type="button" class="modal-close" id="close-lesson-modal" aria-label="Close">&times;</button></div>
+        <form method="post" action="javascript:void(0)" style="display:flex;flex-direction:column;min-height:0;flex:1;">
+            <div style="overflow:auto;padding:1rem 1.25rem 0.5rem 1.25rem;flex:1;min-height:0;">
+                <div class="form-group"><label class="form-label">Lesson Title</label><input type="text" class="form-control" placeholder="Brief title for the lesson"></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">Category</label><select class="form-control"><option>Select category</option><option>Incident Response</option><option>Control Failure</option><option>Compliance Gap</option><option>Process Improvement</option></select></div><div class="form-group"><label class="form-label">Impact Level</label><select class="form-control"><option>Medium</option><option>Low</option><option>High</option><option>Critical</option></select></div></div>
+                <div class="form-group"><label class="form-label">Description</label><textarea class="form-control" rows="2" placeholder="Detailed description of the lesson learned"></textarea></div>
+                <div class="form-group"><label class="form-label">What Happened</label><textarea class="form-control" rows="2" placeholder="Describe what happened during the incident"></textarea></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">What Went Well</label><textarea class="form-control" rows="2" placeholder="What aspects worked well?"></textarea></div><div class="form-group"><label class="form-label">What Could Improve</label><textarea class="form-control" rows="2" placeholder="What could be improved?"></textarea></div></div>
+                <div class="form-group"><label class="form-label">Root Cause Analysis</label><textarea class="form-control" rows="2" placeholder="What was the root cause of the issue?"></textarea></div>
+                <div class="form-group"><label class="form-label">Preventive Measures</label><textarea class="form-control" rows="2" placeholder="What measures are being implemented to prevent recurrence?"></textarea></div>
+                <div class="form-group"><label class="form-label">Process Improvements</label><textarea class="form-control" rows="2" placeholder="What process improvements will be made?"></textarea></div>
+                <div class="form-row-2"><div class="form-group"><label class="form-label">Documented By</label><input type="text" class="form-control" placeholder="Person/team documenting this lesson"></div><div class="form-group"><label class="form-label">Implementation Status</label><select class="form-control"><option>Pending</option><option>In Progress</option><option>Completed</option></select></div></div>
+            </div>
+            <div class="modal-footer" style="padding:0.75rem 1.25rem;border-top:1px solid #e5e7eb;background:#fff;display:flex;justify-content:flex-end;gap:0.5rem;"><button type="button" class="btn btn-secondary" id="cancel-lesson-modal">Cancel</button><button type="submit" class="btn btn-primary">Add Lesson</button></div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
 <script>
 (function() {
   var modal = document.getElementById('risk-modal');
@@ -469,6 +837,56 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
   openers.forEach(function(id){ var el = document.getElementById(id); if (el) el.addEventListener('click', openModal); });
   var c1 = document.getElementById('close-risk-modal'); if (c1) c1.addEventListener('click', closeModal);
   var c2 = document.getElementById('cancel-risk-modal'); if (c2) c2.addEventListener('click', closeModal);
+  if (modal) { modal.addEventListener('click', function(e){ if (e.target === modal) closeModal(); }); }
+})();
+(function() {
+  var modal = document.getElementById('lesson-modal');
+  var openers = ['open-lesson-modal', 'open-lesson-modal-2', 'open-lesson-modal-3'];
+  function openModal() { if (modal) { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); } }
+  function closeModal() { if (modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); } }
+  openers.forEach(function(id){ var el = document.getElementById(id); if (el) el.addEventListener('click', openModal); });
+  var c1 = document.getElementById('close-lesson-modal'); if (c1) c1.addEventListener('click', closeModal);
+  var c2 = document.getElementById('cancel-lesson-modal'); if (c2) c2.addEventListener('click', closeModal);
+  if (modal) { modal.addEventListener('click', function(e){ if (e.target === modal) closeModal(); }); }
+})();
+(function() {
+  var modal = document.getElementById('compliance-modal');
+  var openers = ['open-compliance-modal', 'open-compliance-modal-2', 'open-compliance-modal-3'];
+  function openModal() { if (modal) { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); } }
+  function closeModal() { if (modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); } }
+  openers.forEach(function(id){ var el = document.getElementById(id); if (el) el.addEventListener('click', openModal); });
+  var c1 = document.getElementById('close-compliance-modal'); if (c1) c1.addEventListener('click', closeModal);
+  var c2 = document.getElementById('cancel-compliance-modal'); if (c2) c2.addEventListener('click', closeModal);
+  if (modal) { modal.addEventListener('click', function(e){ if (e.target === modal) closeModal(); }); }
+})();
+(function() {
+  var modal = document.getElementById('resilience-modal');
+  var openers = ['open-resilience-modal', 'open-resilience-modal-2', 'open-resilience-modal-3'];
+  function openModal() { if (modal) { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); } }
+  function closeModal() { if (modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); } }
+  openers.forEach(function(id){ var el = document.getElementById(id); if (el) el.addEventListener('click', openModal); });
+  var c1 = document.getElementById('close-resilience-modal'); if (c1) c1.addEventListener('click', closeModal);
+  var c2 = document.getElementById('cancel-resilience-modal'); if (c2) c2.addEventListener('click', closeModal);
+  if (modal) { modal.addEventListener('click', function(e){ if (e.target === modal) closeModal(); }); }
+})();
+(function() {
+  var modal = document.getElementById('incident-modal');
+  var openers = ['open-incident-modal', 'open-incident-modal-2', 'open-incident-modal-3'];
+  function openModal() { if (modal) { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); } }
+  function closeModal() { if (modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); } }
+  openers.forEach(function(id){ var el = document.getElementById(id); if (el) el.addEventListener('click', openModal); });
+  var c1 = document.getElementById('close-incident-modal'); if (c1) c1.addEventListener('click', closeModal);
+  var c2 = document.getElementById('cancel-incident-modal'); if (c2) c2.addEventListener('click', closeModal);
+  if (modal) { modal.addEventListener('click', function(e){ if (e.target === modal) closeModal(); }); }
+})();
+(function() {
+  var modal = document.getElementById('anomaly-modal');
+  var openers = ['open-anomaly-modal', 'open-anomaly-modal-2', 'open-anomaly-modal-3'];
+  function openModal() { if (modal) { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); } }
+  function closeModal() { if (modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); } }
+  openers.forEach(function(id){ var el = document.getElementById(id); if (el) el.addEventListener('click', openModal); });
+  var c1 = document.getElementById('close-anomaly-modal'); if (c1) c1.addEventListener('click', closeModal);
+  var c2 = document.getElementById('cancel-anomaly-modal'); if (c2) c2.addEventListener('click', closeModal);
   if (modal) { modal.addEventListener('click', function(e){ if (e.target === modal) closeModal(); }); }
 })();
 // Auto-apply dropdown filters for compact toolbar UX.

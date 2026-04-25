@@ -30,60 +30,60 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
     $dueOver = !empty($row['due_date']) && strtotime($row['due_date']) < strtotime('today')
         && !in_array($st, ['approved', 'completed', 'rejected'], true);
 
-    $viewBtn = '<a href="' . htmlspecialchars($basePath) . '/compliance/view/' . $id . '" class="btn btn-sm btn-outline-secondary"><i class="fas fa-eye"></i> View</a>';
+    $viewBtn = '<a href="' . htmlspecialchars($basePath) . '/compliance/view/' . $id . '" class="btn btn-sm compliance-action-btn action-view"><i class="fas fa-eye"></i> View</a>';
 
-    $mk = function (string $cls, string $icon, string $label, string $href = '', string $formAction = ''): string {
+    $mk = function (string $variant, string $icon, string $label, string $href = '', string $formAction = ''): string {
         if ($formAction !== '') {
             return '<form method="post" action="' . htmlspecialchars($formAction) . '" class="d-inline" onsubmit="return confirm(\'Continue?\');">'
-                . '<button type="submit" class="btn btn-sm ' . htmlspecialchars($cls) . '"><i class="fas ' . htmlspecialchars($icon) . '"></i> ' . htmlspecialchars($label) . '</button></form>';
+                . '<button type="submit" class="btn btn-sm compliance-action-btn ' . htmlspecialchars($variant) . '"><i class="fas ' . htmlspecialchars($icon) . '"></i> ' . htmlspecialchars($label) . '</button></form>';
         }
 
-        return '<a href="' . htmlspecialchars($href) . '" class="btn btn-sm ' . htmlspecialchars($cls) . '"><i class="fas ' . htmlspecialchars($icon) . '"></i> ' . htmlspecialchars($label) . '</a>';
+        return '<a href="' . htmlspecialchars($href) . '" class="btn btn-sm compliance-action-btn ' . htmlspecialchars($variant) . '"><i class="fas ' . htmlspecialchars($icon) . '"></i> ' . htmlspecialchars($label) . '</a>';
     };
 
     // —— Admin: full workflow visibility (reference UI) ——
     if ($isAdmin) {
         if ($dueOver && !in_array($st, ['approved', 'completed', 'rejected'], true)) {
-            return [$mk('btn-warning text-dark', 'fa-exclamation-triangle', 'Act Now', $basePath . '/compliance/view/' . $id . '?tab=checklist'), $viewBtn];
+            return [$mk('action-act', 'fa-exclamation-triangle', 'Act Now', $basePath . '/compliance/view/' . $id . '?tab=checklist'), $viewBtn];
         }
         if ($st === 'draft') {
-            return [$mk('btn-secondary', 'fa-pencil-alt', 'Edit', $basePath . '/compliances/edit/' . $id), $viewBtn];
+            return [$mk('action-edit', 'fa-pencil-alt', 'Edit', $basePath . '/compliances/edit/' . $id), $viewBtn];
         }
         if (in_array($st, ['pending', 'rework'], true)) {
-            return [$mk('btn-primary', 'fa-paper-plane', 'Submit', '', $basePath . '/compliances/submit/' . $id), $viewBtn];
+            return [$mk('action-submit', 'fa-paper-plane', 'Submit', '', $basePath . '/compliances/submit/' . $id), $viewBtn];
         }
         if ($st === 'submitted') {
-            return [$mk('btn-info text-white', 'fa-clipboard-check', 'Review', $basePath . '/compliance/view/' . $id . '?tab=checklist'), $viewBtn];
+            return [$mk('action-review', 'fa-clipboard-check', 'Review', $basePath . '/compliance/view/' . $id . '?tab=checklist'), $viewBtn];
         }
         if ($st === 'under_review') {
-            return [$mk('btn-success', 'fa-check-double', 'Approve', $basePath . '/compliance/view/' . $id . '?tab=checklist'), $viewBtn];
+            return [$mk('action-approve', 'fa-check-double', 'Approve', $basePath . '/compliance/view/' . $id . '?tab=checklist'), $viewBtn];
         }
         if (in_array($st, ['approved', 'completed', 'rejected'], true)) {
-            return [$mk('btn-primary', 'fa-eye', 'View', $basePath . '/compliance/view/' . $id), ''];
+            return [$mk('action-view', 'fa-eye', 'View', $basePath . '/compliance/view/' . $id), ''];
         }
 
-        return [$mk('btn-primary', 'fa-eye', 'View', $basePath . '/compliance/view/' . $id), ''];
+        return [$mk('action-view', 'fa-eye', 'View', $basePath . '/compliance/view/' . $id), ''];
     }
 
     // —— Maker: View + Submit (checklist) when owner & actionable ——
     if ($isMaker) {
         $chk = $basePath . '/compliance/view/' . $id . '?tab=checklist';
         if ($isOwner && in_array($st, ['pending', 'draft', 'rework'], true)) {
-            return [$mk('btn-primary', 'fa-paper-plane', 'Submit', $chk), $viewBtn];
+            return [$mk('action-submit', 'fa-paper-plane', 'Submit', $chk), $viewBtn];
         }
     }
 
     // —— Reviewer: View + Review ——
     if ($isReviewer && $isAssignedReviewer && $st === 'submitted') {
-        return [$mk('btn-info text-white', 'fa-clipboard-check', 'Review', $basePath . '/compliance/view/' . $id . '?tab=checklist'), $viewBtn];
+        return [$mk('action-review', 'fa-clipboard-check', 'Review', $basePath . '/compliance/view/' . $id . '?tab=checklist'), $viewBtn];
     }
 
     // —— Approver: View + Approve + Reject ——
     if ($isApprover && $isAssignedApprover && $st === 'under_review') {
         $chk = htmlspecialchars($basePath) . '/compliance/view/' . $id . '?tab=checklist';
         $pair = '<span class="d-inline-flex flex-wrap gap-1 align-items-center">'
-            . '<a href="' . $chk . '" class="btn btn-sm btn-success"><i class="fas fa-check"></i> Approve</a>'
-            . '<a href="' . $chk . '" class="btn btn-sm btn-outline-danger"><i class="fas fa-times"></i> Reject</a></span>';
+            . '<a href="' . $chk . '" class="btn btn-sm compliance-action-btn action-approve"><i class="fas fa-check"></i> Approve</a>'
+            . '<a href="' . $chk . '" class="btn btn-sm compliance-action-btn action-reject"><i class="fas fa-times"></i> Reject</a></span>';
 
         return [$pair, $viewBtn];
     }
@@ -163,31 +163,29 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
             </div>
             <?php endif; ?>
             <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">From</label>
+                <label class="form-label">Due Date From</label>
                 <input type="date" name="from" class="form-control" value="<?= htmlspecialchars($filters['from'] ?? '') ?>">
             </div>
             <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">To</label>
+                <label class="form-label">Due Date To</label>
                 <input type="date" name="to" class="form-control" value="<?= htmlspecialchars($filters['to'] ?? '') ?>">
             </div>
             <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px;">
                 <label class="form-label">Search</label>
-                <input type="text" name="search" class="form-control" placeholder="Search by title, ID, or owner..." value="<?= htmlspecialchars($filters['search'] ?? '') ?>">
+                <input type="text" name="search" class="form-control" placeholder="Search by title or owner..." value="<?= htmlspecialchars($filters['search'] ?? '') ?>">
             </div>
             <button type="submit" class="btn btn-secondary">Filter</button>
         </div>
     </form>
 
-    <div class="table-wrap">
+    <div class="table-wrap compliance-list-table-wrap">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>Title</th>
                     <th>Framework</th>
                     <th>Department</th>
                     <th>Priority</th>
-                    <th>Created Date</th>
                     <th>Due Date</th>
                     <th>Status</th>
                     <th>Action</th>
@@ -244,12 +242,10 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
                     [$primaryAct, $secondaryAct] = $actionCell($row);
                 ?>
                 <tr>
-                    <td><?= htmlspecialchars($row['compliance_code']) ?></td>
                     <td><?= htmlspecialchars(mb_substr($row['title'], 0, 60)) ?><?= mb_strlen($row['title']) > 60 ? '…' : '' ?></td>
                     <td><?= htmlspecialchars($row['authority_name'] ?? '—') ?></td>
                     <td><?= htmlspecialchars($row['department']) ?></td>
                     <td><span class="badge <?= $pcls ?>"><?= htmlspecialchars($plab) ?></span></td>
-                    <td><?= !empty($row['created_at']) ? date('M j, Y', strtotime($row['created_at'])) : '—' ?></td>
                     <td><?= !empty($row['due_date']) ? date('M j, Y', strtotime($row['due_date'])) : '—' ?></td>
                     <td><span class="badge <?= $scls ?>"><?= htmlspecialchars($slab) ?></span></td>
                     <td class="compliance-list-actions">
@@ -261,16 +257,16 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($items)): ?>
-                <tr><td colspan="9" class="text-muted">No compliances found.</td></tr>
+                <tr><td colspan="7" class="text-muted">No compliances found.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
-        <span class="text-muted">Showing <?= $total ? (($page - 1) * $perPage + 1) : 0 ?>-<?= min($page * $perPage, $total) ?> of <?= $total ?></span>
+    <div class="compliance-list-footer">
+        <span class="text-muted compliance-list-summary">Showing <?= $total ? (($page - 1) * $perPage + 1) : 0 ?>-<?= min($page * $perPage, $total) ?> of <?= $total ?></span>
         <?php $totalPages = $total ? (int) ceil($total / $perPage) : 1; ?>
         <?php if ($totalPages > 1): ?>
-        <div style="display: flex; gap: 0.25rem;">
+        <div class="compliance-list-pagination">
             <?php for ($i = 1; $i <= $totalPages; $i++): ?>
             <a href="?<?= http_build_query(array_merge($filters, ['page' => $i])) ?>" class="btn btn-sm <?= $i === $page ? 'btn-primary' : 'btn-secondary' ?>"><?= $i ?></a>
             <?php endfor; ?>

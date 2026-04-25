@@ -88,6 +88,16 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 <label class="form-label">Description</label>
                 <textarea name="description" class="form-control" placeholder="Enter compliance description" rows="3"><?= htmlspecialchars($_POST['description'] ?? '') ?></textarea>
             </div>
+            <div class="form-row-2">
+                <div class="form-group">
+                    <label class="form-label">Objective / Description</label>
+                    <textarea name="objective_text" class="form-control" rows="2" placeholder="What is the objective of this compliance?"><?= htmlspecialchars($_POST['objective_text'] ?? '') ?></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Expected Outcome</label>
+                    <textarea name="expected_outcome" class="form-control" rows="2" placeholder="What does success look like?"><?= htmlspecialchars($_POST['expected_outcome'] ?? '') ?></textarea>
+                </div>
+            </div>
             <div class="form-group">
                 <label class="form-label">Penalty / Impact</label>
                 <textarea name="penalty_impact" class="form-control" placeholder="Describe penalty or impact" rows="2"><?= htmlspecialchars($_POST['penalty_impact'] ?? '') ?></textarea>
@@ -173,11 +183,11 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 <div class="form-group mb-0">
                     <label class="form-label">Evidence upload <span class="text-muted font-normal">(Optional)</span></label>
                     <div class="evidence-dropzone" id="evidence-dropzone">
-                        <input type="file" name="evidence_upload" id="evidence_upload" class="evidence-file-input" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.xls,.xlsx" tabindex="-1">
+                        <input type="file" name="evidence_upload" id="evidence_upload" class="evidence-file-input" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.xls,.xlsx" tabindex="-1">
                         <div class="evidence-dropzone-inner">
                             <span class="evidence-dropzone-icon"><i class="fas fa-cloud-upload-alt"></i></span>
                             <p class="evidence-dropzone-text"><strong>Click to upload</strong> or drag and drop</p>
-                            <p class="evidence-dropzone-hint">PDF, DOC, PNG, JPG, XLS (max 10MB)</p>
+                            <p class="evidence-dropzone-hint">PDF, DOC, PNG, JPG, JPEG, GIF, WEBP, XLS, XLSX (max 10MB)</p>
                             <span id="evidence-file-name" class="ci-file-name"></span>
                         </div>
                     </div>
@@ -209,17 +219,17 @@ $evTypePost = $_POST['evidence_type'] ?? '';
             <h3 class="card-title">Important Dates</h3>
             <div class="create-form-grid-4">
                 <div class="form-group">
-                    <label class="form-label">Start Date</label>
-                    <input type="date" name="start_date" class="form-control" value="<?= htmlspecialchars($_POST['start_date'] ?? '') ?>">
+                    <label class="form-label">Start Date *</label>
+                    <input type="date" name="start_date" class="form-control" value="<?= htmlspecialchars($_POST['start_date'] ?? '') ?>" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Expected Date</label>
-                    <input type="date" name="expected_date" class="form-control" value="<?= htmlspecialchars($_POST['expected_date'] ?? '') ?>">
+                    <label class="form-label">Expected Date *</label>
+                    <input type="date" name="expected_date" class="form-control" value="<?= htmlspecialchars($_POST['expected_date'] ?? '') ?>" required>
                     <p class="form-help">Must be on or before Due Date.</p>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Reminder Date</label>
-                    <input type="date" name="reminder_date" class="form-control" value="<?= htmlspecialchars($_POST['reminder_date'] ?? '') ?>">
+                    <label class="form-label">Reminder Date *</label>
+                    <input type="date" name="reminder_date" class="form-control" value="<?= htmlspecialchars($_POST['reminder_date'] ?? '') ?>" required>
                 </div>
             </div>
         </div>
@@ -289,7 +299,6 @@ $evTypePost = $_POST['evidence_type'] ?? '';
     function toggleWorkflow(lock) {
         var isTwoLevel = wf.value === 'two-level';
         revField.style.display = isTwoLevel ? 'none' : '';
-        if (isTwoLevel) revSel.value = '';
         wf.disabled = !!lock;
         document.getElementById('wf-hidden') && document.getElementById('wf-hidden').remove();
         if (lock) {
@@ -314,12 +323,12 @@ $evTypePost = $_POST['evidence_type'] ?? '';
         wf.value = data.workflow;
         toggleWorkflow(true); // lock dropdown
 
-        // auto-select reviewer
-        if (data.reviewer_id && revSel) {
+        // only auto-fill when user has not selected anyone yet
+        if (data.reviewer_id && revSel && !revSel.value) {
             revSel.value = data.reviewer_id;
         }
-        // auto-select approver
-        if (data.approver_id && appSel) {
+        // only auto-fill when user has not selected anyone yet
+        if (data.approver_id && appSel && !appSel.value) {
             appSel.value = data.approver_id;
         }
 

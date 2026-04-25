@@ -3,10 +3,17 @@ $c = $compliance;
 $flashSuccess = $_SESSION['flash_success'] ?? null;
 $flashError = $_SESSION['flash_error'] ?? null;
 unset($_SESSION['flash_success'], $_SESSION['flash_error']);
-$auth = $auth ?? ['id' => null, 'isAdmin' => false, 'isApprover' => false, 'isReviewer' => false, 'isMaker' => false];
+$auth = $auth ?? ['id' => null, 'isAdmin' => false, 'isApprover' => false, 'isReviewer' => false, 'isMaker' => false, 'roleSlug' => null];
 $tab = $tab ?? 'overview';
 $documentVersions = $documentVersions ?? [];
 $historyRangeMonths = (int)($historyRangeMonths ?? 6);
+$doaFlowText = $doaFlowText ?? '';
+$doaLogs = $doaLogs ?? [];
+$doaLevelProgress = $doaLevelProgress ?? [];
+$doaCurrentRoleSlug = $doaCurrentRoleSlug ?? '';
+$doaHasDelegationNotes = !empty($doaHasDelegationNotes);
+$discussion = $discussion ?? [];
+$checkpoints = $checkpoints ?? [];
 
 function freq_label_view($f) {
     $m = ['one-time' => 'One-time', 'daily' => 'Daily', 'weekly' => 'Weekly', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly',
@@ -33,9 +40,19 @@ function activity_jump_tab($action) {
 $isOwner = (int)($auth['id'] ?? 0) === (int)$c['owner_id'];
 $canMakerAct = !empty($auth['isAdmin']) || (!empty($auth['isMaker']) && $isOwner);
 $st = $c['status'];
+$isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
+$isOverdue = !empty($c['due_date'])
+    && $c['due_date'] < date('Y-m-d')
+    && !in_array($c['status'], ['completed', 'approved', 'rejected'], true);
+$usesDoa = \App\Core\DoaEngine::complianceUsesDoa($c);
+$canDoaLevelAct = !empty($auth['isAdmin']) || (int)($auth['id'] ?? 0) === (int)($c['doa_active_user_id'] ?? 0);
+$canApproveFinal = !empty($auth['isAdmin'])
+    || ($usesDoa && (int)($auth['id'] ?? 0) === (int)($c['doa_active_user_id'] ?? 0) && \App\Core\DoaEngine::roleMayFinalApprove($doaCurrentRoleSlug))
+    || (!$usesDoa && !empty($auth['isApprover']) && (int)($auth['id'] ?? 0) === (int)($c['approver_id'] ?? 0));
+$showDoaIntermediate = $usesDoa && $st === 'submitted' && (int)($c['doa_current_level'] ?? 0) < (int)($c['doa_total_levels'] ?? 0);
+$showLegacyReviewer = !$usesDoa && !$isTwoLevel && $st === 'submitted' && (!empty($auth['isAdmin']) || (!empty($auth['isReviewer']) && (int)($auth['id'] ?? 0) === (int)($c['reviewer_id'] ?? 0)));
 
 /* Workflow stage strip */
-$isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
 $makerDone = !in_array($st, ['pending', 'draft', 'rework'], true);
 $reviewerDone = in_array($st, ['under_review', 'completed', 'approved', 'rejected'], true);
 $approverDone = in_array($st, ['completed', 'approved', 'rejected'], true);
@@ -61,15 +78,96 @@ $approverActive = $st === 'under_review' || ($isTwoLevel && $st === 'submitted')
             </div>
         </div>
         <div class="compliance-meta-bar">
-            <div class="cmb-item"><span class="cmb-label">Due date</span><span class="cmb-val"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
-            <div class="cmb-item"><span class="cmb-label">Risk</span><span class="cmb-val"><span class="badge badge-<?= in_array($c['risk_level'], ['critical','high'], true) ? 'danger' : 'warning' ?>"><?= htmlspecialchars(ucfirst($c['risk_level'])) ?></span></span></div>
+            <div class="cmb-item<?= !empty($isOverdue) ? ' cmb-overdue' : '' ?>"><span class="cmb-label">Due date</span><span class="cmb-val <?= !empty($isOverdue) ? 'text-danger font-weight-600' : '' ?>"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
+            <div class="cmb-item"><span class="cmb-label">Risk</span><span class="cmb-val"><span class="badge <?= in_array($c['risk_level'], ['critical','high'], true) ? 'badge-doarisk' : 'badge-secondary' ?>"><?= htmlspecialchars(ucfirst($c['risk_level'])) ?></span></span></div>
             <div class="cmb-item"><span class="cmb-label">Priority</span><span class="cmb-val"><span class="badge badge-<?= in_array($c['priority'], ['critical','high'], true) ? 'danger' : 'secondary' ?>"><?= htmlspecialchars(ucfirst($c['priority'])) ?></span></span></div>
             <div class="cmb-item cmb-team"><span class="cmb-label">Maker</span><span class="cmb-val"><?= htmlspecialchars($c['owner_name'] ?? '—') ?></span></div>
-            <?php if (!$isTwoLevel): ?>
-            <div class="cmb-item cmb-team"><span class="cmb-label">Reviewer</span><span class="cmb-val"><?= htmlspecialchars($c['reviewer_name'] ?? '—') ?></span></div>
-            <?php endif; ?>
+            <div class="cmb-item cmb-team"><span class="cmb-label">Reviewer</span><span class="cmb-val"><?= htmlspecialchars($c['reviewer_name'] ?? 'Unassigned') ?></span></div>
             <div class="cmb-item cmb-team"><span class="cmb-label">Approver</span><span class="cmb-val"><?= htmlspecialchars($c['approver_name'] ?? '—') ?></span></div>
+            <?php if ($usesDoa && in_array($st, ['submitted', 'under_review'], true)): ?>
+            <div class="cmb-item cmb-team"><span class="cmb-label">DOA — next</span><span class="cmb-val"><?= htmlspecialchars($c['doa_active_user_name'] ?? '—') ?> <span class="text-muted text-sm">(L<?= (int)($c['doa_current_level'] ?? 1) ?>/<?= (int)($c['doa_total_levels'] ?? 1) ?>)</span></span></div>
+            <?php endif; ?>
         </div>
+        <?php if ($usesDoa && $doaFlowText !== ''): ?>
+        <div class="doa-compliance-panel card">
+            <div class="doa-compliance-panel-head">
+                <h3 class="doa-compliance-panel-title"><i class="fas fa-clipboard-check" aria-hidden="true"></i> DOA — authority &amp; routing</h3>
+                <p class="doa-compliance-panel-meta mb-0">Applied: <strong><?= htmlspecialchars((string)($c['doa_applied_condition'] ?? '')) ?></strong></p>
+            </div>
+            <p class="text-muted text-sm mb-2">Chain: <?= htmlspecialchars($doaFlowText) ?></p>
+            <div class="doa-c6-legend" aria-label="Six-step delegation on this compliance">
+                <span class="doa-c6-chip doa-c6-chip--on" title="Rule &amp; assignment">1 Plan</span>
+                <span class="doa-c6-chip<?= $doaHasDelegationNotes ? ' doa-c6-chip--on' : '' ?>" title="<?= htmlspecialchars($doaHasDelegationNotes ? 'Rule set has discussion notes' : 'Add notes on the rule set (step 2) if needed', ENT_QUOTES, 'UTF-8') ?>">2 Discuss</span>
+                <span class="doa-c6-chip<?= !empty($c['due_date']) ? ' doa-c6-chip--on' : '' ?>" title="Due <?= htmlspecialchars((string)($c['due_date'] ?? '')) ?>">3 Deadline</span>
+                <span class="doa-c6-chip doa-c6-chip--on" title="DOA levels active">4 Authority</span>
+                <span class="doa-c6-chip<?= !empty($doaLogs) ? ' doa-c6-chip--on' : '' ?>" title="Logged actions">5 Checkpoints</span>
+                <span class="doa-c6-chip<?= in_array($st, ['completed', 'approved', 'rejected'], true) ? ' doa-c6-chip--on' : '' ?>" title="Final outcome">6 Debrief</span>
+            </div>
+            <?php if (!empty($doaLevelProgress)): ?>
+            <div class="doa-prog-strip" aria-label="DOA level progress">
+                <?php foreach ($doaLevelProgress as $dp):
+                    $ic = '○';
+                    $cls = 'doa-prog-dot--pending';
+                    if ($dp['state'] === 'done') {
+                        $ic = '✓';
+                        $cls = 'doa-prog-dot--done';
+                    } elseif ($dp['state'] === 'current') {
+                        $ic = '●';
+                        $cls = 'doa-prog-dot--current';
+                    } elseif ($dp['state'] === 'rejected') {
+                        $ic = '✗';
+                        $cls = 'doa-prog-dot--rejected';
+                    } elseif ($dp['state'] === 'rework') {
+                        $ic = '↩';
+                        $cls = 'doa-prog-dot--rework';
+                    } elseif ($dp['state'] === 'skipped') {
+                        $ic = '—';
+                        $cls = 'doa-prog-dot--skip';
+                    }
+                    ?>
+                <div class="doa-prog-step">
+                    <span class="doa-prog-dot <?= $cls ?>" title="<?= htmlspecialchars($dp['state']) ?>"><?= $ic ?></span>
+                    <span class="doa-prog-label"><?= htmlspecialchars($dp['label']) ?></span>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
+            <?php if (!empty($doaLogs)): ?>
+            <div class="doa-audit-wrap">
+                <h4 class="doa-audit-title">Accountability log</h4>
+                <div class="table-wrap doa-audit-table-wrap">
+                    <table class="data-table doa-audit-table text-sm">
+                        <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Who</th>
+                                <th>Role</th>
+                                <th>Level</th>
+                                <th>Action</th>
+                                <th>Comment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($doaLogs as $log): ?>
+                            <tr>
+                                <td class="text-muted"><?= !empty($log['created_at']) ? htmlspecialchars(date('M j, Y H:i', strtotime($log['created_at']))) : '—' ?></td>
+                                <td><?= htmlspecialchars((string)($log['user_name'] ?? '—')) ?></td>
+                                <td><?= htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($log['role'] ?? '')))) ?></td>
+                                <td>L<?= (int)($log['level'] ?? 0) ?></td>
+                                <td><?php
+                                    $actKey = strtolower((string)($log['action'] ?? ''));
+                                    $actClass = in_array($actKey, ['submitted', 'forwarded', 'approved', 'rejected', 'rework'], true) ? $actKey : 'other';
+                                    ?><span class="doa-action-pill doa-action--<?= htmlspecialchars($actClass) ?>"><?= htmlspecialchars((string)($log['action'] ?? '')) ?></span></td>
+                                <td><?= htmlspecialchars((string)($log['comment'] ?? '')) ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
         <div class="workflow-stage-strip" aria-label="Workflow stage">
             <div class="wss-step <?= $makerDone ? 'wss-done' : ($makerActive ? 'wss-active' : '') ?>">
                 <span class="wss-icon"><?= $makerDone ? '✓' : ($makerActive ? '●' : '○') ?></span>
@@ -106,11 +204,6 @@ $approverActive = $st === 'under_review' || ($isTwoLevel && $st === 'submitted')
     <a href="?tab=activity" class="compliance-tab <?= $tab === 'activity' ? 'active' : '' ?>">Activity</a>
 </div>
 
-<?php
-$isOverdue = !empty($c['due_date'])
-    && $c['due_date'] < date('Y-m-d')
-    && !in_array($c['status'], ['completed', 'approved', 'rejected'], true);
-?>
 <?php if ($tab === 'overview'): ?>
 <?php if ($isOverdue): ?>
 <?php $overdueDays = (int)((strtotime(date('Y-m-d')) - strtotime($c['due_date'])) / 86400); ?>
@@ -193,17 +286,75 @@ $isOverdue = !empty($c['due_date'])
     <?php if (!empty($c['description'])): ?>
     <p class="mt-3"><span class="co-label d-block mb-1">Description</span><?= nl2br(htmlspecialchars($c['description'])) ?></p>
     <?php endif; ?>
+    <?php if (!empty($c['objective_text']) || !empty($c['expected_outcome'])): ?>
+    <div class="card-inner-bordered">
+        <?php if (!empty($c['objective_text'])): ?>
+        <p class="mb-2"><span class="co-label d-block mb-1">Objective / Description</span><?= nl2br(htmlspecialchars((string)$c['objective_text'])) ?></p>
+        <?php endif; ?>
+        <?php if (!empty($c['expected_outcome'])): ?>
+        <p class="mb-0"><span class="co-label d-block mb-1">Expected Outcome</span><?= nl2br(htmlspecialchars((string)$c['expected_outcome'])) ?></p>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+</div>
+<div class="card">
+    <h3 class="card-title">Discussion</h3>
+    <form method="post" action="<?= $basePath ?>/compliances/discussion/<?= (int)$c['id'] ?>" class="mb-3">
+        <div class="form-group">
+            <label class="form-label">Add comment</label>
+            <textarea name="comment" class="form-control" rows="2" placeholder="Add context, assign with @Reviewer or @Approver"></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Add Comment</button>
+    </form>
+    <?php if (!empty($discussion)): ?>
+    <ul class="activity-timeline-ref">
+        <?php foreach ($discussion as $d): ?>
+        <li class="activity-tl-item">
+            <span class="activity-tl-dot"></span>
+            <div class="activity-tl-body">
+                <strong><?= htmlspecialchars($d['user_name'] ?? 'User') ?></strong>
+                <div><?= nl2br(htmlspecialchars((string)($d['comment'] ?? ''))) ?></div>
+                <div class="activity-tl-meta"><?= date('M j, Y H:i', strtotime((string)($d['created_at'] ?? 'now'))) ?></div>
+            </div>
+        </li>
+        <?php endforeach; ?>
+    </ul>
+    <?php else: ?>
+    <p class="text-muted mb-0">No discussion yet.</p>
+    <?php endif; ?>
 </div>
 <div class="card">
     <h3 class="card-title">Assigned users</h3>
     <ul class="assigned-users-list">
         <li><strong>Maker</strong> <?= htmlspecialchars($c['owner_name'] ?? '—') ?></li>
-        <?php if (!$isTwoLevel): ?>
-        <li><strong>Reviewer</strong> <?= htmlspecialchars($c['reviewer_name'] ?? '—') ?></li>
-        <?php endif; ?>
+        <li><strong>Reviewer</strong> <?= htmlspecialchars($c['reviewer_name'] ?? 'Unassigned') ?></li>
         <li><strong>Approver</strong> <?= htmlspecialchars($c['approver_name'] ?? '—') ?></li>
     </ul>
 </div>
+<?php if (!empty($doaLogs)): ?>
+<div class="card">
+    <h3 class="card-title">DOA audit log</h3>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr><th>When</th><th>Level</th><th>Role</th><th>User</th><th>Action</th><th>Comment</th></tr>
+            </thead>
+            <tbody>
+                <?php foreach ($doaLogs as $lg): ?>
+                <tr>
+                    <td class="text-sm"><?= htmlspecialchars($lg['created_at'] ?? '') ?></td>
+                    <td>L<?= (int)($lg['level'] ?? 0) ?></td>
+                    <td><?= htmlspecialchars(ucfirst((string)($lg['role'] ?? ''))) ?></td>
+                    <td><?= htmlspecialchars($lg['user_name'] ?? '—') ?></td>
+                    <td><span class="badge badge-<?= ($lg['action'] ?? '') === 'Rejected' ? 'danger' : (($lg['action'] ?? '') === 'Rework' ? 'warning' : 'success') ?>"><?= htmlspecialchars($lg['action'] ?? '') ?></span></td>
+                    <td class="text-sm"><?= nl2br(htmlspecialchars((string)($lg['comment'] ?? ''))) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
 <div class="card">
     <h3 class="card-title">Important dates</h3>
     <div class="important-dates-row">
@@ -237,6 +388,9 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
 ?>
 <div class="card">
     <h3 class="card-title">Workflow progress</h3>
+    <?php if ($usesDoa): ?>
+    <p class="text-sm text-muted mb-2">A multi-level DOA rule is active — use the action cards below; routing may differ from the default two/three step summary.</p>
+    <?php endif; ?>
     <p class="text-muted mb-2"><?= $doneC ?> of <?= count($steps) ?> stages completed <span class="float-end font-semibold"><?= $pct ?>%</span></p>
     <div class="checklist-progress-bar"><div class="checklist-progress-fill" style="width:<?= $pct ?>%"></div></div>
     <ul class="process-step-list">
@@ -252,7 +406,6 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         <?php endforeach; ?>
     </ul>
 </div>
-
 <?php if (in_array($st, ['pending', 'draft', 'rework'], true) && $canMakerAct): ?>
 <div class="card workflow-action-card">
     <h3 class="card-title">Step 1 — Maker</h3>
@@ -281,10 +434,10 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         <input type="hidden" name="return_tab" value="checklist">
         <label class="form-label"><?= !empty($documents) ? 'Upload updated document' : 'Upload document' ?></label>
         <div class="ci-dropzone" id="maker-upload-dz">
-            <input type="file" name="document" id="maker-upload-file" class="ci-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx" required>
+            <input type="file" name="document" id="maker-upload-file" class="ci-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp" required>
             <i class="fas fa-cloud-upload-alt ci-drop-ico"></i>
             <p class="mb-1"><strong>Click to upload</strong> or drag and drop</p>
-            <p class="text-muted text-sm mb-0">PDF, DOC, DOCX, XLS, XLSX</p>
+            <p class="text-muted text-sm mb-0">PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG, GIF, WEBP</p>
             <span id="maker-upload-name" class="ci-file-name"></span>
         </div>
         <button type="submit" class="btn btn-secondary mt-2"><i class="fas fa-upload"></i> Upload</button>
@@ -293,7 +446,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
     <form method="post" action="<?= $basePath ?>/compliances/submit/<?= (int)$c['id'] ?>">
         <div class="form-group">
             <label class="form-label">Completion date</label>
-            <input type="date" name="completion_date" class="form-control" style="max-width:200px" value="<?= htmlspecialchars(date('Y-m-d')) ?>">
+            <input type="date" name="completion_date" class="form-control" style="max-width:200px" value="<?= htmlspecialchars(date('Y-m-d')) ?>" max="<?= htmlspecialchars(date('Y-m-d')) ?>">
         </div>
         <div class="form-group">
             <label class="form-label">Comment</label>
@@ -320,7 +473,32 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
 </script>
 <?php endif; ?>
 
-<?php if (!$isTwoLevel && $st === 'submitted' && ($auth['isAdmin'] || ($auth['isReviewer'] && (int)$auth['id'] === (int)($c['reviewer_id'] ?? 0)))): ?>
+<?php if ($showDoaIntermediate && $canDoaLevelAct): ?>
+<div class="card workflow-action-card">
+    <h3 class="card-title">DOA — Level L<?= (int)($c['doa_current_level'] ?? 2) ?> (forward)</h3>
+    <p class="text-muted text-sm">You are the current assignee for this approval level. Add a comment and forward to the next level. <strong>Reviewer / senior reviewer:</strong> you cannot give final approval here — only forward or request rework.</p>
+    <?php if (!empty($documents)): ?>
+    <p class="text-sm text-muted mb-2">Latest evidence:</p>
+    <ul class="mb-3"><?php foreach (array_slice($documents, 0, 3) as $d): ?>
+        <li><a href="<?= $basePath ?>/uploads/<?= htmlspecialchars($d['file_path']) ?>" target="_blank"><?= htmlspecialchars($d['file_name']) ?></a></li>
+    <?php endforeach; ?></ul>
+    <?php endif; ?>
+    <form method="post" action="<?= $basePath ?>/compliances/forward/<?= (int)$c['id'] ?>" class="mb-3">
+        <div class="form-group">
+            <label class="form-label">Comment *</label>
+            <textarea name="review_comment" class="form-control" rows="3" required placeholder="Approval notes for the next level"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Approve &amp; forward to next level</button>
+    </form>
+    <form method="post" action="<?= $basePath ?>/compliances/rework/<?= (int)$c['id'] ?>" onsubmit="return confirm('Send back to maker for rework?');">
+        <div class="form-group">
+            <label class="form-label">Rework reason *</label>
+            <textarea name="review_comment" class="form-control" rows="2" required placeholder="What needs to be fixed?"></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary">Request rework</button>
+    </form>
+</div>
+<?php elseif ($showLegacyReviewer): ?>
 <div class="card workflow-action-card">
     <h3 class="card-title">Step 2 — Reviewer</h3>
     <?php if (!empty($documents)): ?>
@@ -331,14 +509,14 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
     <?php endif; ?>
     <form method="post" action="<?= $basePath ?>/compliances/forward/<?= (int)$c['id'] ?>" class="mb-3">
         <div class="form-group">
-            <label class="form-label">Review comment</label>
-            <textarea name="review_comment" class="form-control" rows="2" placeholder="Notes for approver"></textarea>
+            <label class="form-label">Review comment *</label>
+            <textarea name="review_comment" class="form-control" rows="2" required placeholder="Notes for approver"></textarea>
         </div>
         <button type="submit" class="btn btn-primary">Approve &amp; forward to approver</button>
     </form>
     <form method="post" action="<?= $basePath ?>/compliances/rework/<?= (int)$c['id'] ?>" onsubmit="return confirm('Send back to maker for rework?');">
         <div class="form-group">
-            <label class="form-label">Rework reason</label>
+            <label class="form-label">Rework reason *</label>
             <textarea name="review_comment" class="form-control" rows="2" required placeholder="What needs to be fixed?"></textarea>
         </div>
         <button type="submit" class="btn btn-secondary">Request rework</button>
@@ -346,20 +524,20 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
 </div>
 <?php endif; ?>
 
-<?php if ($st === 'under_review' && ($auth['isAdmin'] || ($auth['isApprover'] && (int)$auth['id'] === (int)($c['approver_id'] ?? 0)))): ?>
+<?php if ($st === 'under_review' && $canApproveFinal): ?>
 <div class="card workflow-action-card">
     <h3 class="card-title"><?= $isTwoLevel ? 'Step 2' : 'Step 3' ?> — Approver</h3>
     <form method="post" action="<?= $basePath ?>/compliances/approve/<?= (int)$c['id'] ?>" class="mb-3">
         <div class="form-group">
-            <label class="form-label">Final comment</label>
-            <textarea name="final_comment" class="form-control" rows="2" placeholder="Approval remarks"></textarea>
+            <label class="form-label">Comment *</label>
+            <textarea name="final_comment" class="form-control" rows="3" required placeholder="Approval remarks"></textarea>
         </div>
-        <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Approve &amp; close</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Approve</button>
     </form>
     <form method="post" action="<?= $basePath ?>/compliances/reject/<?= (int)$c['id'] ?>" onsubmit="return confirm('Reject this compliance?');">
         <div class="form-group">
-            <label class="form-label">Rejection reason</label>
-            <textarea name="final_comment" class="form-control" rows="2" required></textarea>
+            <label class="form-label">Rejection reason *</label>
+            <textarea name="final_comment" class="form-control" rows="3" required placeholder="Why this is rejected"></textarea>
         </div>
         <button type="submit" class="btn btn-secondary text-danger">Reject</button>
     </form>
@@ -377,7 +555,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         <?php if (!in_array($c['status'], ['completed', 'rejected'], true) && $canMakerAct): ?>
         <form method="post" action="<?= $basePath ?>/compliances/upload-document/<?= (int)$c['id'] ?>" enctype="multipart/form-data" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
             <input type="hidden" name="return_tab" value="documents">
-            <input type="file" name="document" class="form-control" style="width:auto;min-width:200px" accept=".pdf,.doc,.docx,.xls,.xlsx" required>
+            <input type="file" name="document" class="form-control" style="width:auto;min-width:200px" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp" required>
             <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Upload document</button>
         </form>
         <?php endif; ?>
@@ -434,12 +612,12 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
         <a href="<?= $basePath ?>/compliances/history-export/<?= (int)$c['id'] ?>?range=<?= (int)$historyRangeMonths ?>" class="btn btn-secondary btn-sm"><i class="fas fa-file-export"></i> Export CSV</a>
     </div>
     <div class="history-kpi-row">
-        <div class="history-kpi"><i class="fas fa-chart-line text-primary"></i><div><span class="hkv"><?= (int)$ht['total'] ?></span><span class="hkl">Total submissions</span></div></div>
+        <div class="history-kpi"><i class="fas fa-file-alt text-primary"></i><div><span class="hkv"><?= (int)$ht['total'] ?></span><span class="hkl">Total documents</span></div></div>
         <div class="history-kpi"><i class="fas fa-check-circle text-success"></i><div><span class="hkv"><?= (int)$ht['approved'] ?></span><span class="hkl">Approved</span></div></div>
         <div class="history-kpi"><i class="fas fa-times-circle text-danger"></i><div><span class="hkv"><?= (int)$ht['rejected'] ?></span><span class="hkl">Rejected</span></div></div>
         <div class="history-kpi"><i class="fas fa-exclamation-triangle text-warning"></i><div><span class="hkv"><?= (int)$ht['rework_pending'] ?></span><span class="hkl">Rework / pending</span></div></div>
     </div>
-    <p class="text-muted text-sm px-3">Showing <?= count($submissionsHistory ?? []) ?> submissions</p>
+    <p class="text-muted text-sm px-3">Showing <?= count($submissionsHistory ?? []) ?> document<?= (count($submissionsHistory ?? []) === 1) ? '' : 's' ?> in this period (create new, checklist, and rework uploads)</p>
     <div class="table-wrap">
         <table class="data-table">
             <thead>
@@ -459,6 +637,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
             <tbody>
                 <?php foreach ($submissionsHistory ?? [] as $s): ?>
                 <?php
+                $stRaw = (string)($s['status'] ?? '');
                 $detail = [
                     'month' => $s['submit_for_month'] ? date('F Y', strtotime($s['submit_for_month'])) : '—',
                     'submission_date' => $s['submission_date'] ? date('j M Y, H:i', strtotime($s['submission_date'])) : '—',
@@ -466,7 +645,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
                     'completion' => !empty($s['maker_completion_date']) ? date('j M Y', strtotime($s['maker_completion_date'])) : '—',
                     'document' => $s['document_name'] ?? '—',
                     'document_path' => $s['document_path'] ?? '',
-                    'status' => $s['status'] ?? '—',
+                    'status' => $stRaw === 'uploaded' ? 'On file' : ($stRaw !== '' ? $stRaw : '—'),
                     'checker' => $s['checker_name'] ?? '—',
                     'remark' => $s['checker_remark'] ?? '—',
                     'checker_date' => $s['checker_date'] ? date('j M Y', strtotime($s['checker_date'])) : '—',
@@ -479,7 +658,7 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
                     <td><?= htmlspecialchars($s['uploader_name'] ?? '—') ?></td>
                     <td><?= !empty($s['maker_completion_date']) ? date('j M Y', strtotime($s['maker_completion_date'])) : '—' ?></td>
                     <td><?php if (!empty($s['document_name'])): ?><a href="<?= $basePath ?>/uploads/<?= htmlspecialchars($s['document_path'] ?? '') ?>" download onclick="event.stopPropagation()"><i class="fas fa-download"></i> <?= htmlspecialchars(mb_substr($s['document_name'], 0, 20)) ?><?= mb_strlen($s['document_name']) > 20 ? '…' : '' ?></a><?php else: ?>—<?php endif; ?></td>
-                    <td><span class="badge badge-<?= $s['status'] === 'approved' ? 'success' : ($s['status'] === 'rework' ? 'warning' : ($s['status'] === 'rejected' ? 'danger' : 'secondary')) ?>"><?= htmlspecialchars(ucfirst($s['status'])) ?></span></td>
+                    <td><span class="badge badge-<?= ($s['status'] ?? '') === 'approved' ? 'success' : (($s['status'] ?? '') === 'rework' ? 'warning' : (($s['status'] ?? '') === 'rejected' ? 'danger' : (($s['status'] ?? '') === 'uploaded' ? 'info' : 'secondary'))) ?>"><?= htmlspecialchars(($s['status'] ?? '') === 'uploaded' ? 'On file' : ucfirst((string)($s['status'] ?? '—'))) ?></span></td>
                     <td><?= htmlspecialchars($s['checker_name'] ?? '—') ?></td>
                     <td><?= htmlspecialchars(mb_substr($s['checker_remark'] ?? '—', 0, 36)) ?><?= mb_strlen($s['checker_remark'] ?? '') > 36 ? '…' : '' ?></td>
                     <td><?= $s['checker_date'] ? date('j M Y', strtotime($s['checker_date'])) : '—' ?></td>
@@ -487,11 +666,28 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($submissionsHistory)): ?>
-                <tr><td colspan="10" class="text-muted">No submissions in this period.</td></tr>
+                <tr><td colspan="10" class="text-muted">No evidence files in this date range. Try a longer range or upload documents first.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
     </div>
+</div>
+<div class="card">
+    <h3 class="card-title">Final Debrief</h3>
+    <form method="post" action="<?= $basePath ?>/compliances/debrief/<?= (int)$c['id'] ?>">
+        <div class="form-group">
+            <label class="form-label">Final Comment (Approver)</label>
+            <textarea name="final_debrief_comment" class="form-control" rows="3" placeholder="Final decision summary"><?= htmlspecialchars((string)($c['final_debrief_comment'] ?? '')) ?></textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Lessons / Notes</label>
+            <textarea name="final_debrief_lessons" class="form-control" rows="2" placeholder="Key lessons learned"><?= htmlspecialchars((string)($c['final_debrief_lessons'] ?? '')) ?></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Save Debrief</button>
+    </form>
+    <?php if (!empty($c['final_debrief_at'])): ?>
+    <p class="text-muted text-sm mt-2 mb-0">Last updated: <?= htmlspecialchars(date('M j, Y H:i', strtotime((string)$c['final_debrief_at']))) ?></p>
+    <?php endif; ?>
 </div>
 
 <?php else: /* activity */ ?>

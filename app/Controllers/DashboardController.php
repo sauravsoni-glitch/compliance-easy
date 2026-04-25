@@ -6,6 +6,36 @@ use App\Core\BaseController;
 
 class DashboardController extends BaseController
 {
+    private function onTimeCompliancesList(?string $fromDate = null, ?string $toDateExclusive = null, int $limit = 50): array
+    {
+        $orgId = Auth::organizationId();
+        [$rbac, $rbacP] = Auth::complianceScopeSql('c.');
+        $sql = "SELECT c.id, c.compliance_code, c.title, c.status, c.risk_level, c.due_date,
+                a.name AS framework, u.full_name AS owner_name
+                FROM compliance_submissions cs
+                JOIN compliances c ON c.id = cs.compliance_id
+                LEFT JOIN authorities a ON a.id = c.authority_id
+                LEFT JOIN users u ON u.id = c.owner_id
+                WHERE c.organization_id = ? AND ($rbac)
+                  AND cs.status = 'approved'
+                  AND DATE(cs.checker_date) <= DATE(c.due_date)";
+        $params = array_merge([$orgId], $rbacP);
+        if ($fromDate !== null) {
+            $sql .= " AND cs.checker_date >= ?";
+            $params[] = $fromDate;
+        }
+        if ($toDateExclusive !== null) {
+            $sql .= " AND cs.checker_date < ?";
+            $params[] = $toDateExclusive;
+        }
+        $sql .= " GROUP BY c.id, c.compliance_code, c.title, c.status, c.risk_level, c.due_date, a.name, u.full_name
+                  ORDER BY c.due_date ASC, c.id DESC
+                  LIMIT $limit";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
     private function complianceListQuery(string $whereExtra, array $params, int $limit = 50): array
     {
         $orgId = Auth::organizationId();
@@ -61,6 +91,117 @@ class DashboardController extends BaseController
         $upcomingDueCnt->execute(array_merge([$orgId], $rbP));
         $upcomingDueCount = (int) $upcomingDueCnt->fetchColumn();
 
+        [$rbC, $rbCP] = Auth::complianceScopeSql('c.');
+        $monthStart = date('Y-m-01');
+        $nextMonthStart = date('Y-m-01', strtotime('+1 month'));
+        $sixMonthStart = date('Y-m-01', strtotime('-5 months'));
+
+        $onTimeMonthQ = $db->prepare("
+            SELECT COUNT(*)
+            FROM compliance_submissions cs
+            JOIN compliances c ON c.id = cs.compliance_id
+            WHERE c.organization_id = ? AND ($rbC)
+              AND cs.status = 'approved'
+              AND cs.checker_date >= ? AND cs.checker_date < ?
+              AND DATE(cs.checker_date) <= DATE(c.due_date)
+        ");
+        $onTimeMonthQ->execute(array_merge([$orgId], $rbCP, [$monthStart, $nextMonthStart]));
+        $onTimeCompletedMonth = (int) $onTimeMonthQ->fetchColumn();
+
+        $onTime6mQ = $db->prepare("
+            SELECT COUNT(*)
+            FROM compliance_submissions cs
+            JOIN compliances c ON c.id = cs.compliance_id
+            WHERE c.organization_id = ? AND ($rbC)
+              AND cs.status = 'approved'
+              AND cs.checker_date >= ?
+              AND DATE(cs.checker_date) <= DATE(c.due_date)
+        ");
+        $onTime6mQ->execute(array_merge([$orgId], $rbCP, [$sixMonthStart]));
+        $onTimeCompleted6Months = (int) $onTime6mQ->fetchColumn();
+
+        $windowMonthCount = 6;
+
+        $deptDelayQ = $db->prepare("
+            SELECT
+                COALESCE(NULLIF(TRIM(c.department), ''), 'Unspecified') AS department,
+                COUNT(*) AS delay_instances,
+                COUNT(DISTINCT DATE_FORMAT(cs.checker_date, '%Y-%m')) AS delayed_months
+            FROM compliance_submissions cs
+            JOIN compliances c ON c.id = cs.compliance_id
+            WHERE c.organization_id = ? AND ($rbC)
+              AND cs.status = 'approved'
+              AND cs.checker_date >= ?
+              AND DATE(cs.checker_date) > DATE(c.due_date)
+            GROUP BY COALESCE(NULLIF(TRIM(c.department), ''), 'Unspecified')
+            HAVING delayed_months >= 2
+            ORDER BY delayed_months DESC, delay_instances DESC
+            LIMIT 5
+        ");
+        $deptDelayQ->execute(array_merge([$orgId], $rbCP, [$sixMonthStart]));
+        $departmentDelayHotspots = $deptDelayQ->fetchAll(\PDO::FETCH_ASSOC);
+
+        $cmpDelayQ = $db->prepare("
+            SELECT
+                c.id,
+                c.compliance_code,
+                c.title,
+                COUNT(*) AS delay_instances,
+                COUNT(DISTINCT DATE_FORMAT(cs.checker_date, '%Y-%m')) AS delayed_months
+            FROM compliance_submissions cs
+            JOIN compliances c ON c.id = cs.compliance_id
+            WHERE c.organization_id = ? AND ($rbC)
+              AND cs.status = 'approved'
+              AND cs.checker_date >= ?
+              AND DATE(cs.checker_date) > DATE(c.due_date)
+            GROUP BY c.id, c.compliance_code, c.title
+            HAVING delayed_months >= 2
+            ORDER BY delayed_months DESC, delay_instances DESC
+            LIMIT 5
+        ");
+        $cmpDelayQ->execute(array_merge([$orgId], $rbCP, [$sixMonthStart]));
+        $complianceDelayHotspots = $cmpDelayQ->fetchAll(\PDO::FETCH_ASSOC);
+
+        $persistentDeptDelayQ = $db->prepare("
+            SELECT
+                COALESCE(NULLIF(TRIM(c.department), ''), 'Unspecified') AS department,
+                COUNT(*) AS delay_instances,
+                COUNT(DISTINCT DATE_FORMAT(cs.checker_date, '%Y-%m')) AS delayed_months
+            FROM compliance_submissions cs
+            JOIN compliances c ON c.id = cs.compliance_id
+            WHERE c.organization_id = ? AND ($rbC)
+              AND cs.status = 'approved'
+              AND cs.checker_date >= ?
+              AND DATE(cs.checker_date) > DATE(c.due_date)
+            GROUP BY COALESCE(NULLIF(TRIM(c.department), ''), 'Unspecified')
+            HAVING delayed_months = ?
+            ORDER BY delay_instances DESC
+            LIMIT 1
+        ");
+        $persistentDeptDelayQ->execute(array_merge([$orgId], $rbCP, [$sixMonthStart, $windowMonthCount]));
+        $persistentDelayDepartment = $persistentDeptDelayQ->fetch(\PDO::FETCH_ASSOC) ?: null;
+
+        $persistentCmpDelayQ = $db->prepare("
+            SELECT
+                c.id,
+                c.compliance_code,
+                c.title,
+                COUNT(*) AS delay_instances,
+                COUNT(DISTINCT DATE_FORMAT(cs.checker_date, '%Y-%m')) AS delayed_months
+            FROM compliance_submissions cs
+            JOIN compliances c ON c.id = cs.compliance_id
+            WHERE c.organization_id = ? AND ($rbC)
+              AND cs.status = 'approved'
+              AND cs.checker_date >= ?
+              AND DATE(cs.checker_date) > DATE(c.due_date)
+            GROUP BY c.id, c.compliance_code, c.title
+            HAVING delayed_months = ?
+            ORDER BY delay_instances DESC
+            LIMIT 1
+        ");
+        $persistentCmpDelayQ->execute(array_merge([$orgId], $rbCP, [$sixMonthStart, $windowMonthCount]));
+        $persistentDelayCompliance = $persistentCmpDelayQ->fetch(\PDO::FETCH_ASSOC) ?: null;
+
         $highRisk = $db->prepare("SELECT COUNT(*) FROM compliances WHERE organization_id = ? AND ($rb) AND risk_level IN ('high', 'critical') AND status NOT IN ('approved', 'completed')");
         $highRisk->execute(array_merge([$orgId], $rbP));
         $highRiskCount = (int) $highRisk->fetchColumn();
@@ -71,9 +212,11 @@ class DashboardController extends BaseController
         $approvedList = $this->complianceListQuery("c.status IN ('approved','completed')", []);
         $rejectedList = $this->complianceListQuery("c.status = 'rejected'", []);
         $upcomingDueList = $this->complianceListQuery("c.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY) AND c.status NOT IN ('approved','completed','rejected')", []);
+        $onTimeMonthList = $this->onTimeCompliancesList($monthStart, $nextMonthStart);
+        $onTime6MonthsList = $this->onTimeCompliancesList($sixMonthStart, null);
+        $overdueTasksList = $this->complianceListQuery("c.due_date < CURDATE() AND c.status NOT IN ('approved','completed','rejected')", []);
 
         // Recent activity
-        [$rbC, $rbCP] = Auth::complianceScopeSql('c.');
         $stmt = $db->prepare("
             SELECT c.id, c.compliance_code, c.title, c.status, c.created_at
             FROM compliances c
@@ -288,12 +431,21 @@ class DashboardController extends BaseController
             'rejectedCount' => $rejectedCount,
             'overdueCount' => $overdueCount,
             'upcomingDueCount' => $upcomingDueCount,
+            'onTimeCompletedMonth' => $onTimeCompletedMonth,
+            'onTimeCompleted6Months' => $onTimeCompleted6Months,
             'highRiskCount' => $highRiskCount,
+            'departmentDelayHotspots' => $departmentDelayHotspots,
+            'complianceDelayHotspots' => $complianceDelayHotspots,
+            'persistentDelayDepartment' => $persistentDelayDepartment,
+            'persistentDelayCompliance' => $persistentDelayCompliance,
             'allList' => $allList,
             'pendingList' => $pendingList,
             'approvedList' => $approvedList,
             'rejectedList' => $rejectedList,
             'upcomingDueList' => $upcomingDueList,
+            'onTimeMonthList' => $onTimeMonthList,
+            'onTime6MonthsList' => $onTime6MonthsList,
+            'overdueTasksList' => $overdueTasksList,
             'recentActivity' => $recentActivity,
             'upcomingDue' => $upcomingDue,
             'overdueList' => $overdueList,

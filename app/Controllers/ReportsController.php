@@ -21,17 +21,23 @@ class ReportsController extends BaseController
     {
         Auth::requireAuth();
         $orgId = Auth::organizationId();
-        $tab = preg_replace('/[^a-z\-]/', '', $_GET['tab'] ?? 'overview');
-        if (!in_array($tab, ['overview', 'recent', 'missing', 'upload'], true)) {
-            $tab = 'overview';
+        $tab = preg_replace('/[^a-z\-]/', '', $_GET['tab'] ?? 'reports');
+        if (!in_array($tab, ['overview', 'recent', 'missing', 'reports'], true)) {
+            $tab = 'reports';
         }
         $q = trim($_GET['q'] ?? '');
-
         $hasKind = $this->docKindColumn();
 
         $compliances = $this->fetchCompliances($orgId, $q);
         $recentDocs = $this->fetchRecentDocuments($orgId, $q, $hasKind);
         $missingRows = $this->fetchMissingPending($orgId, $q);
+        $departmentSummary = $this->fetchDepartmentSummary($orgId, $q);
+        $ownerWorkload = $this->fetchRoleWorkload($orgId, $q, 'owner');
+        $reviewerWorkload = $this->fetchRoleWorkload($orgId, $q, 'reviewer');
+        $approverWorkload = $this->fetchRoleWorkload($orgId, $q, 'approver');
+        $overdueAging = $this->fetchOverdueAging($orgId, $q);
+        $upcomingDue = $this->fetchUpcomingDue($orgId, $q);
+        $recentCompletions = $this->fetchRecentCompletions($orgId, $q);
 
         $total = count($compliances);
         $completed = 0;
@@ -99,16 +105,6 @@ class ReportsController extends BaseController
 
         $completionRate = $total > 0 ? (int) round(100 * $completed / $total) : 0;
 
-        [$rbUp, $rbUpP] = Auth::complianceScopeSql('c.');
-        $forUpload = $this->db->prepare("
-            SELECT c.id, c.title, c.compliance_code
-            FROM compliances c
-            WHERE c.organization_id = ? AND ($rbUp) AND c.status NOT IN ('draft', 'rejected')
-            ORDER BY c.title
-        ");
-        $forUpload->execute(array_merge([$orgId], $rbUpP));
-        $uploadComplianceOptions = $forUpload->fetchAll(\PDO::FETCH_ASSOC);
-
         $this->view('reports/index', [
             'currentPage' => 'reports',
             'pageTitle' => 'Reports & Analytics',
@@ -125,8 +121,26 @@ class ReportsController extends BaseController
             'statusByAuthority' => $statusByAuthority,
             'recentDocs' => $recentDocs,
             'missingRows' => $missingRows,
-            'uploadComplianceOptions' => $uploadComplianceOptions,
+            'departmentSummary' => $departmentSummary,
+            'ownerWorkload' => $ownerWorkload,
+            'reviewerWorkload' => $reviewerWorkload,
+            'approverWorkload' => $approverWorkload,
+            'overdueAging' => $overdueAging,
+            'upcomingDue' => $upcomingDue,
+            'recentCompletions' => $recentCompletions,
         ]);
+    }
+
+    private function appendSearchFilter(string &$sql, array &$params, string $q): void
+    {
+        if ($q === '') {
+            return;
+        }
+        $sql .= ' AND (c.title LIKE ? OR c.compliance_code LIKE ? OR u.full_name LIKE ?)';
+        $like = '%' . $q . '%';
+        $params[] = $like;
+        $params[] = $like;
+        $params[] = $like;
     }
 
     private function fetchCompliances(int $orgId, string $q): array
@@ -199,6 +213,135 @@ class ReportsController extends BaseController
             $params[] = $like;
         }
         $sql .= ' ORDER BY c.due_date ASC';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    private function fetchDepartmentSummary(int $orgId, string $q): array
+    {
+        [$rb, $rbP] = Auth::complianceScopeSql('c.');
+        $sql = "SELECT
+                c.department,
+                COUNT(*) AS total_items,
+                SUM(CASE WHEN c.status IN ('approved','completed') THEN 1 ELSE 0 END) AS completed_items,
+                SUM(CASE WHEN c.status = 'under_review' THEN 1 ELSE 0 END) AS under_review_items,
+                SUM(CASE WHEN c.status IN ('pending','draft','rework','submitted') THEN 1 ELSE 0 END) AS pending_items,
+                SUM(CASE WHEN c.due_date < CURDATE() AND c.status NOT IN ('approved','completed','rejected') THEN 1 ELSE 0 END) AS overdue_items
+            FROM compliances c
+            INNER JOIN users u ON u.id = c.owner_id
+            WHERE c.organization_id = ? AND ($rb)";
+        $params = array_merge([$orgId], $rbP);
+        $this->appendSearchFilter($sql, $params, $q);
+        $sql .= ' GROUP BY c.department ORDER BY c.department ASC';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    private function fetchRoleWorkload(int $orgId, string $q, string $roleType): array
+    {
+        $roleColumn = 'owner_id';
+        $pendingExpr = "SUM(CASE WHEN c.status IN ('pending','draft','rework','submitted','under_review') THEN 1 ELSE 0 END)";
+        if ($roleType === 'reviewer') {
+            $roleColumn = 'reviewer_id';
+            $pendingExpr = "SUM(CASE WHEN c.status = 'submitted' THEN 1 ELSE 0 END)";
+        } elseif ($roleType === 'approver') {
+            $roleColumn = 'approver_id';
+            $pendingExpr = "SUM(CASE WHEN c.status = 'under_review' THEN 1 ELSE 0 END)";
+        }
+
+        [$rb, $rbP] = Auth::complianceScopeSql('c.');
+        $sql = "SELECT
+                u.full_name,
+                COUNT(*) AS assigned_total,
+                $pendingExpr AS awaiting_action,
+                SUM(CASE WHEN c.status IN ('approved','completed') THEN 1 ELSE 0 END) AS closed_items
+            FROM compliances c
+            INNER JOIN users u ON u.id = c.$roleColumn
+            WHERE c.organization_id = ? AND ($rb) AND c.$roleColumn IS NOT NULL";
+        $params = array_merge([$orgId], $rbP);
+        $this->appendSearchFilter($sql, $params, $q);
+        $sql .= ' GROUP BY u.id, u.full_name ORDER BY awaiting_action DESC, assigned_total DESC, u.full_name ASC LIMIT 12';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    private function fetchOverdueAging(int $orgId, string $q): array
+    {
+        [$rb, $rbP] = Auth::complianceScopeSql('c.');
+        $sql = "SELECT
+                c.id,
+                c.compliance_code,
+                c.title,
+                c.department,
+                c.priority,
+                c.due_date,
+                u.full_name AS owner_name,
+                DATEDIFF(CURDATE(), c.due_date) AS overdue_days
+            FROM compliances c
+            INNER JOIN users u ON u.id = c.owner_id
+            WHERE c.organization_id = ? AND ($rb)
+              AND c.due_date < CURDATE()
+              AND c.status NOT IN ('approved','completed','rejected')";
+        $params = array_merge([$orgId], $rbP);
+        $this->appendSearchFilter($sql, $params, $q);
+        $sql .= ' ORDER BY overdue_days DESC, c.due_date ASC LIMIT 30';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    private function fetchUpcomingDue(int $orgId, string $q): array
+    {
+        [$rb, $rbP] = Auth::complianceScopeSql('c.');
+        $sql = "SELECT
+                c.id,
+                c.compliance_code,
+                c.title,
+                c.department,
+                c.status,
+                c.due_date,
+                c.priority,
+                u.full_name AS owner_name,
+                DATEDIFF(c.due_date, CURDATE()) AS due_in_days
+            FROM compliances c
+            INNER JOIN users u ON u.id = c.owner_id
+            WHERE c.organization_id = ? AND ($rb)
+              AND c.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+              AND c.status NOT IN ('approved','completed','rejected')";
+        $params = array_merge([$orgId], $rbP);
+        $this->appendSearchFilter($sql, $params, $q);
+        $sql .= ' ORDER BY c.due_date ASC LIMIT 30';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    private function fetchRecentCompletions(int $orgId, string $q): array
+    {
+        [$rb, $rbP] = Auth::complianceScopeSql('c.');
+        $sql = "SELECT
+                c.id,
+                c.compliance_code,
+                c.title,
+                c.department,
+                c.status,
+                c.updated_at,
+                u.full_name AS owner_name
+            FROM compliances c
+            INNER JOIN users u ON u.id = c.owner_id
+            WHERE c.organization_id = ? AND ($rb)
+              AND c.status IN ('approved','completed')";
+        $params = array_merge([$orgId], $rbP);
+        $this->appendSearchFilter($sql, $params, $q);
+        $sql .= ' ORDER BY c.updated_at DESC LIMIT 20';
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
 
@@ -291,28 +434,57 @@ class ReportsController extends BaseController
         $orgId = Auth::organizationId();
         $fmt = strtolower($_GET['format'] ?? 'csv');
         $stmt = $this->db->prepare('
-            SELECT c.compliance_code, c.title, c.status, c.due_date, c.risk_level, c.priority, a.name AS authority, u.full_name AS owner
+            SELECT c.compliance_code, c.title, c.status, c.due_date, c.risk_level, c.priority,
+                   c.created_at, c.updated_at, a.name AS authority, u.full_name AS owner,
+                   ls.last_submission_at
             FROM compliances c
             INNER JOIN authorities a ON a.id = c.authority_id
             INNER JOIN users u ON u.id = c.owner_id
+            LEFT JOIN (
+                SELECT compliance_id, MAX(submission_date) AS last_submission_at
+                FROM compliance_submissions
+                GROUP BY compliance_id
+            ) ls ON ls.compliance_id = c.id
             WHERE c.organization_id = ?
             ORDER BY c.id
         ');
         $stmt->execute([$orgId]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $toIst = static function (?string $raw): string {
+            if (empty($raw)) {
+                return '—';
+            }
+            $dt = \DateTime::createFromFormat('Y-m-d H:i:s', (string)$raw, new \DateTimeZone('UTC'));
+            if (!$dt) {
+                $ts = strtotime((string)$raw);
+                if (!$ts) {
+                    return '—';
+                }
+                $dt = new \DateTime('@' . $ts);
+                $dt->setTimezone(new \DateTimeZone('UTC'));
+            }
+            $dt->setTimezone(new \DateTimeZone('Asia/Kolkata'));
+            return $dt->format('d M Y H:i') . ' IST';
+        };
+        $generatedAtIst = (new \DateTime('now', new \DateTimeZone('UTC')))
+            ->setTimezone(new \DateTimeZone('Asia/Kolkata'))
+            ->format('d M Y H:i') . ' IST';
 
         if ($fmt === 'pdf') {
             header('Content-Type: text/html; charset=utf-8');
             echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Compliance Report</title>';
             echo '<style>body{font-family:Arial,sans-serif;padding:24px;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ccc;padding:8px;text-align:left;} th{background:#f3f4f6;}</style></head><body>';
-            echo '<h1>Reports & Analytics — Compliance Export</h1><p>Generated ' . date('Y-m-d H:i') . '</p><table><thead><tr>';
-            foreach (['Code', 'Title', 'Status', 'Due', 'Risk', 'Priority', 'Framework', 'Owner'] as $h) {
+            echo '<h1>Reports & Analytics — Compliance Export</h1><p>Generated on ' . htmlspecialchars($generatedAtIst) . '</p><table><thead><tr>';
+            foreach (['Code', 'Title', 'Status', 'Due Date & Time', 'Last Submission', 'Created On', 'Last Updated', 'Risk', 'Priority', 'Framework', 'Owner'] as $h) {
                 echo '<th>' . htmlspecialchars($h) . '</th>';
             }
             echo '</tr></thead><tbody>';
             foreach ($rows as $r) {
                 echo '<tr><td>' . htmlspecialchars($r['compliance_code']) . '</td><td>' . htmlspecialchars($r['title']) . '</td>';
-                echo '<td>' . htmlspecialchars($r['status']) . '</td><td>' . htmlspecialchars($r['due_date'] ?? '') . '</td>';
+                echo '<td>' . htmlspecialchars($r['status']) . '</td><td>' . htmlspecialchars($toIst($r['due_date'] ?? null)) . '</td>';
+                echo '<td>' . htmlspecialchars($toIst($r['last_submission_at'] ?? null)) . '</td>';
+                echo '<td>' . htmlspecialchars($toIst($r['created_at'] ?? null)) . '</td>';
+                echo '<td>' . htmlspecialchars($toIst($r['updated_at'] ?? null)) . '</td>';
                 echo '<td>' . htmlspecialchars($r['risk_level']) . '</td><td>' . htmlspecialchars($r['priority']) . '</td>';
                 echo '<td>' . htmlspecialchars($r['authority']) . '</td><td>' . htmlspecialchars($r['owner']) . '</td></tr>';
             }
@@ -323,11 +495,160 @@ class ReportsController extends BaseController
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="compliance-report-' . date('Y-m-d') . '.csv"');
         $out = fopen('php://output', 'w');
-        fputcsv($out, ['Code', 'Title', 'Status', 'Due Date', 'Risk', 'Priority', 'Framework', 'Owner']);
+        fputcsv($out, ['Code', 'Title', 'Status', 'Due Date & Time', 'Last Submission', 'Created On', 'Last Updated', 'Risk', 'Priority', 'Framework', 'Owner']);
         foreach ($rows as $r) {
-            fputcsv($out, [$r['compliance_code'], $r['title'], $r['status'], $r['due_date'], $r['risk_level'], $r['priority'], $r['authority'], $r['owner']]);
+            fputcsv($out, [
+                $r['compliance_code'],
+                $r['title'],
+                $r['status'],
+                $toIst($r['due_date'] ?? null),
+                $toIst($r['last_submission_at'] ?? null),
+                $toIst($r['created_at'] ?? null),
+                $toIst($r['updated_at'] ?? null),
+                $r['risk_level'],
+                $r['priority'],
+                $r['authority'],
+                $r['owner'],
+            ]);
         }
         fclose($out);
         exit;
     }
+
+    public function exportDashboard(): void
+    {
+        Auth::requireRole('admin');
+        $orgId = Auth::organizationId();
+        $fmt = strtolower((string)($_GET['format'] ?? 'csv'));
+        $q = trim((string)($_GET['q'] ?? ''));
+
+        $departmentSummary = $this->fetchDepartmentSummary($orgId, $q);
+        $ownerWorkload = $this->fetchRoleWorkload($orgId, $q, 'owner');
+        $reviewerWorkload = $this->fetchRoleWorkload($orgId, $q, 'reviewer');
+        $approverWorkload = $this->fetchRoleWorkload($orgId, $q, 'approver');
+        $overdueAging = $this->fetchOverdueAging($orgId, $q);
+        $upcomingDue = $this->fetchUpcomingDue($orgId, $q);
+        $recentCompletions = $this->fetchRecentCompletions($orgId, $q);
+
+        $counts = [
+            'overdue' => count($overdueAging),
+            'upcoming' => count($upcomingDue),
+            'closed' => count($recentCompletions),
+        ];
+
+        $insights = [];
+        $insights[] = $counts['overdue'] . ' compliances are overdue.';
+        $maxDept = '';
+        $maxOverdue = -1;
+        foreach ($departmentSummary as $d) {
+            $ov = (int)($d['overdue_items'] ?? 0);
+            if ($ov > $maxOverdue) {
+                $maxOverdue = $ov;
+                $maxDept = (string)($d['department'] ?? '');
+            }
+        }
+        if ($maxDept !== '' && $maxOverdue > 0) {
+            $insights[] = $maxDept . ' department has most delays (' . $maxOverdue . ').';
+        }
+
+        $generatedAtIst = (new \DateTime('now', new \DateTimeZone('UTC')))
+            ->setTimezone(new \DateTimeZone('Asia/Kolkata'))
+            ->format('d M Y H:i') . ' IST';
+
+        if ($fmt === 'pdf') {
+            header('Content-Type: text/html; charset=utf-8');
+            echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Compliance Dashboard Report</title>';
+            echo '<style>body{font-family:Arial,sans-serif;padding:22px;color:#111;} h1,h2{margin:0 0 8px;} h2{margin-top:22px;font-size:18px;} table{border-collapse:collapse;width:100%;margin-top:8px;} th,td{border:1px solid #d1d5db;padding:7px;text-align:left;font-size:12px;} th{background:#f3f4f6;} .muted{color:#6b7280;font-size:12px;} ul{margin-top:6px;}</style></head><body>';
+            echo '<h1>Compliance Reports Dashboard</h1>';
+            echo '<div class="muted">Generated on ' . htmlspecialchars($generatedAtIst) . ($q !== '' ? ' | Search filter: ' . htmlspecialchars($q) : '') . '</div>';
+
+            echo '<h2>Department Compliance Summary</h2><table><thead><tr><th>Department</th><th>Total</th><th>Completed</th><th>Pending</th><th>Under Review</th><th>Overdue</th><th>Completion %</th></tr></thead><tbody>';
+            foreach ($departmentSummary as $d) {
+                $tot = (int)($d['total_items'] ?? 0);
+                $done = (int)($d['completed_items'] ?? 0);
+                $pct = $tot > 0 ? (int)round(($done * 100) / $tot) : 0;
+                echo '<tr><td>' . htmlspecialchars((string)($d['department'] ?? '—')) . '</td><td>' . $tot . '</td><td>' . (int)$d['completed_items'] . '</td><td>' . (int)$d['pending_items'] . '</td><td>' . (int)$d['under_review_items'] . '</td><td>' . (int)$d['overdue_items'] . '</td><td>' . $pct . '%</td></tr>';
+            }
+            if (empty($departmentSummary)) {
+                echo '<tr><td colspan="7">No rows.</td></tr>';
+            }
+            echo '</tbody></table>';
+
+            echo '<h2>Action Workload by Role</h2><table><thead><tr><th>Role</th><th>User</th><th>Assigned Total</th><th>Awaiting Action</th><th>Closed</th></tr></thead><tbody>';
+            foreach (['Maker' => $ownerWorkload, 'Reviewer' => $reviewerWorkload, 'Approver' => $approverWorkload] as $role => $rows) {
+                foreach ($rows as $r) {
+                    echo '<tr><td>' . htmlspecialchars($role) . '</td><td>' . htmlspecialchars((string)($r['full_name'] ?? '—')) . '</td><td>' . (int)$r['assigned_total'] . '</td><td>' . (int)$r['awaiting_action'] . '</td><td>' . (int)$r['closed_items'] . '</td></tr>';
+                }
+            }
+            if (empty($ownerWorkload) && empty($reviewerWorkload) && empty($approverWorkload)) {
+                echo '<tr><td colspan="5">No rows.</td></tr>';
+            }
+            echo '</tbody></table>';
+
+            echo '<h2>Due & Closure Reporting</h2><p class="muted">Overdue: ' . $counts['overdue'] . ' | Due next 30 days: ' . $counts['upcoming'] . ' | Recent closures: ' . $counts['closed'] . '</p>';
+            echo '<table><thead><tr><th>Bucket</th><th>Compliance</th><th>Department</th><th>Owner</th><th>Date / Aging</th><th>Status</th></tr></thead><tbody>';
+            foreach ($overdueAging as $o) {
+                echo '<tr><td>Overdue</td><td>' . htmlspecialchars((string)$o['compliance_code'] . ' — ' . (string)$o['title']) . '</td><td>' . htmlspecialchars((string)$o['department']) . '</td><td>' . htmlspecialchars((string)$o['owner_name']) . '</td><td>' . (int)$o['overdue_days'] . ' days late</td><td>' . htmlspecialchars(ucfirst((string)($o['priority'] ?? ''))) . '</td></tr>';
+            }
+            foreach ($upcomingDue as $u) {
+                $due = !empty($u['due_date']) ? date('d M Y', strtotime((string)$u['due_date'])) : '—';
+                echo '<tr><td>Upcoming</td><td>' . htmlspecialchars((string)$u['compliance_code'] . ' — ' . (string)$u['title']) . '</td><td>' . htmlspecialchars((string)$u['department']) . '</td><td>' . htmlspecialchars((string)$u['owner_name']) . '</td><td>' . htmlspecialchars($due . ' (' . (int)$u['due_in_days'] . ' days)') . '</td><td>' . htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($u['status'] ?? '')))) . '</td></tr>';
+            }
+            foreach ($recentCompletions as $c) {
+                $upd = !empty($c['updated_at']) ? date('d M Y', strtotime((string)$c['updated_at'])) : '—';
+                echo '<tr><td>Closed</td><td>' . htmlspecialchars((string)$c['compliance_code'] . ' — ' . (string)$c['title']) . '</td><td>' . htmlspecialchars((string)$c['department']) . '</td><td>' . htmlspecialchars((string)$c['owner_name']) . '</td><td>' . htmlspecialchars($upd) . '</td><td>' . htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($c['status'] ?? '')))) . '</td></tr>';
+            }
+            if (empty($overdueAging) && empty($upcomingDue) && empty($recentCompletions)) {
+                echo '<tr><td colspan="6">No rows.</td></tr>';
+            }
+            echo '</tbody></table>';
+
+            if (!empty($insights)) {
+                echo '<h2>Insights</h2><ul>';
+                foreach ($insights as $ins) {
+                    echo '<li>' . htmlspecialchars($ins) . '</li>';
+                }
+                echo '</ul>';
+            }
+            echo '<script>window.onload=function(){window.print();}</script></body></html>';
+            exit;
+        }
+
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="compliance-dashboard-report-' . date('Y-m-d') . '.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, ['Section', 'Col1', 'Col2', 'Col3', 'Col4', 'Col5', 'Col6', 'Col7']);
+        fputcsv($out, ['Meta', 'Generated on', $generatedAtIst, 'Search filter', $q !== '' ? $q : 'None', '', '', '']);
+        foreach ($insights as $ins) {
+            fputcsv($out, ['Insight', $ins, '', '', '', '', '', '']);
+        }
+        fputcsv($out, ['Department Summary', 'Department', 'Total', 'Completed', 'Pending', 'Under Review', 'Overdue', 'Completion %']);
+        foreach ($departmentSummary as $d) {
+            $tot = (int)($d['total_items'] ?? 0);
+            $done = (int)($d['completed_items'] ?? 0);
+            $pct = $tot > 0 ? (int)round(($done * 100) / $tot) . '%' : '0%';
+            fputcsv($out, ['Department Summary', $d['department'] ?? '', $tot, (int)$d['completed_items'], (int)$d['pending_items'], (int)$d['under_review_items'], (int)$d['overdue_items'], $pct]);
+        }
+        fputcsv($out, ['Role Workload', 'Role', 'User', 'Assigned', 'Awaiting', 'Closed', '', '']);
+        foreach (['Maker' => $ownerWorkload, 'Reviewer' => $reviewerWorkload, 'Approver' => $approverWorkload] as $role => $rows) {
+            foreach ($rows as $r) {
+                fputcsv($out, ['Role Workload', $role, $r['full_name'] ?? '', (int)$r['assigned_total'], (int)$r['awaiting_action'], (int)$r['closed_items'], '', '']);
+            }
+        }
+        fputcsv($out, ['Due & Closure', 'Bucket', 'Compliance', 'Department', 'Owner', 'Date / Aging', 'Status', '']);
+        foreach ($overdueAging as $o) {
+            fputcsv($out, ['Due & Closure', 'Overdue', ($o['compliance_code'] ?? '') . ' — ' . ($o['title'] ?? ''), $o['department'] ?? '', $o['owner_name'] ?? '', (int)$o['overdue_days'] . ' days late', ucfirst((string)($o['priority'] ?? '')), '']);
+        }
+        foreach ($upcomingDue as $u) {
+            $due = !empty($u['due_date']) ? date('d M Y', strtotime((string)$u['due_date'])) : '—';
+            fputcsv($out, ['Due & Closure', 'Upcoming', ($u['compliance_code'] ?? '') . ' — ' . ($u['title'] ?? ''), $u['department'] ?? '', $u['owner_name'] ?? '', $due . ' (' . (int)$u['due_in_days'] . ' days)', ucfirst(str_replace('_', ' ', (string)($u['status'] ?? ''))), '']);
+        }
+        foreach ($recentCompletions as $c) {
+            $upd = !empty($c['updated_at']) ? date('d M Y', strtotime((string)$c['updated_at'])) : '—';
+            fputcsv($out, ['Due & Closure', 'Closed', ($c['compliance_code'] ?? '') . ' — ' . ($c['title'] ?? ''), $c['department'] ?? '', $c['owner_name'] ?? '', $upd, ucfirst(str_replace('_', ' ', (string)($c['status'] ?? ''))), '']);
+        }
+        fclose($out);
+        exit;
+    }
+
 }

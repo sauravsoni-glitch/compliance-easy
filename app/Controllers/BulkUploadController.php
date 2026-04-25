@@ -986,67 +986,8 @@ class BulkUploadController extends BaseController
     public function uploadDoa(): void
     {
         Auth::requireRole('admin');
-        $orgId = Auth::organizationId();
-        $fname = $_FILES['file']['name'] ?? 'doa.csv';
-        if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
-            $_SESSION['flash_error'] = 'Please upload a DOA file.';
-            $this->redirect('/bulk-upload');
-        }
-        $tmp = $_FILES['file']['tmp_name'];
-        if (!$this->isAcceptableBulkUpload($tmp, $fname)) {
-            $_SESSION['flash_error'] = 'Could not read file as CSV or Excel (.xlsx).';
-            $this->redirect('/bulk-upload');
-        }
-        [$headers, $rows, $readErr] = $this->readUploadedRows($tmp, $fname);
-        if ($readErr !== null) {
-            $_SESSION['flash_error'] = $readErr;
-            $this->redirect('/bulk-upload');
-        }
-        $this->forwardUploadedFileToWebhook($tmp, $fname);
-        $this->archiveFileToUploadHistory($tmp, $fname, 'bulk_doa');
-        $extDb = $this->doaExtended();
-        $ok = 0;
-        $fail = 0;
-        foreach ($rows as $row) {
-            if (count(array_filter($row, fn ($c) => trim((string) $c) !== '')) === 0) {
-                continue;
-            }
-            $dept = trim($row[0] ?? '');
-            $lvl = (int) ($row[1] ?? 1);
-            $role = trim($row[2] ?? '');
-            $atype = trim($row[3] ?? 'Expense Approval');
-            $minA = (float) str_replace(',', '', $row[4] ?? '0');
-            $maxS = strtoupper(trim($row[5] ?? '0'));
-            $unl = ($maxS === 'UNLIMITED' || $maxS === 'YES');
-            $maxA = $unl ? 999999999999.99 : (float) str_replace(',', '', $row[5] ?? '0');
-            $cond = trim($row[6] ?? '');
-            $st = strtolower(trim($row[7] ?? 'active'));
-            if (!in_array($st, ['active', 'temporary', 'inactive'], true)) {
-                $st = 'active';
-            }
-            if ($dept === '' || $role === '') {
-                $fail++;
-                continue;
-            }
-            $code = $this->nextRuleCode($orgId);
-            $ld = $unl ? 'Unlimited' : null;
-            try {
-                if ($extDb) {
-                    $this->db->prepare('INSERT INTO delegation_authority (rule_code, organization_id, department, level_order, designation, approval_type, approval_limit, min_amount, conditions, is_unlimited, limit_display, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-                        ->execute([$code, $orgId, $dept, max(1, $lvl), $role, $atype, $maxA, $minA, $cond ?: null, $unl ? 1 : 0, $ld, $st]);
-                } else {
-                    $this->db->prepare('INSERT INTO delegation_authority (organization_id, department, level_order, designation, approval_limit, limit_display, status) VALUES (?,?,?,?,?,?,?)')
-                        ->execute([$orgId, $dept, max(1, $lvl), $role, $maxA, $ld, $st]);
-                }
-                $ok++;
-            } catch (\Throwable $e) {
-                $fail++;
-            }
-        }
-        $st = $fail && $ok ? 'partial' : ($fail && !$ok ? 'failed' : 'completed');
-        $this->writeLog($orgId, 'doa', $fname, $ok + $fail, $ok, $fail, $st, null);
-        $_SESSION['flash_success'] = "DOA import: {$ok} rules, {$fail} failed.";
-        $this->redirect('/bulk-upload?tab=history');
+        $_SESSION['flash_error'] = 'DOA bulk upload uses the new rule engine. Create rules under DOA in the sidebar.';
+        $this->redirect('/bulk-upload');
     }
 
     public function uploadMatrix(): void

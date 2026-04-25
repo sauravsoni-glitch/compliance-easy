@@ -132,6 +132,7 @@ class AuthController extends BaseController
         } catch (\Throwable $e) {
             // column may not exist until migration
         }
+        $_SESSION['post_login_opening'] = 1;
         $this->redirect($this->dashboardPathForRole((string) ($user['role_slug'] ?? '')));
     }
 

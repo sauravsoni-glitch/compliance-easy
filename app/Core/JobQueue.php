@@ -5,11 +5,34 @@ use PDO;
 
 final class JobQueue
 {
+    private static bool $schemaEnsured = false;
+
+    private static function ensureSchema(PDO $db): void
+    {
+        if (self::$schemaEnsured) {
+            return;
+        }
+        $db->exec(
+            "CREATE TABLE IF NOT EXISTS jobs (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                queue VARCHAR(64) NOT NULL DEFAULT 'default',
+                payload TEXT NOT NULL,
+                attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+                available_at DATETIME NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                KEY queue_available (queue, available_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+        self::$schemaEnsured = true;
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
     public static function push(PDO $db, array $payload, string $queue = 'default', ?string $availableAt = null): void
     {
+        self::ensureSchema($db);
         $when = $availableAt ?? date('Y-m-d H:i:s');
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
         if ($json === false) {
@@ -28,6 +51,7 @@ final class JobQueue
      */
     public static function pop(PDO $db, string $queue = 'default'): ?array
     {
+        self::ensureSchema($db);
         $db->beginTransaction();
         try {
             $stmt = $db->prepare(

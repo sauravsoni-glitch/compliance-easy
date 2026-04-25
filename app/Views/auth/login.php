@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="auth-layout">
+    <div class="auth-bg-orb auth-bg-orb-1" aria-hidden="true"></div>
+    <div class="auth-bg-orb auth-bg-orb-2" aria-hidden="true"></div>
     <div class="auth-card auth-card-login">
         <div class="auth-logo-wrap">
             <a href="<?= $basePath ?? '' ?>/" class="logo">easy</a>
@@ -18,7 +20,6 @@
         </div>
         <h1>Welcome</h1>
         <p class="subtitle">Sign in to your account or create a new one.</p>
-
 
         <form method="post" action="<?= $basePath ?? '' ?>/login" class="auth-form">
             <?php if (!empty($error)): ?>
@@ -47,7 +48,6 @@
                 <a href="<?= $basePath ?? '' ?>/pricing">View Pricing</a>
             </div>
         </form>
-
         <div class="auth-links">
             New to ComplianceHub? <a href="<?= $basePath ?? '' ?>/pricing">Sign Up</a><br>
             <a href="<?= $basePath ?? '' ?>/pricing">View Pricing Plans</a>

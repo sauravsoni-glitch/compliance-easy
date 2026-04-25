@@ -3,7 +3,7 @@ $flashSuccess = $_SESSION['flash_success'] ?? null;
 $flashError = $_SESSION['flash_error'] ?? null;
 unset($_SESSION['flash_success'], $_SESSION['flash_error']);
 $basePath = $basePath ?? '';
-$activeTab = $activeTab ?? 'overview';
+$activeTab = $activeTab ?? 'reports';
 $searchQ = $searchQ ?? '';
 $tabUrl = function (string $t) use ($basePath, $searchQ) {
     $u = $basePath . '/reports?tab=' . urlencode($t);
@@ -100,10 +100,10 @@ $sba = $statusByAuthority ?? [
     </div>
 
     <nav class="rpt-tabs">
+        <a href="<?= htmlspecialchars($tabUrl('reports')) ?>" class="rpt-tab <?= $activeTab === 'reports' ? 'active' : '' ?>"><i class="fas fa-table"></i> Reports Dashboard</a>
         <a href="<?= htmlspecialchars($tabUrl('overview')) ?>" class="rpt-tab <?= $activeTab === 'overview' ? 'active' : '' ?>"><i class="fas fa-th-large"></i> Overview</a>
         <a href="<?= htmlspecialchars($tabUrl('recent')) ?>" class="rpt-tab <?= $activeTab === 'recent' ? 'active' : '' ?>"><i class="fas fa-folder-open"></i> Recent Documents</a>
         <a href="<?= htmlspecialchars($tabUrl('missing')) ?>" class="rpt-tab <?= $activeTab === 'missing' ? 'active' : '' ?>"><i class="fas fa-exclamation-circle"></i> Missing / Pending</a>
-        <a href="<?= htmlspecialchars($tabUrl('upload')) ?>" class="rpt-tab <?= $activeTab === 'upload' ? 'active' : '' ?>"><i class="fas fa-cloud-upload-alt"></i> Quick Upload</a>
     </nav>
 
     <?php if ($flashSuccess): ?><div class="alert alert-success"><?= htmlspecialchars($flashSuccess) ?></div><?php endif; ?>
@@ -352,63 +352,153 @@ $sba = $statusByAuthority ?? [
         </div>
     </div>
 
-    <?php else: /* upload */ ?>
-    <div class="card rpt-upload-card">
-        <h3 class="card-title">Quick Upload</h3>
-        <p class="text-muted text-sm">Upload documents for compliance items</p>
-        <form method="post" action="<?= htmlspecialchars($basePath) ?>/reports/quick-upload" enctype="multipart/form-data" class="rpt-upload-form">
-            <div class="form-group">
-                <label class="form-label">Select Compliance <span class="text-danger">*</span></label>
-                <select name="compliance_id" class="form-control" required>
-                    <option value="">Choose compliance item</option>
-                    <?php foreach ($uploadComplianceOptions ?? [] as $opt): ?>
-                    <option value="<?= (int)$opt['id'] ?>"><?= htmlspecialchars($opt['compliance_code'] . ' — ' . $opt['title']) ?></option>
+    <?php elseif ($activeTab === 'reports'): ?>
+    <div class="card">
+        <h3 class="card-title">Department Compliance Summary</h3>
+        <p class="text-muted text-sm">Department-wise completion, pending pipeline, and overdue risk.</p>
+        <div class="rpt-export-row" style="margin-bottom:0.75rem;">
+            <a href="<?= htmlspecialchars($basePath) ?>/reports/export-dashboard?format=csv&q=<?= urlencode($searchQ ?? '') ?>" class="btn btn-secondary"><i class="fas fa-file-excel"></i> Export Excel</a>
+            <a href="<?= htmlspecialchars($basePath) ?>/reports/export-dashboard?format=pdf&q=<?= urlencode($searchQ ?? '') ?>" class="btn btn-secondary" target="_blank"><i class="fas fa-file-pdf"></i> Export PDF</a>
+        </div>
+        <div class="table-wrap mt-3">
+            <table class="data-table rpt-table">
+                <thead>
+                    <tr>
+                        <th>Department</th>
+                        <th>Total</th>
+                        <th>Completed</th>
+                        <th>Pending</th>
+                        <th>Under Review</th>
+                        <th>Overdue</th>
+                        <th>Completion %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach (($departmentSummary ?? []) as $d): ?>
+                    <?php
+                        $tot = (int)($d['total_items'] ?? 0);
+                        $done = (int)($d['completed_items'] ?? 0);
+                        $pct = $tot > 0 ? (int) round(($done * 100) / $tot) : 0;
+                    ?>
+                    <tr>
+                        <td><strong><?= htmlspecialchars($d['department'] ?? '—') ?></strong></td>
+                        <td><?= $tot ?></td>
+                        <td><?= (int)($d['completed_items'] ?? 0) ?></td>
+                        <td><?= (int)($d['pending_items'] ?? 0) ?></td>
+                        <td><?= (int)($d['under_review_items'] ?? 0) ?></td>
+                        <td><?= (int)($d['overdue_items'] ?? 0) ?></td>
+                        <td><span class="rpt-pill <?= $pct >= 80 ? 'rpt-pill-approved' : ($pct >= 50 ? 'rpt-pill-medium' : 'rpt-pill-review') ?>"><?= $pct ?>%</span></td>
+                    </tr>
                     <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Document Type <span class="text-danger">*</span></label>
-                <select name="document_type" class="form-control" required>
-                    <option value="">Select type</option>
-                    <option value="Evidence">Evidence</option>
-                    <option value="Supporting">Supporting</option>
-                    <option value="Return">Return</option>
-                    <option value="Other">Other</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Upload File <span class="text-danger">*</span></label>
-                <div class="rpt-dropzone" id="rpt-dropzone">
-                    <input type="file" name="file" id="rpt-file" class="rpt-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
-                    <i class="fas fa-cloud-upload-alt rpt-drop-ico"></i>
-                    <p class="mb-1"><strong>Click to upload</strong> or drag and drop</p>
-                    <p class="text-muted text-sm mb-0">PDF, Word, Excel (XLS, XLSX), PNG, JPG — max 10MB</p>
-                    <span class="rpt-file-name" id="rpt-file-name"></span>
-                </div>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Upload Comments</label>
-                <textarea name="upload_comments" class="form-control" rows="3" placeholder="Add any comments about this upload..."></textarea>
-            </div>
-            <button type="submit" class="btn btn-primary btn-block rpt-upload-submit"><i class="fas fa-upload"></i> Upload Document</button>
-        </form>
+                    <?php if (empty($departmentSummary)): ?>
+                    <tr><td colspan="7" class="text-muted">No department summary rows found.</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-    <script>
-    (function(){
-        var dz = document.getElementById('rpt-dropzone');
-        var fi = document.getElementById('rpt-file');
-        var fn = document.getElementById('rpt-file-name');
-        if (!dz || !fi) return;
-        dz.addEventListener('click', function(e) { if (e.target !== fi) fi.click(); });
-        fi.addEventListener('change', function() { fn.textContent = this.files[0] ? this.files[0].name : ''; });
-        dz.addEventListener('dragover', function(e) { e.preventDefault(); dz.classList.add('dragover'); });
-        dz.addEventListener('dragleave', function() { dz.classList.remove('dragover'); });
-        dz.addEventListener('drop', function(e) {
-            e.preventDefault();
-            dz.classList.remove('dragover');
-            if (e.dataTransfer.files.length) { fi.files = e.dataTransfer.files; fn.textContent = fi.files[0].name; }
-        });
-    })();
-    </script>
+
+    <div class="card">
+        <h3 class="card-title">Action Workload by Role</h3>
+        <p class="text-muted text-sm">Current action queues for maker, reviewer, and approver users.</p>
+        <div class="table-wrap mt-3">
+            <table class="data-table rpt-table">
+                <thead>
+                    <tr>
+                        <th>Role</th>
+                        <th>User</th>
+                        <th>Assigned Total</th>
+                        <th>Awaiting Action</th>
+                        <th>Closed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach (['Maker' => ($ownerWorkload ?? []), 'Reviewer' => ($reviewerWorkload ?? []), 'Approver' => ($approverWorkload ?? [])] as $roleLabel => $rows): ?>
+                        <?php foreach ($rows as $r): ?>
+                        <tr>
+                            <td><span class="rpt-fw-pill"><?= htmlspecialchars($roleLabel) ?></span></td>
+                            <td><?= htmlspecialchars($r['full_name'] ?? '—') ?></td>
+                            <td><?= (int)($r['assigned_total'] ?? 0) ?></td>
+                            <td><strong><?= (int)($r['awaiting_action'] ?? 0) ?></strong></td>
+                            <td><?= (int)($r['closed_items'] ?? 0) ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endforeach; ?>
+                    <?php if (empty($ownerWorkload) && empty($reviewerWorkload) && empty($approverWorkload)): ?>
+                    <tr><td colspan="5" class="text-muted">No workload rows available.</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title">Due &amp; Closure Reporting</h3>
+        <p class="text-muted text-sm">Upcoming due items, overdue aging, and recent closures.</p>
+        <div class="rpt-kpi-row" style="margin-top:0.5rem;">
+            <div class="rpt-kpi rpt-kpi-red">
+                <div class="rpt-kpi-icon"><i class="fas fa-exclamation-circle"></i></div>
+                <div><div class="rpt-kpi-val"><?= count($overdueAging ?? []) ?></div><div class="rpt-kpi-lbl">Overdue (top 30)</div></div>
+            </div>
+            <div class="rpt-kpi rpt-kpi-orange">
+                <div class="rpt-kpi-icon"><i class="fas fa-hourglass-half"></i></div>
+                <div><div class="rpt-kpi-val"><?= count($upcomingDue ?? []) ?></div><div class="rpt-kpi-lbl">Due next 30 days</div></div>
+            </div>
+            <div class="rpt-kpi rpt-kpi-green">
+                <div class="rpt-kpi-icon"><i class="fas fa-check-circle"></i></div>
+                <div><div class="rpt-kpi-val"><?= count($recentCompletions ?? []) ?></div><div class="rpt-kpi-lbl">Recent closures</div></div>
+            </div>
+        </div>
+        <div class="table-wrap mt-3">
+            <table class="data-table rpt-table">
+                <thead>
+                    <tr>
+                        <th>Bucket</th>
+                        <th>Compliance</th>
+                        <th>Department</th>
+                        <th>Owner</th>
+                        <th>Date / Aging</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach (($overdueAging ?? []) as $o): ?>
+                    <tr>
+                        <td><span class="rpt-pill rpt-pill-review">Overdue</span></td>
+                        <td><a href="<?= htmlspecialchars($basePath) ?>/compliance/view/<?= (int)$o['id'] ?>"><?= htmlspecialchars(($o['compliance_code'] ?? '') . ' — ' . ($o['title'] ?? '')) ?></a></td>
+                        <td><?= htmlspecialchars($o['department'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars($o['owner_name'] ?? '—') ?></td>
+                        <td><?= (int)($o['overdue_days'] ?? 0) ?> days late</td>
+                        <td><span class="<?= rpt_priority_class(strtolower((string)($o['priority'] ?? 'medium'))) ?>"><?= htmlspecialchars(ucfirst($o['priority'] ?? 'medium')) ?></span></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php foreach (($upcomingDue ?? []) as $u): ?>
+                    <tr>
+                        <td><span class="rpt-pill rpt-pill-medium">Upcoming</span></td>
+                        <td><a href="<?= htmlspecialchars($basePath) ?>/compliance/view/<?= (int)$u['id'] ?>"><?= htmlspecialchars(($u['compliance_code'] ?? '') . ' — ' . ($u['title'] ?? '')) ?></a></td>
+                        <td><?= htmlspecialchars($u['department'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars($u['owner_name'] ?? '—') ?></td>
+                        <td><?= !empty($u['due_date']) ? date('M j, Y', strtotime($u['due_date'])) : '—' ?><?= isset($u['due_in_days']) ? ' (' . (int)$u['due_in_days'] . ' days)' : '' ?></td>
+                        <td><span class="rpt-pill rpt-pill-uploaded"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $u['status'] ?? 'pending'))) ?></span></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php foreach (($recentCompletions ?? []) as $c): ?>
+                    <tr>
+                        <td><span class="rpt-pill rpt-pill-approved">Closed</span></td>
+                        <td><a href="<?= htmlspecialchars($basePath) ?>/compliance/view/<?= (int)$c['id'] ?>"><?= htmlspecialchars(($c['compliance_code'] ?? '') . ' — ' . ($c['title'] ?? '')) ?></a></td>
+                        <td><?= htmlspecialchars($c['department'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars($c['owner_name'] ?? '—') ?></td>
+                        <td><?= !empty($c['updated_at']) ? date('M j, Y', strtotime($c['updated_at'])) : '—' ?></td>
+                        <td><span class="rpt-pill rpt-pill-approved"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $c['status'] ?? 'completed'))) ?></span></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($overdueAging) && empty($upcomingDue) && empty($recentCompletions)): ?>
+                    <tr><td colspan="6" class="text-muted">No rows available for due/closure reporting.</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <?php endif; ?>
 </div>

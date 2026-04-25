@@ -7,7 +7,20 @@
     <link rel="stylesheet" href="<?= htmlspecialchars($basePath ?? '', ENT_QUOTES, 'UTF-8') ?>/assets/css/app.css?v=<?= rawurlencode((string)($assetVersion ?? '1')) ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
+<?php
+$showPostLoginOpening = !empty($_SESSION['post_login_opening']);
+if ($showPostLoginOpening) {
+    unset($_SESSION['post_login_opening']);
+}
+?>
 <body>
+    <div id="post-login-opening" class="post-login-opening<?= $showPostLoginOpening ? ' active' : '' ?>" aria-hidden="<?= $showPostLoginOpening ? 'false' : 'true' ?>">
+        <div class="post-login-opening-card">
+            <div class="post-login-opening-logo">easy</div>
+            <div class="post-login-opening-title">Opening your workspace...</div>
+            <div class="post-login-opening-bar"><span></span></div>
+        </div>
+    </div>
     <?php
     $navRole = (string)($user['role_slug'] ?? '');
     $navAdmin = ($navRole === 'admin');
@@ -50,12 +63,10 @@
                         <i class="fas fa-brain"></i>
                         <span>Circular Intelligence</span>
                     </a>
-                    <?php if ($navAdmin): ?>
-                    <a href="<?= $basePath ?? '' ?>/doa" class="nav-item <?= ($currentPage ?? '') === 'doa' ? 'active' : '' ?>">
-                        <i class="fas fa-users"></i>
+                    <a href="<?= $basePath ?? '' ?>/doa/list" class="nav-item <?= ($currentPage ?? '') === 'doa' ? 'active' : '' ?>">
+                        <i class="fas fa-clipboard-check"></i>
                         <span>Delegation of Authority (DOA)</span>
                     </a>
-                    <?php endif; ?>
                     <?php if ($navAdmin): ?>
                     <a href="<?= $basePath ?? '' ?>/authority-matrix" class="nav-item <?= ($currentPage ?? '') === 'authority-matrix' ? 'active' : '' ?>">
                         <i class="fas fa-th"></i>
@@ -71,7 +82,7 @@
                 </div>
                 <div class="nav-section">
                     <span class="nav-section-title">IT COMPLIANCE</span>
-                    <a href="<?= $basePath ?? '' ?>/itrisk/dashboard?tab=assessment" class="nav-item <?= ($currentPage ?? '') === 'itrisk' ? 'active' : '' ?>">
+                    <a href="<?= $basePath ?? '' ?>/itrisk/dashboard?tab=it-dashboard" class="nav-item <?= ($currentPage ?? '') === 'itrisk' ? 'active' : '' ?>">
                         <i class="fas fa-shield-alt"></i>
                         <span>Operational risk</span>
                     </a>
@@ -164,5 +175,18 @@
         </div>
     </div>
     <script src="<?= htmlspecialchars($basePath ?? '', ENT_QUOTES, 'UTF-8') ?>/assets/js/app.js?v=<?= rawurlencode((string)($assetVersion ?? '1')) ?>"></script>
+    <script>
+    (function () {
+        var splash = document.getElementById('post-login-opening');
+        if (!splash || !splash.classList.contains('active')) return;
+        window.setTimeout(function () {
+            splash.classList.add('fade-out');
+            splash.setAttribute('aria-hidden', 'true');
+        }, 1100);
+        window.setTimeout(function () {
+            splash.parentNode && splash.parentNode.removeChild(splash);
+        }, 1500);
+    })();
+    </script>
 </body>
 </html>
