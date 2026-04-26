@@ -1,5 +1,14 @@
 RewriteEngine On
+# RewriteBase is required only when Apache serves the app from a subfolder
+# (e.g. http://localhost/compliance/public/).  At the domain root (production)
+# this directive must be absent.
+#
+# To activate for local/subfolder deployment, add to your Apache VirtualHost:
+#   Define LOCAL_ENV
+# Production VirtualHosts should NOT define LOCAL_ENV.
+<IfDefine LOCAL_ENV>
 RewriteBase /compliance/public/
+</IfDefine>
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ index.php [QSA,L]
