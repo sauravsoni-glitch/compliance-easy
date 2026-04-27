@@ -8,6 +8,12 @@
     "require-dev": {
         "phpunit/phpunit": "^9.6"
     },
+    "scripts": {
+        "test": "phpunit",
+        "smoke": "php scripts/smoke_check.php",
+        "lint": "php scripts/lint_project.php",
+        "check": "php scripts/check_system.php"
+    },
     "config": {
         "sort-packages": true
     },

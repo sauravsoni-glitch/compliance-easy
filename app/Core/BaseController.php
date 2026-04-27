@@ -14,7 +14,11 @@ abstract class BaseController
         $this->appConfig = require dirname(__DIR__, 2) . '/config/app.php';
         Auth::init();
         if (Auth::check()) {
-            Auth::syncRoleFromDatabase($this->db);
+            try {
+                Auth::syncRoleFromDatabase($this->db);
+            } catch (\Throwable $e) {
+                // Keep request alive even if role sync query fails (e.g., transient DB issue).
+            }
         }
     }
 

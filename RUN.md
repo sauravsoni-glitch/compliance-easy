@@ -18,9 +18,9 @@
 
 ```bash
 cd c:\Users\Saurav.Soni\Desktop\compliance
-
 mysql -u root -p -e "CREATE DATABASE compliance_saas CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 mysql -u root -p compliance_saas < database/schema.sql
+```
 
 **Existing database:** apply lifecycle updates once:
 
@@ -29,7 +29,6 @@ mysql -u root -p compliance_saas < database/migrations/002_compliance_lifecycle.
 ```
 
 (Adds `compliance_history.comment`, widens `frequency`, and **Audit** authority. If `comment` already exists, skip that line or ignore the error.)
-```
 
 *(If your MySQL root has no password, omit the `-p` or press Enter when asked.)*
 
@@ -134,3 +133,20 @@ If the seed script or app says **"No connection could be made"** or **"target ma
 | 3 | Set `config/app.php` → `'url' => 'http://localhost:8000'` |
 | 4 | Run `php -S localhost:8000 -t public public/index.php` |
 | 5 | Open **http://localhost:8000** and log in with a demo user |
+
+---
+
+## Quick health checks (recommended)
+
+Run these from project root:
+
+```powershell
+# Works even when Composer is not installed globally
+C:\xampp\php\php.exe scripts\check_system.php
+```
+
+If Composer is available on PATH, you can also run:
+
+```bash
+composer check
+```

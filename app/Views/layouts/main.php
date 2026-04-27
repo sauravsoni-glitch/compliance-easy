@@ -26,7 +26,6 @@ if ($showPostLoginOpening) {
     $navAdmin = ($navRole === 'admin');
     $navMaker = ($navRole === 'maker');
     $navCanCreate = $navAdmin || $navMaker;
-    $navTab = (string)($_GET['tab'] ?? '');
     ?>
     <div class="app-layout">
         <aside class="sidebar">
@@ -40,6 +39,10 @@ if ($showPostLoginOpening) {
                     <a href="<?= $basePath ?? '' ?>/dashboard" class="nav-item <?= ($currentPage ?? '') === 'dashboard' ? 'active' : '' ?>">
                         <i class="fas fa-th-large"></i>
                         <span>Dashboard</span>
+                    </a>
+                    <a href="<?= $basePath ?? '' ?>/calendar" class="nav-item <?= ($currentPage ?? '') === 'compliance-calendar' ? 'active' : '' ?>">
+                        <i class="fas fa-calendar-alt"></i>
+                        <span>Calendar</span>
                     </a>
                     <a href="<?= $basePath ?? '' ?>/compliance" class="nav-item <?= ($currentPage ?? '') === 'compliance-items' ? 'active' : '' ?>">
                         <i class="fas fa-list-alt"></i>
@@ -82,7 +85,7 @@ if ($showPostLoginOpening) {
                 </div>
                 <div class="nav-section">
                     <span class="nav-section-title">IT COMPLIANCE</span>
-                    <a href="<?= $basePath ?? '' ?>/itrisk/dashboard?tab=it-dashboard" class="nav-item <?= ($currentPage ?? '') === 'itrisk' ? 'active' : '' ?>">
+                    <a href="<?= $basePath ?? '' ?>/itrisk/dashboard" class="nav-item <?= ($currentPage ?? '') === 'itrisk' ? 'active' : '' ?>">
                         <i class="fas fa-shield-alt"></i>
                         <span>Operational risk</span>
                     </a>
@@ -95,7 +98,7 @@ if ($showPostLoginOpening) {
                         <span>Organization</span>
                     </a>
                     <a href="<?= $basePath ?? '' ?>/roles-permissions" class="nav-item <?= ($currentPage ?? '') === 'roles' ? 'active' : '' ?>">
-                        <i class="fas fa-shield-alt"></i>
+                        <i class="fas fa-user-shield"></i>
                         <span>Roles & Permissions</span>
                     </a>
                     <a href="<?= $basePath ?? '' ?>/settings" class="nav-item <?= ($currentPage ?? '') === 'settings' ? 'active' : '' ?>">

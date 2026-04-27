@@ -33,7 +33,7 @@ class ComplianceController extends BaseController
      *
      * @param array<string,mixed> $row
      */
-    private function notifyComplianceAssignees(array $row, string $subjectPrefix = 'Compliance assignment updated'): void
+    private function notifyComplianceAssignees(array $row, string $subjectPrefix = 'Compliance assignment updated'): array
     {
         $snapshot = ComplianceCreatedMailReport::fromDatabaseRow($row);
         $html = ComplianceCreatedMailReport::buildHtmlEmail($snapshot);
@@ -54,8 +54,12 @@ class ComplianceController extends BaseController
             $targets[strtolower($approverEmail)] = ['email' => $approverEmail, 'name' => (string)($row['approver_name'] ?? 'Approver')];
         }
 
+        $attempted = 0;
+        $sent = 0;
+        $failed = 0;
         foreach ($targets as $t) {
-            Mailer::sendGeneric(
+            $attempted++;
+            [$ok, $err] = Mailer::sendGeneric(
                 $this->appConfig,
                 (string)$t['email'],
                 (string)$t['name'],
@@ -63,7 +67,16 @@ class ComplianceController extends BaseController
                 $html,
                 $text
             );
+            if ($ok) {
+                $sent++;
+            } else {
+                $failed++;
+                if (!empty($this->appConfig['debug']) && $err) {
+                    error_log('notifyComplianceAssignees: ' . (string) $err);
+                }
+            }
         }
+        return ['attempted' => $attempted, 'sent' => $sent, 'failed' => $failed];
     }
 
     /**
@@ -759,7 +772,20 @@ class ComplianceController extends BaseController
 
         $this->logHistory($id, 'Compliance Created', 'Compliance item created', Auth::id());
 
-        $_SESSION['flash_success'] = 'Compliance saved. ID ' . $code . '. Assigned to maker; visible on dashboard and calendar.' . $uploadNote;
+        $mailNote = '';
+        $notifyRow = $this->loadComplianceForNotification($id, (int) $orgId);
+        if ($notifyRow) {
+            $mailStats = $this->notifyComplianceAssignees($notifyRow, 'New compliance created');
+            if (($mailStats['attempted'] ?? 0) < 1) {
+                $mailNote = ' Mail not sent (no assignee email addresses found).';
+            } elseif (($mailStats['sent'] ?? 0) < 1) {
+                $mailNote = ' Mail could not be sent. Check mail settings in config/mail.php or config/mail.local.php.';
+            } elseif (($mailStats['failed'] ?? 0) > 0) {
+                $mailNote = ' Mail sent to some assignees; a few addresses failed.';
+            }
+        }
+
+        $_SESSION['flash_success'] = 'Compliance saved. ID ' . $code . '. Assigned to maker; visible on dashboard and calendar.' . $uploadNote . $mailNote;
         $this->redirect('/compliance/view/' . $id);
     }
 
@@ -1268,6 +1294,14 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Only the assigned approver can approve.';
             $this->redirect('/compliance/view/' . $id);
         }
+        if (DoaEngine::complianceUsesDoa($c)) {
+            $lvl = (int) ($c['doa_current_level'] ?? 2);
+            $role = $this->doaRoleAtLevel((int) $orgId, (int) $c['doa_rule_set_id'], $lvl);
+            if (!Auth::isAdmin() && !DoaEngine::roleMayFinalApprove($role)) {
+                $_SESSION['flash_error'] = 'Your DOA role at this level cannot give final approval. Only Approver, Compliance Head, Management, or Admin may complete the decision.';
+                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
+            }
+        }
         $this->db->prepare("UPDATE compliances SET status = 'completed' WHERE id = ?")->execute([$id]);
         $stmt = $this->db->prepare('SELECT id FROM compliance_submissions WHERE compliance_id = ? ORDER BY id DESC LIMIT 1');
         $stmt->execute([$id]);
@@ -1280,10 +1314,6 @@ class ComplianceController extends BaseController
         if (DoaEngine::complianceUsesDoa($c)) {
             $lvl = (int) ($c['doa_current_level'] ?? 2);
             $role = $this->doaRoleAtLevel((int) $orgId, (int) $c['doa_rule_set_id'], $lvl);
-            if (!Auth::isAdmin() && !DoaEngine::roleMayFinalApprove($role)) {
-                $_SESSION['flash_error'] = 'Your DOA role at this level cannot give final approval. Only Approver, Compliance Head, Management, or Admin may complete the decision.';
-                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
-            }
             $this->logDoaCompliance($id, $lvl, $role, 'Approved', $remark);
         }
         $_SESSION['flash_success'] = 'Compliance approved and completed.';
@@ -1311,6 +1341,14 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Only the assigned approver can reject.';
             $this->redirect('/compliance/view/' . $id);
         }
+        if (DoaEngine::complianceUsesDoa($c)) {
+            $lvl = (int) ($c['doa_current_level'] ?? 2);
+            $role = $this->doaRoleAtLevel((int) $orgId, (int) $c['doa_rule_set_id'], $lvl);
+            if (!Auth::isAdmin() && !DoaEngine::roleMayFinalApprove($role)) {
+                $_SESSION['flash_error'] = 'Your DOA role at this level cannot issue a final rejection. Only Approver, Compliance Head, Management, or Admin may reject at the final step.';
+                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
+            }
+        }
         $this->db->prepare("UPDATE compliances SET status = 'rejected' WHERE id = ?")->execute([$id]);
         $stmt = $this->db->prepare('SELECT id FROM compliance_submissions WHERE compliance_id = ? ORDER BY id DESC LIMIT 1');
         $stmt->execute([$id]);
@@ -1323,10 +1361,6 @@ class ComplianceController extends BaseController
         if (DoaEngine::complianceUsesDoa($c)) {
             $lvl = (int) ($c['doa_current_level'] ?? 2);
             $role = $this->doaRoleAtLevel((int) $orgId, (int) $c['doa_rule_set_id'], $lvl);
-            if (!Auth::isAdmin() && !DoaEngine::roleMayFinalApprove($role)) {
-                $_SESSION['flash_error'] = 'Your DOA role at this level cannot issue a final rejection. Only Approver, Compliance Head, Management, or Admin may reject at the final step.';
-                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
-            }
             $this->logDoaCompliance($id, $lvl, $role, 'Rejected', $remark);
         }
         $_SESSION['flash_success'] = 'Compliance rejected.';

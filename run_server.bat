@@ -15,7 +15,9 @@ if not defined PHP_CMD (
     exit /b 1
 )
 cd /d "%~dp0"
-echo Starting server at http://localhost:8000
+set "APP_URL=http://127.0.0.1:8000"
+echo Starting server at %APP_URL%
+echo If the browser fails, try http://localhost:8000
 echo Press Ctrl+C to stop.
-"%PHP_CMD%" -S localhost:8000 -t public public/index.php
+"%PHP_CMD%" -S 127.0.0.1:8000 -t public public/index.php
 pause

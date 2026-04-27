@@ -111,7 +111,8 @@ class Auth
     public static function requireAuth(): void
     {
         if (!self::check()) {
-            header('Location: /login');
+            $p = self::webPathPrefix();
+            header('Location: ' . ($p !== '' ? $p : '') . '/login', true, 302);
             exit;
         }
     }
