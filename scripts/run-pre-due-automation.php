@@ -37,9 +37,10 @@ $db = Database::getConnection();
 $orgIds = array_map('intval', $db->query('SELECT id FROM organizations ORDER BY id')->fetchAll(PDO::FETCH_COLUMN));
 $all = ['organizations' => 0, 'processed' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0];
 $runner = new PreDueAutomationService($db, $appConfig);
+$force = in_array('--force', $argv ?? [], true);
 foreach ($orgIds as $orgId) {
     $all['organizations']++;
-    $r = $runner->runForOrganization($orgId);
+    $r = $runner->runForOrganization($orgId, $force);
     $all['processed'] += (int) ($r['processed'] ?? 0);
     $all['sent'] += (int) ($r['sent'] ?? 0);
     $all['failed'] += (int) ($r['failed'] ?? 0);

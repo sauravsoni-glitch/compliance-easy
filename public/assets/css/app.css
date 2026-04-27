@@ -284,6 +284,9 @@ a:hover {
     justify-content: space-between;
     padding: 0 1.5rem;
     gap: 1rem;
+    position: relative;
+    z-index: 2500;
+    overflow: visible;
 }
 .header-search {
     display: flex;
@@ -1155,7 +1158,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
 }
 
 /* Header dropdowns */
-.header-dropdown-wrap { position: relative; }
+.header-dropdown-wrap { position: relative; z-index: 2600; }
 .user-menu-trigger {
     display: flex;
     align-items: center;
@@ -1179,7 +1182,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
     border-radius: var(--radius);
     box-shadow: 0 10px 25px rgba(0,0,0,0.15);
     border: 1px solid var(--border);
-    z-index: 1000;
+    z-index: 3000;
     max-height: 360px;
     overflow-y: auto;
 }

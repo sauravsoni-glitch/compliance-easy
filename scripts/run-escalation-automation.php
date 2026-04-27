@@ -34,7 +34,22 @@ if (is_file(ROOT_PATH . '/vendor/autoload.php')) {
 
 $appConfig = require ROOT_PATH . '/config/app.php';
 $service = new EscalationAutomationService(Database::getConnection(), $appConfig);
-$summary = $service->runForAllOrganizations();
+$force = in_array('--force', $argv ?? [], true);
+if ($force) {
+    $db = Database::getConnection();
+    $orgIds = array_map('intval', $db->query('SELECT id FROM organizations ORDER BY id')->fetchAll(PDO::FETCH_COLUMN));
+    $summary = ['organizations' => 0, 'processed' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0];
+    foreach ($orgIds as $orgId) {
+        $summary['organizations']++;
+        $r = $service->runForOrganization($orgId, true);
+        $summary['processed'] += (int) ($r['processed'] ?? 0);
+        $summary['sent'] += (int) ($r['sent'] ?? 0);
+        $summary['failed'] += (int) ($r['failed'] ?? 0);
+        $summary['skipped'] += (int) ($r['skipped'] ?? 0);
+    }
+} else {
+    $summary = $service->runForAllOrganizations();
+}
 
 echo 'Escalation automation run completed' . PHP_EOL;
 echo 'Organizations: ' . (int) ($summary['organizations'] ?? 0) . PHP_EOL;

@@ -14,7 +14,12 @@ try {
     }
     $authId = [regex]::Match($createPage.Content, 'name="authority_id"[\s\S]*?<option value="(\d+)"').Groups[1].Value
     $ownerId = [regex]::Match($createPage.Content, 'name="owner_id"[\s\S]*?<option value="(\d+)"').Groups[1].Value
-    if (-not $authId -or -not $ownerId) { throw 'Could not parse authority_id / owner_id' }
+    $reviewerId = [regex]::Match($createPage.Content, 'name="reviewer_id"[\s\S]*?<option value="(\d+)"').Groups[1].Value
+    $approverId = [regex]::Match($createPage.Content, 'name="approver_id"[\s\S]*?<option value="(\d+)"').Groups[1].Value
+    if (-not $authId -or -not $ownerId -or -not $reviewerId -or -not $approverId) {
+        throw 'Could not parse authority/owner/reviewer/approver IDs from create form.'
+    }
+    Write-Output ("E2E_PARSE auth={0} owner={1} reviewer={2} approver={3}" -f $authId, $ownerId, $reviewerId, $approverId)
 
     $now = Get-Date
     $title = 'E2E Compliance ' + $now.ToString('yyyyMMddHHmmss')
@@ -23,7 +28,11 @@ try {
     $exp = $now.AddDays(3).ToString('yyyy-MM-dd')
     $rem = $now.AddDays(1).ToString('yyyy-MM-dd')
 
-    $createResp = Invoke-WebRequest -Uri "$base/compliances/create" -Method Post -WebSession $s -Body @{
+    $createResp = $null
+    $createLocation = ''
+    $createBody = ''
+    try {
+        $createResp = Invoke-WebRequest -Uri "$base/compliances/create" -Method Post -WebSession $s -Body @{
         title = $title
         authority_id = $authId
         circular_reference = 'E2E-REF'
@@ -33,25 +42,53 @@ try {
         frequency = 'monthly'
         description = 'E2E flow'
         objective_text = 'obj'
-        expected_outcome = 'ok'
         penalty_impact = 'none'
         owner_id = $ownerId
-        workflow_type = 'two-level'
-        reviewer_id = ''
-        approver_id = $ownerId
+        workflow_type = 'three-level'
+        reviewer_id = $reviewerId
+        approver_id = $approverId
         evidence_required = '0'
         start_date = $start
         due_date = $due
         expected_date = $exp
         reminder_date = $rem
-    } -MaximumRedirection 10 -UseBasicParsing
-
-    $createUri = ''
-    if ($createResp.BaseResponse -and $createResp.BaseResponse.ResponseUri) {
-        $createUri = $createResp.BaseResponse.ResponseUri.AbsoluteUri
+        } -MaximumRedirection 0 -UseBasicParsing
+    } catch {
+        if ($_.Exception.Response) {
+            $createLocation = [string]$_.Exception.Response.Headers['Location']
+            try {
+                $sr = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $createBody = $sr.ReadToEnd()
+                $sr.Close()
+            } catch {}
+        } else {
+            throw
+        }
     }
-    $id = [regex]::Match($createUri, '/compliance/view/(\d+)').Groups[1].Value
-    if (-not $id) { throw "Create failed; location=$createLocation" }
+    $createUri = ''
+    if ($createResp -and $createResp.BaseResponse -and $createResp.BaseResponse.ResponseUri) {
+        $createUri = $createResp.BaseResponse.ResponseUri.AbsoluteUri
+        $createBody = [string]$createResp.Content
+    }
+    if (-not $createLocation -and $createUri) { $createLocation = $createUri }
+    $id = [regex]::Match($createLocation, '/compliance/view/(\d+)').Groups[1].Value
+    if (-not $id) {
+        $errMsg = ''
+        $m = [regex]::Match($createBody, '<div class="alert alert-danger">([\s\S]*?)</div>')
+        if ($m.Success) {
+            $errMsg = (($m.Groups[1].Value -replace '<[^>]+>', '') -replace '\s+', ' ').Trim()
+        }
+        if ($errMsg -eq '') {
+            $s1 = [regex]::Match($createBody, '<title>([\s\S]*?)</title>')
+            $titleTxt = if ($s1.Success) { ($s1.Groups[1].Value -replace '\s+', ' ').Trim() } else { 'n/a' }
+            $s2 = [regex]::Match($createBody, '<h1[^>]*>([\s\S]*?)</h1>')
+            $h1Txt = if ($s2.Success) { (($s2.Groups[1].Value -replace '<[^>]+>', '') -replace '\s+', ' ').Trim() } else { 'n/a' }
+            $errMsg = "page_title=$titleTxt; h1=$h1Txt"
+        }
+        $safeErr = 'n/a'
+        if ($errMsg -ne '') { $safeErr = $errMsg }
+        throw ("Create failed; location={0}; error={1}" -f $createLocation, $safeErr)
+    }
 
     Invoke-WebRequest -Uri "$base/compliances/submit/$id" -Method Post -WebSession $s -Body @{ maker_comment='submitted by e2e'; completion_date=(Get-Date).ToString('yyyy-MM-dd') } -MaximumRedirection 5 -UseBasicParsing | Out-Null
     # Forward step is needed when workflow resolves to 3-level.

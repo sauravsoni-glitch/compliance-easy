@@ -51,9 +51,7 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
         <h1 class="page-title"><?= $activeTab === 'it-dashboard' ? 'IT Dashboard' : ($activeTab === 'incidents' ? 'Incident Management' : ($activeTab === 'anomalies' ? 'Anomaly Detection' : ($activeTab === 'compliance' ? 'Compliance Tracking' : ($activeTab === 'resilience' ? 'Resilience Management' : ($activeTab === 'lessons' ? 'Lessons Learned' : ($activeTab === 'upload' ? 'Data Upload' : 'IT Risk')))))) ?></h1>
         <p class="page-subtitle"><?= $activeTab === 'it-dashboard' ? 'Monitor IT compliance, risk posture, controls, and KRIs from one place.' : ($activeTab === 'incidents' ? 'Track, manage, and report operational incidents.' : ($activeTab === 'anomalies' ? 'AI-powered detection of unusual patterns that might indicate risks' : ($activeTab === 'compliance' ? 'Monitor and manage compliance with regulatory requirements' : ($activeTab === 'resilience' ? 'Build and monitor organizational resilience to operational risks' : ($activeTab === 'lessons' ? 'Capture key findings to improve controls and prevent recurrence' : ($activeTab === 'upload' ? 'Upload and manage operational risk data in bulk' : 'Identify and classify IT/InfoSec risks across the organization.')))))) ?></p>
     </div>
-    <?php if ($activeTab === 'it-dashboard'): ?>
-    <a href="<?= htmlspecialchars($basePath) ?>/compliances/create" class="btn btn-primary"><i class="fas fa-plus"></i> Create IT Compliance</a>
-    <?php elseif ($canOpenLessonsModal): ?>
+    <?php if ($canOpenLessonsModal): ?>
     <button type="button" class="btn btn-primary" id="open-lesson-modal"><i class="fas fa-lightbulb"></i> Add Lesson</button>
     <?php elseif ($activeTab === 'upload'): ?>
     <button type="button" class="btn btn-primary"><i class="fas fa-upload"></i> Upload Data</button>
@@ -65,8 +63,6 @@ unset($_SESSION['flash_success'], $_SESSION['flash_error']);
     <button type="button" class="btn btn-primary" id="open-incident-modal"><i class="fas fa-flag"></i> Report Incident</button>
     <?php elseif ($canOpenAnomalyModal): ?>
     <button type="button" class="btn btn-primary" id="open-anomaly-modal"><i class="fas fa-plus"></i> Add Anomaly</button>
-    <?php elseif ($canOpenRiskModal): ?>
-    <button type="button" class="btn btn-primary" id="open-risk-modal"><i class="fas fa-plus"></i> <?= $activeTab === 'controls' ? 'Add Control' : ($activeTab === 'kris' ? 'Add KRI' : 'Add Risk') ?></button>
     <?php endif; ?>
 </div>
 <?php if ($flashSuccess): ?><div class="alert alert-success"><?= htmlspecialchars($flashSuccess) ?></div><?php endif; ?>

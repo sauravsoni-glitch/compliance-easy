@@ -34,6 +34,14 @@ class SettingsController extends BaseController
             ->execute([$orgId, $key, json_encode($data, JSON_UNESCAPED_UNICODE)]);
     }
 
+    private function hasSetting(int $orgId, string $key): bool
+    {
+        $stmt = $this->db->prepare('SELECT 1 FROM settings WHERE organization_id = ? AND key_name = ? LIMIT 1');
+        $stmt->execute([$orgId, $key]);
+
+        return (bool) $stmt->fetchColumn();
+    }
+
     private function defaultNotifications(): array
     {
         return [
@@ -78,6 +86,7 @@ class SettingsController extends BaseController
         return [
             'enable_dept' => true,
             'accelerated_high_risk' => true,
+            'daily_time' => '09:00',
             'depts' => $depts,
         ];
     }
@@ -87,6 +96,8 @@ class SettingsController extends BaseController
         $out = $current;
         $out['enable_dept'] = array_key_exists('enable_dept', $out) ? !empty($out['enable_dept']) : !empty($defaults['enable_dept']);
         $out['accelerated_high_risk'] = array_key_exists('accelerated_high_risk', $out) ? !empty($out['accelerated_high_risk']) : !empty($defaults['accelerated_high_risk']);
+        $daily = (string) ($out['daily_time'] ?? ($defaults['daily_time'] ?? '09:00'));
+        $out['daily_time'] = preg_match('/^\d{2}:\d{2}$/', $daily) ? $daily : '09:00';
         $out['depts'] = is_array($out['depts'] ?? null) ? $out['depts'] : [];
 
         foreach (($defaults['depts'] ?? []) as $slug => $defDept) {
@@ -248,6 +259,9 @@ class SettingsController extends BaseController
         $escalationDefaults = $this->defaultEscalation();
         $escalation = $this->getJson($orgId, self::KEYS['escalation'], $escalationDefaults);
         $escalation = $this->normalizeEscalation($escalation, $escalationDefaults);
+        if (!$this->hasSetting($orgId, self::KEYS['escalation'])) {
+            $this->setJson($orgId, self::KEYS['escalation'], $escalation);
+        }
         $preDue = $this->getJson($orgId, self::KEYS['pre_due'], $this->defaultPreDue());
         $templates = $this->getJson($orgId, self::KEYS['templates'], $this->defaultTemplates());
         $logs = $this->getJson($orgId, self::KEYS['logs'], $this->defaultLogs());
@@ -393,9 +407,25 @@ class SettingsController extends BaseController
         if (!is_array($esc)) {
             $esc = [];
         }
+        $escTime24 = '09:00';
+        $escHour12 = (int) ($_POST['esc_daily_hour'] ?? 9);
+        $escMinute = (int) ($_POST['esc_daily_minute'] ?? 0);
+        $escAmPm = strtoupper(trim((string) ($_POST['esc_daily_ampm'] ?? 'AM')));
+        if ($escHour12 >= 1 && $escHour12 <= 12 && $escMinute >= 0 && $escMinute <= 59 && in_array($escAmPm, ['AM', 'PM'], true)) {
+            $hh = $escHour12;
+            if ($escAmPm === 'AM' && $hh === 12) {
+                $hh = 0;
+            } elseif ($escAmPm === 'PM' && $hh < 12) {
+                $hh += 12;
+            }
+            $escTime24 = sprintf('%02d:%02d', $hh, $escMinute);
+        } elseif (preg_match('/^\d{2}:\d{2}$/', (string) ($_POST['esc_daily_time'] ?? ''))) {
+            $escTime24 = (string) $_POST['esc_daily_time'];
+        }
         $out = [
             'enable_dept' => !empty($_POST['enable_dept']),
             'accelerated_high_risk' => !empty($_POST['accelerated_high_risk']),
+            'daily_time' => $escTime24,
             'depts' => [],
         ];
         // Pre-fetch the set of valid active user_ids in this org so we can validate
@@ -456,7 +486,22 @@ class SettingsController extends BaseController
             }
         }
         $pre['enabled'] = !empty($_POST['pre_enabled']);
-        $pre['daily_time'] = preg_match('/^\d{2}:\d{2}$/', $_POST['daily_time'] ?? '') ? $_POST['daily_time'] : '09:00';
+        $preTime24 = '09:00';
+        $preHour12 = (int) ($_POST['pre_daily_hour'] ?? 9);
+        $preMinute = (int) ($_POST['pre_daily_minute'] ?? 0);
+        $preAmPm = strtoupper(trim((string) ($_POST['pre_daily_ampm'] ?? 'AM')));
+        if ($preHour12 >= 1 && $preHour12 <= 12 && $preMinute >= 0 && $preMinute <= 59 && in_array($preAmPm, ['AM', 'PM'], true)) {
+            $hh = $preHour12;
+            if ($preAmPm === 'AM' && $hh === 12) {
+                $hh = 0;
+            } elseif ($preAmPm === 'PM' && $hh < 12) {
+                $hh += 12;
+            }
+            $preTime24 = sprintf('%02d:%02d', $hh, $preMinute);
+        } elseif (preg_match('/^\d{2}:\d{2}$/', (string) ($_POST['daily_time'] ?? ''))) {
+            $preTime24 = (string) $_POST['daily_time'];
+        }
+        $pre['daily_time'] = $preTime24;
         $pre['first'] = max(0, (int) ($_POST['first_days'] ?? 7));
         $pre['second'] = max(0, (int) ($_POST['second_days'] ?? 3));
         $pre['final'] = max(0, (int) ($_POST['final_days'] ?? 1));
@@ -499,11 +544,11 @@ class SettingsController extends BaseController
         $action = $_POST['pre_action'] ?? 'save';
         if ($action === 'test') {
             $runner = new PreDueAutomationService($this->db, $this->appConfig);
-            $r = $runner->runForOrganization($orgId);
+            $r = $runner->runForOrganization($orgId, true);
             $_SESSION['flash_success'] = 'Pre-due reminder run completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.';
         } elseif ($action === 'trigger') {
             $runner = new PreDueAutomationService($this->db, $this->appConfig);
-            $r = $runner->runForOrganization($orgId);
+            $r = $runner->runForOrganization($orgId, true);
             $_SESSION['flash_success'] = 'Manual pre-due trigger completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.';
         } else {
             $_SESSION['flash_success'] = 'Pre-due reminder configuration saved.';

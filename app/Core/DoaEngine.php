@@ -97,6 +97,13 @@ final class DoaEngine
             }
         } catch (\Throwable $e) {
         }
+        try {
+            $chk = $db->query("SHOW COLUMNS FROM `doa_rules` LIKE 'level_user_id'");
+            if ($chk && !$chk->fetch(\PDO::FETCH_ASSOC)) {
+                $db->exec('ALTER TABLE `doa_rules` ADD COLUMN `level_user_id` int unsigned NULL AFTER `role`');
+            }
+        } catch (\Throwable $e) {
+        }
     }
 
     /** Numeric severity for compliance risk_level / rule condition (higher = stricter). */
@@ -301,7 +308,7 @@ final class DoaEngine
      */
     public static function loadRuleLevels(PDO $db, int $orgId, int $ruleSetId): array
     {
-        $st = $db->prepare('SELECT level, role FROM doa_rules WHERE organization_id = ? AND rule_set_id = ? AND status = ? ORDER BY level ASC, id ASC');
+        $st = $db->prepare('SELECT level, role, level_user_id FROM doa_rules WHERE organization_id = ? AND rule_set_id = ? AND status = ? ORDER BY level ASC, id ASC');
         $st->execute([$orgId, $ruleSetId, 'Active']);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         $out = [];
@@ -311,7 +318,22 @@ final class DoaEngine
             if ($lvl < 1 || $role === '') {
                 continue;
             }
-            $uid = self::resolveUserForRole($db, $orgId, $role);
+            $uid = (int)($r['level_user_id'] ?? 0);
+            if ($uid > 0) {
+                try {
+                    $chk = $db->prepare('SELECT id FROM users WHERE id = ? AND organization_id = ? AND status = ? LIMIT 1');
+                    $chk->execute([$uid, $orgId, 'active']);
+                    $ok = (int) $chk->fetchColumn();
+                    if ($ok < 1) {
+                        $uid = 0;
+                    }
+                } catch (\Throwable $e) {
+                    $uid = 0;
+                }
+            }
+            if ($uid < 1) {
+                $uid = (int) (self::resolveUserForRole($db, $orgId, $role) ?? 0);
+            }
             $out[] = ['level' => $lvl, 'role' => $role, 'user_id' => $uid];
         }
 

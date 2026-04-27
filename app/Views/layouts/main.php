@@ -62,10 +62,12 @@ if ($showPostLoginOpening) {
                         <i class="fas fa-brain"></i>
                         <span>Circular Intelligence</span>
                     </a>
+                    <?php if ($navAdmin): ?>
                     <a href="<?= $basePath ?? '' ?>/doa/list" class="nav-item <?= ($currentPage ?? '') === 'doa' ? 'active' : '' ?>">
                         <i class="fas fa-clipboard-check"></i>
                         <span>Delegation of Authority (DOA)</span>
                     </a>
+                    <?php endif; ?>
                     <?php if ($navAdmin): ?>
                     <a href="<?= $basePath ?? '' ?>/authority-matrix" class="nav-item <?= ($currentPage ?? '') === 'authority-matrix' ? 'active' : '' ?>">
                         <i class="fas fa-th"></i>

@@ -9,6 +9,42 @@ class DoaController extends BaseController
 {
     private const DEPTS = ['Legal', 'Finance', 'Operations', 'Risk', 'IT', 'Compliance'];
 
+    /**
+     * @return list<array{id:int,full_name:string,email:string,role_slug:string,role_name:string,label:string}>
+     */
+    private function activeUserOptions(int $orgId): array
+    {
+        $st = $this->db->prepare("SELECT u.id, u.full_name, u.email, r.slug AS role_slug, r.name AS role_name
+            FROM users u
+            INNER JOIN roles r ON r.id = u.role_id
+            WHERE u.organization_id = ? AND u.status = 'active'
+            ORDER BY u.full_name ASC, u.id ASC");
+        $st->execute([$orgId]);
+        $rows = $st->fetchAll(\PDO::FETCH_ASSOC);
+        $out = [];
+        foreach ($rows as $u) {
+            $id = (int) ($u['id'] ?? 0);
+            if ($id < 1) {
+                continue;
+            }
+            $name = trim((string) ($u['full_name'] ?? ''));
+            $email = trim((string) ($u['email'] ?? ''));
+            $roleSlug = strtolower(trim((string) ($u['role_slug'] ?? '')));
+            $roleName = trim((string) ($u['role_name'] ?? ''));
+            $label = $name . ' (ID: ' . $id . ')' . ($roleName !== '' ? (' - ' . $roleName) : '') . ($email !== '' ? (' - ' . $email) : '');
+            $out[] = [
+                'id' => $id,
+                'full_name' => $name,
+                'email' => $email,
+                'role_slug' => $roleSlug,
+                'role_name' => $roleName,
+                'label' => $label,
+            ];
+        }
+
+        return $out;
+    }
+
     /** List + legacy /doa index */
     public function list(): void
     {
@@ -129,6 +165,7 @@ class DoaController extends BaseController
     {
         Auth::requireRole('admin');
         DoaEngine::ensureSchema($this->db);
+        $orgId = (int) Auth::organizationId();
         $this->view('doa/create', [
             'currentPage' => 'doa',
             'pageTitle' => 'Create DOA Rule',
@@ -138,6 +175,8 @@ class DoaController extends BaseController
             'departments' => self::DEPTS,
             'isEdit' => false,
             'ruleSetId' => null,
+            'levelUserIds' => [],
+            'userOptions' => $this->activeUserOptions($orgId),
         ]);
     }
 
@@ -155,6 +194,7 @@ class DoaController extends BaseController
         }
         $head = $rows[0];
         $levels = array_map(static fn ($r) => strtolower(trim((string)($r['role'] ?? ''))), $rows);
+        $levelUserIds = array_map(static fn ($r) => (int)($r['level_user_id'] ?? 0), $rows);
         $this->view('doa/create', [
             'currentPage' => 'doa',
             'pageTitle' => 'Edit DOA Rule',
@@ -165,6 +205,8 @@ class DoaController extends BaseController
             'isEdit' => true,
             'ruleSetId' => $ruleSet,
             'levelRoles' => $levels,
+            'levelUserIds' => $levelUserIds,
+            'userOptions' => $this->activeUserOptions($orgId),
         ]);
     }
 
@@ -222,11 +264,23 @@ class DoaController extends BaseController
         if ($conditionType === 'Normal') {
             $conditionValue = '';
         }
-        $roles = $_POST['level_roles'] ?? [];
-        if (!is_array($roles)) {
-            $roles = [];
+        $postedUserIds = $_POST['level_user_ids'] ?? [];
+        if (!is_array($postedUserIds)) {
+            $postedUserIds = [];
         }
-        $roles = array_values(array_filter(array_map(static fn ($r) => strtolower(trim((string) $r)), $roles), static fn ($r) => $r !== ''));
+        $levelUserIds = array_values(array_filter(array_map(static fn ($v) => (int)$v, $postedUserIds), static fn ($v) => $v > 0));
+        $users = $this->activeUserOptions($orgId);
+        $usersById = [];
+        foreach ($users as $u) {
+            $usersById[(int)$u['id']] = $u;
+        }
+        $roles = [];
+        foreach ($levelUserIds as $uid) {
+            $slug = strtolower(trim((string)($usersById[$uid]['role_slug'] ?? '')));
+            if ($slug !== '') {
+                $roles[] = $slug;
+            }
+        }
 
         if ($ruleName === '' || $department === '') {
             $_SESSION['flash_error'] = 'Rule name and department are required.';
@@ -244,7 +298,11 @@ class DoaController extends BaseController
             $_SESSION['flash_error'] = 'Level 1 must be Maker — work is assigned to the maker first.';
             $this->redirect($existingRuleSetId ? '/doa/edit/' . $existingRuleSetId : '/doa/create');
         }
-        foreach ($roles as $slug) {
+        if (count($roles) !== count($levelUserIds)) {
+            $_SESSION['flash_error'] = 'Each level must select a valid active user from your organization.';
+            $this->redirect($existingRuleSetId ? '/doa/edit/' . $existingRuleSetId : '/doa/create');
+        }
+        foreach ($roles as $i => $slug) {
             if ($slug === '') {
                 $_SESSION['flash_error'] = 'Each level must have a role selected.';
                 $this->redirect($existingRuleSetId ? '/doa/edit/' . $existingRuleSetId : '/doa/create');
@@ -255,6 +313,11 @@ class DoaController extends BaseController
             }
             if (!DoaEngine::roleSlugExists($this->db, $slug)) {
                 $_SESSION['flash_error'] = 'Role "' . htmlspecialchars($slug) . '" is not defined in the system. Add it under Roles first.';
+                $this->redirect($existingRuleSetId ? '/doa/edit/' . $existingRuleSetId : '/doa/create');
+            }
+            $uid = (int) ($levelUserIds[$i] ?? 0);
+            if ($uid < 1 || !isset($usersById[$uid])) {
+                $_SESSION['flash_error'] = 'Each level must select a valid active user from your organization.';
                 $this->redirect($existingRuleSetId ? '/doa/edit/' . $existingRuleSetId : '/doa/create');
             }
         }
@@ -297,9 +360,10 @@ class DoaController extends BaseController
             }
 
             $lvl = 1;
-            $ins = $this->db->prepare('INSERT INTO doa_rules (organization_id, rule_set_id, rule_name, department, condition_type, condition_value, level, role, status, delegation_notes) VALUES (?,?,?,?,?,?,?,?,?,?)');
-            foreach ($roles as $roleSlug) {
-                $ins->execute([$orgId, $ruleSetId, $ruleName, $department, $conditionType, $conditionValue !== '' ? $conditionValue : null, $lvl, $roleSlug, $status, $delegationNotes !== '' ? $delegationNotes : null]);
+            $ins = $this->db->prepare('INSERT INTO doa_rules (organization_id, rule_set_id, rule_name, department, condition_type, condition_value, level, role, level_user_id, status, delegation_notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+            foreach ($roles as $i => $roleSlug) {
+                $levelUserId = (int) ($levelUserIds[$i] ?? 0);
+                $ins->execute([$orgId, $ruleSetId, $ruleName, $department, $conditionType, $conditionValue !== '' ? $conditionValue : null, $lvl, $roleSlug, $levelUserId, $status, $delegationNotes !== '' ? $delegationNotes : null]);
                 $lvl++;
             }
             $this->db->commit();

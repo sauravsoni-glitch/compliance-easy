@@ -28,6 +28,26 @@ function Try-Post([Microsoft.PowerShell.Commands.WebRequestSession]$session, [st
     }
 }
 
+function Get-DemoUserMap() {
+    $lines = & 'C:\xampp\php\php.exe' 'C:\Users\Saurav.Soni\Desktop\compliance\scripts\inspect_demo_users.php'
+    $map = @{}
+    foreach ($line in $lines) {
+        if (-not $line) { continue }
+        $parts = $line -split '\|'
+        if ($parts.Count -lt 5) { continue }
+        $email = ''
+        if ($parts.Count -ge 1) { $email = ('' + $parts[0]).Trim().ToLowerInvariant() }
+        $id = 0
+        if ($parts.Count -ge 2) { $id = [int]('' + $parts[1]) }
+        $status = ''
+        if ($parts.Count -ge 5) { $status = ('' + $parts[4]).Trim().ToLowerInvariant() }
+        if ($email -ne '' -and $id -gt 0 -and $status -eq 'active') {
+            $map[$email] = $id
+        }
+    }
+    return $map
+}
+
 $p = Start-Process -FilePath 'C:\xampp\php\php.exe' -ArgumentList '-S', '127.0.0.1:8000', '-t', 'public', 'public/index.php' -WorkingDirectory 'C:\Users\Saurav.Soni\Desktop\compliance' -WindowStyle Hidden -PassThru
 Start-Sleep -Seconds 2
 
@@ -36,6 +56,16 @@ try {
     $maker = New-LoginSession 'maker@easyhome.com' 'maker123'
     $reviewer = New-LoginSession 'reviewer@demo.com' 'Reviewer@123'
     $approver = New-LoginSession 'approver@demo.com' 'Approver@123'
+    $userMap = Get-DemoUserMap
+    $makerId = 0
+    $reviewerId = 0
+    $approverId = 0
+    if ($userMap.ContainsKey('maker@easyhome.com')) { $makerId = [int]$userMap['maker@easyhome.com'] }
+    if ($userMap.ContainsKey('reviewer@demo.com')) { $reviewerId = [int]$userMap['reviewer@demo.com'] }
+    if ($userMap.ContainsKey('approver@demo.com')) { $approverId = [int]$userMap['approver@demo.com'] }
+    if ($makerId -lt 1 -or $reviewerId -lt 1 -or $approverId -lt 1) {
+        throw 'Could not resolve active demo user IDs for maker/reviewer/approver.'
+    }
 
     $createPage = Invoke-WebRequest -Uri "$base/compliances/create" -WebSession $admin -UseBasicParsing
     $authorityId = [regex]::Match($createPage.Content, 'name="authority_id"[\s\S]*?<option value="(\d+)"').Groups[1].Value
@@ -43,7 +73,11 @@ try {
 
     $now = Get-Date
     $title = 'Role E2E ' + $now.ToString('yyyyMMddHHmmss')
-    $createResp = Invoke-WebRequest -Uri "$base/compliances/create" -Method Post -WebSession $admin -Body @{
+    $createResp = $null
+    $createLocation = ''
+    $createBody = ''
+    try {
+        $createResp = Invoke-WebRequest -Uri "$base/compliances/create" -Method Post -WebSession $admin -Body @{
         title = $title
         authority_id = $authorityId
         circular_reference = 'ROLE-E2E'
@@ -53,22 +87,46 @@ try {
         frequency = 'monthly'
         description = 'Role-based flow'
         objective_text = 'obj'
-        expected_outcome = 'ok'
         penalty_impact = 'none'
-        owner_id = '2'
+        owner_id = $makerId
         workflow_type = 'three-level'
-        reviewer_id = '3'
-        approver_id = '4'
+        reviewer_id = $reviewerId
+        approver_id = $approverId
         evidence_required = '0'
         start_date = $now.AddDays(-2).ToString('yyyy-MM-dd')
         due_date = $now.AddDays(5).ToString('yyyy-MM-dd')
         expected_date = $now.AddDays(3).ToString('yyyy-MM-dd')
         reminder_date = $now.AddDays(1).ToString('yyyy-MM-dd')
-    } -MaximumRedirection 10 -UseBasicParsing
-
-    $createUri = $createResp.BaseResponse.ResponseUri.AbsoluteUri
-    $id = [int]([regex]::Match($createUri, '/compliance/view/(\d+)').Groups[1].Value)
-    if ($id -lt 1) { throw "Could not parse created compliance id from $createUri" }
+        } -MaximumRedirection 0 -UseBasicParsing
+    } catch {
+        if ($_.Exception.Response) {
+            $createLocation = [string]$_.Exception.Response.Headers['Location']
+            try {
+                $sr = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $createBody = $sr.ReadToEnd()
+                $sr.Close()
+            } catch {}
+        } else {
+            throw
+        }
+    }
+    $createUri = ''
+    if ($createResp -and $createResp.BaseResponse -and $createResp.BaseResponse.ResponseUri) {
+        $createUri = $createResp.BaseResponse.ResponseUri.AbsoluteUri
+        $createBody = [string]$createResp.Content
+    }
+    if (-not $createLocation -and $createUri) { $createLocation = $createUri }
+    $id = [int]([regex]::Match($createLocation, '/compliance/view/(\d+)').Groups[1].Value)
+    if ($id -lt 1) {
+        $errMsg = ''
+        $m = [regex]::Match($createBody, '<div class="alert alert-danger">([\s\S]*?)</div>')
+        if ($m.Success) {
+            $errMsg = (($m.Groups[1].Value -replace '<[^>]+>', '') -replace '\s+', ' ').Trim()
+        }
+        $safeErr = 'n/a'
+        if ($errMsg -ne '') { $safeErr = $errMsg }
+        throw ("Could not parse created compliance id from {0}; error={1}" -f $createLocation, $safeErr)
+    }
 
     $failures = New-Object System.Collections.Generic.List[string]
 

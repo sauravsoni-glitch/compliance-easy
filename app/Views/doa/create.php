@@ -4,16 +4,9 @@ $edit = !empty($isEdit);
 $basePath = $basePath ?? '';
 $ruleSetId = $ruleSetId ?? null;
 $levelRoles = $levelRoles ?? ['maker', 'reviewer', 'approver'];
+$levelUserIds = $levelUserIds ?? [];
 $action = $edit ? ($basePath . '/doa/update/' . (int)$ruleSetId) : ($basePath . '/doa/store');
-$roleOptions = [
-    'maker' => 'Maker',
-    'reviewer' => 'Reviewer',
-    'senior_reviewer' => 'Senior Reviewer',
-    'approver' => 'Approver',
-    'compliance_head' => 'Compliance Head',
-    'management' => 'Management',
-    'admin' => 'Admin',
-];
+$userOptions = $userOptions ?? [];
 $delegationNotes = (string)($r['delegation_notes'] ?? '');
 ?>
 <div class="doa-page">
@@ -65,7 +58,7 @@ $delegationNotes = (string)($r['delegation_notes'] ?? '');
             </div>
 
             <h3 class="card-title mt-3">Approval levels</h3>
-            <p class="text-muted text-sm">Use level sequence per department (L1, L2, L3...). L1 must be Maker.</p>
+            <p class="text-muted text-sm">Use level sequence per department (L1, L2, L3...). Select only system users. L1 user must have Maker role.</p>
             <div id="doa-levels" class="doa-level-builder"></div>
             <button type="button" class="btn btn-secondary btn-sm mt-2" id="doa-add-level"><i class="fas fa-plus"></i> Add level</button>
 
@@ -92,22 +85,38 @@ $delegationNotes = (string)($r['delegation_notes'] ?? '');
     var condType = document.getElementById('doa-cond-type');
     var condVal = document.getElementById('doa-cond-value');
     var hint = document.getElementById('doa-cond-hint');
-    var roleOptions = <?= json_encode($roleOptions, JSON_UNESCAPED_UNICODE) ?>;
-    var initial = <?= json_encode(array_values($levelRoles), JSON_UNESCAPED_UNICODE) ?>;
+    var userOptions = <?= json_encode($userOptions, JSON_UNESCAPED_UNICODE) ?>;
+    var initialUserIds = <?= json_encode(array_values($levelUserIds), JSON_UNESCAPED_UNICODE) ?>;
+    var initialRoles = <?= json_encode(array_values($levelRoles), JSON_UNESCAPED_UNICODE) ?>;
 
-    function optHtml(selected) {
-        var h = '<option value="">Select role</option>';
-        for (var k in roleOptions) {
-            if (!roleOptions.hasOwnProperty(k)) continue;
-            h += '<option value="' + k + '"' + (k === selected ? ' selected' : '') + '>' + roleOptions[k] + '</option>';
+    function userLabel(u) {
+        return (u.label || ((u.full_name || 'User') + ' (ID: ' + u.id + ')'));
+    }
+    function optHtml(selectedId) {
+        var h = '<option value="">Select user</option>';
+        for (var i = 0; i < userOptions.length; i++) {
+            var u = userOptions[i];
+            var uid = parseInt(u.id, 10);
+            h += '<option value="' + uid + '"' + (uid === selectedId ? ' selected' : '') + '>' + userLabel(u) + '</option>';
         }
         return h;
     }
-    function rowHtml(idx, val) {
+    function roleByUserId(userId) {
+        for (var i = 0; i < userOptions.length; i++) {
+            var u = userOptions[i];
+            if (parseInt(u.id, 10) === parseInt(userId, 10)) {
+                var slug = (u.role_slug || '').toLowerCase();
+                return slug ? slug.replace(/_/g, ' ') : 'unknown';
+            }
+        }
+        return 'unknown';
+    }
+    function rowHtml(idx, selectedUserId) {
+        var roleTxt = selectedUserId ? roleByUserId(selectedUserId) : 'select a user';
         return '<div class="doa-level-row doa-level-row-form mb-2" data-idx="' + idx + '">' +
-            '<div><span class="doa-lvl">L' + idx + '</span><span class="doa-role">Role</span></div>' +
+            '<div><span class="doa-lvl">L' + idx + '</span><span class="doa-role">User</span><div class="text-muted text-sm doa-role-hint">Role: <strong>' + roleTxt + '</strong></div></div>' +
             '<div class="doa-level-actions">' +
-            '<select name="level_roles[]" class="form-control" required>' + optHtml(val || '') + '</select>' +
+            '<select name="level_user_ids[]" class="form-control doa-user-select" required>' + optHtml(selectedUserId || 0) + '</select>' +
             '<button type="button" class="btn btn-sm btn-outline text-danger doa-rm-level">Remove</button>' +
             '</div></div>';
     }
@@ -124,10 +133,10 @@ $delegationNotes = (string)($r['delegation_notes'] ?? '');
             else if (t === 'Priority') { hint.textContent = 'Use Urgent for high priority items.'; condVal.placeholder = 'Urgent'; }
         }
     }
-    function addRow(val) {
+    function addRow(userId) {
         var n = levelsEl.querySelectorAll('.doa-level-row').length + 1;
         var wrap = document.createElement('div');
-        wrap.innerHTML = rowHtml(n, val || '');
+        wrap.innerHTML = rowHtml(n, parseInt(userId || 0, 10));
         levelsEl.appendChild(wrap.firstElementChild);
     }
     levelsEl.addEventListener('click', function(e) {
@@ -141,13 +150,25 @@ $delegationNotes = (string)($r['delegation_notes'] ?? '');
             });
         }
     });
+    levelsEl.addEventListener('change', function(e) {
+        if (!e.target.classList.contains('doa-user-select')) return;
+        var row = e.target.closest('.doa-level-row');
+        if (!row) return;
+        var hintEl = row.querySelector('.doa-role-hint strong');
+        if (hintEl) {
+            hintEl.textContent = roleByUserId(e.target.value);
+        }
+    });
     addBtn.addEventListener('click', function(){ addRow(''); });
     condType.addEventListener('change', syncCondUi);
     syncCondUi();
-    if (initial && initial.length) {
-        initial.forEach(function(v){ addRow(v); });
+    if (initialUserIds && initialUserIds.length) {
+        initialUserIds.forEach(function(v){ addRow(v); });
+    } else if (initialRoles && initialRoles.length) {
+        // Backward compatibility for older rules without explicit user IDs.
+        for (var i = 0; i < initialRoles.length; i++) { addRow(0); }
     } else {
-        addRow('maker'); addRow('reviewer'); addRow('approver');
+        addRow(0); addRow(0); addRow(0);
     }
 })();
 </script>

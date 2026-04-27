@@ -270,6 +270,49 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                 <span class="st-slider"></span>
             </label>
         </div>
+        <div class="form-row-2 st-pre-grid">
+            <div class="form-group">
+                <label class="form-label">Daily Run Time</label>
+                <?php
+                $escTime = (string) ($escalation['daily_time'] ?? '09:00');
+                $escHour12 = 9;
+                $escMinute = 0;
+                $escAmPm = 'AM';
+                $escMeridiem = '09:00 AM';
+                if (preg_match('/^\d{2}:\d{2}$/', $escTime)) {
+                    $h = (int) substr($escTime, 0, 2);
+                    $m = substr($escTime, 3, 2);
+                    $suffix = $h >= 12 ? 'PM' : 'AM';
+                    $h12 = $h % 12;
+                    if ($h12 === 0) {
+                        $h12 = 12;
+                    }
+                    $escHour12 = $h12;
+                    $escMinute = (int) $m;
+                    $escAmPm = $suffix;
+                    $escMeridiem = sprintf('%02d:%s %s', $h12, $m, $suffix);
+                }
+                ?>
+                <div class="st-input-suffix">
+                    <select name="esc_daily_hour" class="form-control" style="max-width:90px;">
+                        <?php for ($hh = 1; $hh <= 12; $hh++): ?>
+                        <option value="<?= $hh ?>" <?= $escHour12 === $hh ? 'selected' : '' ?>><?= sprintf('%02d', $hh) ?></option>
+                        <?php endfor; ?>
+                    </select>
+                    <select name="esc_daily_minute" class="form-control" style="max-width:90px;">
+                        <?php for ($mm = 0; $mm <= 59; $mm++): ?>
+                        <option value="<?= $mm ?>" <?= $escMinute === $mm ? 'selected' : '' ?>><?= sprintf('%02d', $mm) ?></option>
+                        <?php endfor; ?>
+                    </select>
+                    <select name="esc_daily_ampm" class="form-control" style="max-width:90px;">
+                        <option value="AM" <?= $escAmPm === 'AM' ? 'selected' : '' ?>>AM</option>
+                        <option value="PM" <?= $escAmPm === 'PM' ? 'selected' : '' ?>>PM</option>
+                    </select>
+                </div>
+                <input type="hidden" name="esc_daily_time" value="<?= htmlspecialchars($escTime) ?>">
+                <p class="text-muted text-sm mb-0">Escalation mails are sent only at this configured time (AM/PM): <strong><?= htmlspecialchars($escMeridiem) ?></strong>.</p>
+            </div>
+        </div>
         <h4 class="st-subhead mt-3">Department Escalation Configuration</h4>
         <?php
         // Show every department's level editor — the "Escalate To" dropdown of real users
@@ -346,7 +389,40 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         <div class="form-row-2 st-pre-grid">
             <div class="form-group">
                 <label class="form-label">Daily Run Time</label>
-                <input type="time" name="daily_time" class="form-control" value="<?= htmlspecialchars($preDue['daily_time'] ?? '09:00') ?>">
+                <?php
+                $preTime = (string) ($preDue['daily_time'] ?? '09:00');
+                $preHour12 = 9;
+                $preMinute = 0;
+                $preAmPm = 'AM';
+                if (preg_match('/^\d{2}:\d{2}$/', $preTime)) {
+                    $ph = (int) substr($preTime, 0, 2);
+                    $pm = (int) substr($preTime, 3, 2);
+                    $preAmPm = $ph >= 12 ? 'PM' : 'AM';
+                    $p12 = $ph % 12;
+                    if ($p12 === 0) {
+                        $p12 = 12;
+                    }
+                    $preHour12 = $p12;
+                    $preMinute = $pm;
+                }
+                ?>
+                <div class="st-input-suffix">
+                    <select name="pre_daily_hour" class="form-control" style="max-width:90px;">
+                        <?php for ($hh = 1; $hh <= 12; $hh++): ?>
+                        <option value="<?= $hh ?>" <?= $preHour12 === $hh ? 'selected' : '' ?>><?= sprintf('%02d', $hh) ?></option>
+                        <?php endfor; ?>
+                    </select>
+                    <select name="pre_daily_minute" class="form-control" style="max-width:90px;">
+                        <?php for ($mm = 0; $mm <= 59; $mm++): ?>
+                        <option value="<?= $mm ?>" <?= $preMinute === $mm ? 'selected' : '' ?>><?= sprintf('%02d', $mm) ?></option>
+                        <?php endfor; ?>
+                    </select>
+                    <select name="pre_daily_ampm" class="form-control" style="max-width:90px;">
+                        <option value="AM" <?= $preAmPm === 'AM' ? 'selected' : '' ?>>AM</option>
+                        <option value="PM" <?= $preAmPm === 'PM' ? 'selected' : '' ?>>PM</option>
+                    </select>
+                </div>
+                <input type="hidden" name="daily_time" value="<?= htmlspecialchars($preTime) ?>">
             </div>
             <div class="form-group">
                 <label class="form-label">First Reminder</label>
