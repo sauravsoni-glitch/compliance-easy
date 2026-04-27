@@ -40,10 +40,6 @@ if ($showPostLoginOpening) {
                         <i class="fas fa-th-large"></i>
                         <span>Dashboard</span>
                     </a>
-                    <a href="<?= $basePath ?? '' ?>/calendar" class="nav-item <?= ($currentPage ?? '') === 'compliance-calendar' ? 'active' : '' ?>">
-                        <i class="fas fa-calendar-alt"></i>
-                        <span>Calendar</span>
-                    </a>
                     <a href="<?= $basePath ?? '' ?>/compliance" class="nav-item <?= ($currentPage ?? '') === 'compliance-items' ? 'active' : '' ?>">
                         <i class="fas fa-list-alt"></i>
                         <span>Compliance Items</span>

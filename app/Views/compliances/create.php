@@ -88,15 +88,9 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 <label class="form-label">Description</label>
                 <textarea name="description" class="form-control" placeholder="Enter compliance description" rows="3"><?= htmlspecialchars($_POST['description'] ?? '') ?></textarea>
             </div>
-            <div class="form-row-2">
-                <div class="form-group">
-                    <label class="form-label">Objective / Description</label>
-                    <textarea name="objective_text" class="form-control" rows="2" placeholder="What is the objective of this compliance?"><?= htmlspecialchars($_POST['objective_text'] ?? '') ?></textarea>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Expected Outcome</label>
-                    <textarea name="expected_outcome" class="form-control" rows="2" placeholder="What does success look like?"><?= htmlspecialchars($_POST['expected_outcome'] ?? '') ?></textarea>
-                </div>
+            <div class="form-group">
+                <label class="form-label">Objective / Description</label>
+                <textarea name="objective_text" class="form-control" rows="2" placeholder="What is the objective of this compliance?"><?= htmlspecialchars($_POST['objective_text'] ?? '') ?></textarea>
             </div>
             <div class="form-group">
                 <label class="form-label">Penalty / Impact</label>
