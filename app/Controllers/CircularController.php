@@ -502,9 +502,21 @@ class CircularController extends BaseController
         if (!$stmt->fetchColumn()) {
             $this->redirect('/circular-intelligence');
         }
-        $reviewWorkflow = trim($_POST['review_workflow'] ?? 'two-level');
-        $reviewerId = $reviewWorkflow === 'three-level' ? ((int) ($_POST['review_reviewer_id'] ?? 0) ?: null) : null;
-        $approverId = (int) ($_POST['review_approver_id'] ?? 0) ?: null;
+        $reviewDept = trim($_POST['review_department'] ?? '');
+        $reviewFreq = preg_replace('/[^a-z0-9\-]/', '', strtolower($_POST['review_frequency'] ?? 'monthly')) ?: 'monthly';
+        $matrix = $this->matrixWorkflowUsers($orgId, $reviewDept, $reviewFreq);
+        if (!$matrix) {
+            $_SESSION['flash_error'] = 'Authority Matrix mapping is required for the selected department before saving review.';
+            $this->redirect('/circular-intelligence/view/' . $id);
+        }
+        [$makerId, $reviewerIdRaw, $approverIdRaw, $matrixWorkflow] = $matrix;
+        $reviewWorkflow = $matrixWorkflow === 'two-level' ? 'two-level' : 'three-level';
+        $reviewerId = $reviewWorkflow === 'three-level' ? ($reviewerIdRaw ?: null) : null;
+        $approverId = $approverIdRaw ?: null;
+        if (!$makerId || !$approverId || ($reviewWorkflow === 'three-level' && !$reviewerId)) {
+            $_SESSION['flash_error'] = 'Authority Matrix for this department must have Maker/Approver (and Reviewer for three-level).';
+            $this->redirect('/circular-intelligence/view/' . $id);
+        }
 
         $this->db->prepare('UPDATE circulars SET
             review_department = ?, review_secondary_dept = ?, review_owner_id = ?,
@@ -512,13 +524,13 @@ class CircularController extends BaseController
             review_frequency = ?, review_risk = ?, review_priority = ?, review_due_date = ?, review_expected_date = ?,
             review_penalty = ?, review_remarks = ?, status = ?
             WHERE id = ? AND organization_id = ?')->execute([
-            trim($_POST['review_department'] ?? ''),
+            $reviewDept,
             trim($_POST['review_secondary_dept'] ?? '') ?: null,
-            (int) ($_POST['review_owner_id'] ?? 0) ?: null,
+            $makerId,
             $reviewerId,
             $approverId,
             $reviewWorkflow,
-            preg_replace('/[^a-z0-9\-]/', '', strtolower($_POST['review_frequency'] ?? 'monthly')) ?: 'monthly',
+            $reviewFreq,
             $_POST['review_risk'] ?? 'medium',
             $_POST['review_priority'] ?? 'medium',
             $_POST['review_due_date'] ?: null,
@@ -548,7 +560,6 @@ class CircularController extends BaseController
 
         $ext = $this->extendedSchema();
         $dept = $ext ? trim($c['review_department'] ?: $c['ai_department'] ?? '') : trim($c['ai_department'] ?? '');
-        $ownerId = $ext ? (int) ($c['review_owner_id'] ?: 0) : 0;
         $risk = $ext ? ($c['review_risk'] ?: $c['ai_risk_level']) : $c['ai_risk_level'];
         $pri = $ext ? ($c['review_priority'] ?: $c['ai_priority']) : $c['ai_priority'];
         $freq = $ext ? ($c['review_frequency'] ?: $c['ai_frequency']) : $c['ai_frequency'];
@@ -556,26 +567,6 @@ class CircularController extends BaseController
         $exp = $ext && !empty($c['review_expected_date']) ? $c['review_expected_date'] : null;
         $penalty = $ext ? ($c['review_penalty'] ?: $c['ai_penalty']) : $c['ai_penalty'];
         $workflow = $ext ? ($c['review_workflow'] ?: 'two-level') : 'two-level';
-
-        // Resolve owner: review form → AI name match → circular uploader → first maker in org
-        if ($ownerId < 1 && !empty($c['ai_owner'])) {
-            $stmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND full_name = ? LIMIT 1');
-            $stmt->execute([$orgId, $c['ai_owner']]);
-            $ownerId = (int) ($stmt->fetchColumn() ?: 0);
-        }
-        if ($ownerId < 1 && !empty($c['uploaded_by'])) {
-            // Use the person who uploaded the circular as the maker
-            $ownerId = (int) $c['uploaded_by'];
-        }
-        if ($ownerId < 1) {
-            $stmt = $this->db->prepare('SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND r.slug = ? LIMIT 1');
-            $stmt->execute([$orgId, 'maker']);
-            $ownerId = (int) $stmt->fetchColumn();
-        }
-        if ($ownerId < 1) {
-            // Last resort: current admin
-            $ownerId = Auth::id();
-        }
 
         // Use authority name as fallback dept if AI did not detect one
         if ($dept === '') {
@@ -604,22 +595,15 @@ class CircularController extends BaseController
         $num = $stmt->fetchColumn();
         $cmpCode = 'CMP-' . str_pad((string) $num, 3, '0', STR_PAD_LEFT);
 
-        // Use admin-selected reviewer/approver from the review form first
-        $reviewerId = $ext ? ((int) ($c['review_reviewer_id'] ?? 0) ?: null) : null;
-        $approverId = $ext ? ((int) ($c['review_approver_id'] ?? 0) ?: null) : null;
-
-        // Fall back to authority matrix if not set in the review form
-        if (!$approverId) {
-            $matrix = $this->matrixReviewerApprover($orgId, $dept, $freq);
-            if ($matrix) {
-                [$matrixReviewer, $matrixApprover, $matrixWorkflow] = $matrix;
-                if (!$reviewerId) $reviewerId = $matrixReviewer;
-                if (!$approverId) $approverId = $matrixApprover;
-                if (!empty($matrixWorkflow) && !$ext) {
-                    $workflow = $matrixWorkflow;
-                }
-            }
+        $matrix = $this->matrixWorkflowUsers($orgId, $dept, $freq);
+        if (!$matrix) {
+            $_SESSION['flash_error'] = 'Authority Matrix mapping is required for the selected department before approval.';
+            $this->redirect('/circular-intelligence/view/' . $id);
         }
+        [$ownerId, $reviewerIdRaw, $approverIdRaw, $matrixWorkflow] = $matrix;
+        $workflow = $matrixWorkflow === 'two-level' ? 'two-level' : 'three-level';
+        $reviewerId = $workflow === 'three-level' ? ($reviewerIdRaw ?: null) : null;
+        $approverId = $approverIdRaw ?: null;
 
         // For two-level workflow, reviewer is not used
         if ($workflow === 'two-level') {
@@ -628,15 +612,15 @@ class CircularController extends BaseController
 
         // Validate required assignments before creating compliance
         if ($ownerId < 1) {
-            $_SESSION['flash_error'] = 'Please save the review and select an Owner (Maker) before approving.';
+            $_SESSION['flash_error'] = 'Authority Matrix is missing Maker for this department.';
             $this->redirect('/circular-intelligence/view/' . $id);
         }
         if (!$approverId) {
-            $_SESSION['flash_error'] = 'Please save the review and select an Approver before approving.';
+            $_SESSION['flash_error'] = 'Authority Matrix is missing Approver for this department.';
             $this->redirect('/circular-intelligence/view/' . $id);
         }
         if ($workflow === 'three-level' && !$reviewerId) {
-            $_SESSION['flash_error'] = 'Three-level workflow requires a Reviewer. Please save the review and select a Reviewer.';
+            $_SESSION['flash_error'] = 'Authority Matrix is missing Reviewer for three-level workflow.';
             $this->redirect('/circular-intelligence/view/' . $id);
         }
 
@@ -676,25 +660,26 @@ class CircularController extends BaseController
         $this->redirect('/circular-intelligence/view/' . $id);
     }
 
-    private function matrixReviewerApprover(int $orgId, string $department, string $frequency): ?array
+    /** @return array{0:int,1:int,2:int,3:string}|null */
+    private function matrixWorkflowUsers(int $orgId, string $department, string $frequency): ?array
     {
         try {
-            $stmt = $this->db->prepare('SELECT reviewer_id, approver_id, workflow_type FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency = ? LIMIT 1');
+            $stmt = $this->db->prepare("SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency = ? AND status = 'active' LIMIT 1");
             $stmt->execute([$orgId, $department, $frequency]);
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
             if (!$row) {
-                $stmt = $this->db->prepare('SELECT reviewer_id, approver_id, workflow_type FROM authority_matrix WHERE organization_id = ? AND department = ? LIMIT 1');
+                $stmt = $this->db->prepare("SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
                 $stmt->execute([$orgId, $department]);
                 $row = $stmt->fetch(\PDO::FETCH_ASSOC);
             }
             if ($row) {
-                $wl = $row['workflow_type'] ?? '';
+                $wl = (string)($row['workflow_level'] ?? '');
                 if (in_array($wl, ['Single-Level', 'two-level', 'Two-Level'], true)) {
                     $wl = 'two-level';
                 } elseif ($wl !== '') {
                     $wl = 'three-level';
                 }
-                return [(int) $row['reviewer_id'], (int) $row['approver_id'], $wl];
+                return [(int) $row['maker_id'], (int) $row['reviewer_id'], (int) $row['approver_id'], $wl];
             }
         } catch (\Throwable $e) {
         }

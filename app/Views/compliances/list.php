@@ -11,6 +11,7 @@ $isMaker = !empty($auth['isMaker']);
 $isReviewer = !empty($auth['isReviewer']);
 $isApprover = !empty($auth['isApprover']);
 $canCreate = !empty($auth['canCreate']);
+$today = date('Y-m-d');
 
 /**
  * Primary + optional View for compliance list (role + status).
@@ -164,7 +165,7 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
             <?php endif; ?>
             <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label">Due Date From</label>
-                <input type="date" name="from" class="form-control" value="<?= htmlspecialchars($filters['from'] ?? '') ?>">
+                <input type="date" name="from" class="form-control" value="<?= htmlspecialchars($filters['from'] ?? '') ?>" max="<?= htmlspecialchars($today) ?>">
             </div>
             <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label">Due Date To</label>

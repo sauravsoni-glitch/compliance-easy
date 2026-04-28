@@ -59,6 +59,34 @@ $approverDone = in_array($st, ['completed', 'approved', 'rejected'], true);
 $makerActive = in_array($st, ['pending', 'draft', 'rework'], true);
 $reviewerActive = !$isTwoLevel && $st === 'submitted';
 $approverActive = $st === 'under_review' || ($isTwoLevel && $st === 'submitted');
+$makerName = trim((string)($c['owner_name'] ?? 'Maker'));
+$reviewerName = trim((string)($c['reviewer_name'] ?? 'Reviewer'));
+$approverName = trim((string)($c['approver_name'] ?? 'Approver'));
+$submissionRows = $submissionsHistory ?? [];
+$historyRows = $historyTimeline ?? [];
+$latestSubmission = !empty($submissionRows) ? $submissionRows[0] : null;
+$latestDocLabel = !empty($latestSubmission['document_name']) ? (string)$latestSubmission['document_name'] : 'No document uploaded yet';
+$latestCheckerRemark = trim((string)($latestSubmission['checker_remark'] ?? ''));
+$latestMakerCompletion = !empty($latestSubmission['maker_completion_date']) ? date('j M Y', strtotime((string)$latestSubmission['maker_completion_date'])) : '—';
+$latestActionByRole = ['maker' => '', 'reviewer' => '', 'approver' => ''];
+foreach ($historyRows as $hrow) {
+    $act = strtolower((string)($hrow['action'] ?? ''));
+    $desc = trim((string)($hrow['description'] ?? ''));
+    $cmt = trim((string)($hrow['comment'] ?? ''));
+    $line = trim(($desc !== '' ? $desc : ucfirst($act)) . ($cmt !== '' ? ' — ' . $cmt : ''));
+    if ($line === '') {
+        continue;
+    }
+    if ($latestActionByRole['maker'] === '' && (strpos($act, 'submit') !== false || strpos($act, 'document') !== false || strpos($act, 'rework requested') !== false)) {
+        $latestActionByRole['maker'] = $line;
+    }
+    if ($latestActionByRole['reviewer'] === '' && (strpos($act, 'review') !== false || strpos($act, 'forward') !== false || strpos($act, 'rework') !== false)) {
+        $latestActionByRole['reviewer'] = $line;
+    }
+    if ($latestActionByRole['approver'] === '' && (strpos($act, 'approved') !== false || strpos($act, 'rejected') !== false || strpos($act, 'final') !== false)) {
+        $latestActionByRole['approver'] = $line;
+    }
+}
 ?>
 <div class="compliance-detail-shell">
     <div class="compliance-detail-top">
@@ -171,19 +199,19 @@ $approverActive = $st === 'under_review' || ($isTwoLevel && $st === 'submitted')
         <div class="workflow-stage-strip" aria-label="Workflow stage">
             <div class="wss-step <?= $makerDone ? 'wss-done' : ($makerActive ? 'wss-active' : '') ?>">
                 <span class="wss-icon"><?= $makerDone ? '✓' : ($makerActive ? '●' : '○') ?></span>
-                <span><?= $makerDone ? 'Maker completed' : ($makerActive ? 'Maker — action required' : 'Maker') ?></span>
+                <span><?= $makerDone ? 'Maker completed' : ($makerActive ? 'Maker — action required' : 'Maker') ?> · <?= htmlspecialchars($makerName) ?></span>
             </div>
             <?php if (!$isTwoLevel): ?>
             <span class="wss-arrow">→</span>
             <div class="wss-step <?= $reviewerDone ? 'wss-done' : ($reviewerActive ? 'wss-active' : '') ?>">
                 <span class="wss-icon"><?= $reviewerDone ? '✓' : ($reviewerActive ? '●' : '○') ?></span>
-                <span><?= $reviewerActive ? 'Reviewer — pending' : ($reviewerDone ? 'Reviewer completed' : 'Reviewer pending') ?></span>
+                <span><?= $reviewerActive ? 'Reviewer — pending' : ($reviewerDone ? 'Reviewer completed' : 'Reviewer pending') ?> · <?= htmlspecialchars($reviewerName !== '' ? $reviewerName : 'Unassigned') ?></span>
             </div>
             <?php endif; ?>
             <span class="wss-arrow">→</span>
             <div class="wss-step <?= $st === 'rejected' ? 'wss-rejected' : ($approverDone ? 'wss-done' : ($approverActive ? 'wss-active' : '')) ?>">
                 <span class="wss-icon"><?= $st === 'rejected' ? '✗' : ($approverDone ? '✓' : ($approverActive ? '●' : '○')) ?></span>
-                <span><?= $st === 'rejected' ? 'Rejected' : ($approverDone ? 'Approver completed' : ($approverActive ? 'Approver — pending' : 'Approver pending')) ?></span>
+                <span><?= $st === 'rejected' ? 'Rejected' : ($approverDone ? 'Approver completed' : ($approverActive ? 'Approver — pending' : 'Approver pending')) ?> · <?= htmlspecialchars($approverName) ?></span>
             </div>
         </div>
     </div>
@@ -385,6 +413,36 @@ if ($isTwoLevel) {
 }
 $doneC = count(array_filter($steps, function ($x) { return $x['done']; }));
 $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
+$stepsByRole = [
+    'maker' => [
+        'user' => $makerName,
+        'doc' => $latestDocLabel,
+        'comment' => $latestActionByRole['maker'] !== '' ? $latestActionByRole['maker'] : ('Completion date: ' . $latestMakerCompletion),
+    ],
+    'reviewer' => [
+        'user' => $reviewerName !== '' ? $reviewerName : 'Unassigned',
+        'doc' => $latestDocLabel,
+        'comment' => $latestActionByRole['reviewer'] !== '' ? $latestActionByRole['reviewer'] : ($latestCheckerRemark !== '' ? $latestCheckerRemark : 'No reviewer action yet'),
+    ],
+    'approver' => [
+        'user' => $approverName,
+        'doc' => $latestDocLabel,
+        'comment' => $latestActionByRole['approver'] !== '' ? $latestActionByRole['approver'] : 'No approver action yet',
+    ],
+];
+$processFlow = [];
+if ($isTwoLevel) {
+    $processFlow = [
+        ['stage' => 'Stage 1', 'role' => 'Maker', 'status' => ($makerDone ? 'Completed' : ($makerActive ? 'In Progress' : 'Pending')), 'meta' => $stepsByRole['maker']],
+        ['stage' => 'Stage 2', 'role' => 'Approver', 'status' => ($approverDone ? ($st === 'rejected' ? 'Rejected' : 'Completed') : ($approverActive ? 'In Progress' : 'Pending')), 'meta' => $stepsByRole['approver']],
+    ];
+} else {
+    $processFlow = [
+        ['stage' => 'Stage 1', 'role' => 'Maker', 'status' => ($makerDone ? 'Completed' : ($makerActive ? 'In Progress' : 'Pending')), 'meta' => $stepsByRole['maker']],
+        ['stage' => 'Stage 2', 'role' => 'Reviewer', 'status' => ($reviewerDone ? 'Completed' : ($reviewerActive ? 'In Progress' : 'Pending')), 'meta' => $stepsByRole['reviewer']],
+        ['stage' => 'Stage 3', 'role' => 'Approver', 'status' => ($approverDone ? ($st === 'rejected' ? 'Rejected' : 'Completed') : ($approverActive ? 'In Progress' : 'Pending')), 'meta' => $stepsByRole['approver']],
+    ];
+}
 ?>
 <div class="card">
     <h3 class="card-title">Workflow progress</h3>
@@ -395,16 +453,58 @@ $pct = count($steps) ? round(100 * $doneC / count($steps)) : 0;
     <div class="checklist-progress-bar"><div class="checklist-progress-fill" style="width:<?= $pct ?>%"></div></div>
     <ul class="process-step-list">
         <?php foreach ($steps as $s): ?>
+        <?php $rk = strtolower((string)$s['n']); $meta = $stepsByRole[$rk] ?? ['user' => '—', 'doc' => '—', 'comment' => '']; ?>
         <li class="process-step <?= $s['done'] ? 'step-done' : ($s['cur'] ? 'step-current' : '') ?>">
             <span class="step-icon"><i class="fas fa-<?= $s['done'] ? 'check-circle' : ($s['cur'] ? 'circle-notch' : 'circle') ?>"></i></span>
             <div class="step-body">
                 <strong><?= htmlspecialchars($s['n']) ?></strong>
                 <span class="text-muted"><?= htmlspecialchars($s['d']) ?></span>
                 <span class="badge <?= $s['done'] ? 'badge-success' : ($s['cur'] ? 'badge-info' : 'badge-secondary') ?>"><?= $s['done'] ? 'Done' : ($s['cur'] ? 'Active' : 'Waiting') ?></span>
+                <div class="text-sm text-muted mt-1"><strong>User:</strong> <?= htmlspecialchars((string)$meta['user']) ?></div>
+                <div class="text-sm text-muted"><strong>Document:</strong> <?= htmlspecialchars((string)$meta['doc']) ?></div>
+                <div class="text-sm text-muted"><strong>Activity:</strong> <?= htmlspecialchars((string)$meta['comment']) ?></div>
             </div>
         </li>
         <?php endforeach; ?>
     </ul>
+</div>
+<div class="card">
+    <h3 class="card-title">Process flow</h3>
+    <p class="text-muted text-sm mb-2">Sequential handoff view with who did what, with document and comment context.</p>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Stage</th>
+                    <th>Role</th>
+                    <th>User</th>
+                    <th>Status</th>
+                    <th>Document</th>
+                    <th>Activity / Comment</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($processFlow as $pf): ?>
+                <?php
+                $stLabel = strtolower((string)$pf['status']);
+                $stClass = 'badge-secondary';
+                if ($stLabel === 'completed') $stClass = 'badge-success';
+                elseif ($stLabel === 'in progress') $stClass = 'badge-info';
+                elseif ($stLabel === 'rejected') $stClass = 'badge-danger';
+                $meta = $pf['meta'] ?? ['user' => '—', 'doc' => '—', 'comment' => ''];
+                ?>
+                <tr>
+                    <td><?= htmlspecialchars((string)$pf['stage']) ?></td>
+                    <td><?= htmlspecialchars((string)$pf['role']) ?></td>
+                    <td><?= htmlspecialchars((string)($meta['user'] ?? '—')) ?></td>
+                    <td><span class="badge <?= $stClass ?>"><?= htmlspecialchars((string)$pf['status']) ?></span></td>
+                    <td><?= htmlspecialchars((string)($meta['doc'] ?? '—')) ?></td>
+                    <td><?= htmlspecialchars((string)($meta['comment'] ?? '—')) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
 </div>
 <?php if (in_array($st, ['pending', 'draft', 'rework'], true) && $canMakerAct): ?>
 <div class="card workflow-action-card">

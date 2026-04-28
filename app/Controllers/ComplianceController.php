@@ -4,29 +4,29 @@ namespace App\Controllers;
 use App\Core\Auth;
 use App\Core\BaseController;
 use App\Core\ComplianceCreatedMailReport;
-use App\Core\DoaEngine;
 use App\Core\Mailer;
 
 class ComplianceController extends BaseController
 {
-    private function logDoaCompliance(int $complianceId, int $level, string $roleSlug, string $action, ?string $comment): void
+    private function normalizeIsoDate(?string $value): ?string
     {
-        DoaEngine::ensureSchema($this->db);
-        DoaEngine::log($this->db, (int) Auth::organizationId(), $complianceId, $level, $roleSlug, Auth::id(), $action, $comment);
-    }
-
-    private function doaRoleAtLevel(int $orgId, int $ruleSetId, int $level): string
-    {
-        try {
-            $st = $this->db->prepare('SELECT role FROM doa_rules WHERE organization_id = ? AND rule_set_id = ? AND level = ? LIMIT 1');
-            $st->execute([$orgId, $ruleSetId, $level]);
-            $r = strtolower(trim((string) $st->fetchColumn()));
-
-            return $r !== '' ? $r : 'approver';
-        } catch (\Throwable $e) {
-            return 'approver';
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
         }
+        $dt = \DateTime::createFromFormat('Y-m-d', $value);
+        if (!$dt || $dt->format('Y-m-d') !== $value) {
+            return null;
+        }
+
+        return $value;
     }
+
+    private function isFutureIsoDate(string $value): bool
+    {
+        return strtotime($value . ' 00:00:00') > strtotime(date('Y-m-d') . ' 00:00:00');
+    }
+
 
     /**
      * Send compliance notifications to maker/reviewer/approver assignees.
@@ -384,24 +384,25 @@ class ComplianceController extends BaseController
         return $rows;
     }
 
-    /** @return array{0:int,1:int,2:string} reviewer_id, approver_id, workflow_level */
-    private function matrixReviewerApprover(int $orgId, string $department, string $frequency): array
+    /** @return array{0:int,1:int,2:int,3:string} maker_id, reviewer_id, approver_id, workflow_level */
+    private function matrixWorkflowUsers(int $orgId, string $department, string $frequency): array
     {
-        $stmt = $this->db->prepare("SELECT reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
+        $stmt = $this->db->prepare("SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
         $stmt->execute([$orgId, $department]);
         $r = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($r && (!empty($r['reviewer_id']) || !empty($r['approver_id']))) {
-            return [(int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0), (string)($r['workflow_level'] ?? '')];
+        if ($r && (!empty($r['maker_id']) || !empty($r['reviewer_id']) || !empty($r['approver_id']))) {
+            return [(int)($r['maker_id'] ?? 0), (int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0), (string)($r['workflow_level'] ?? '')];
         }
         $map = ['one-time' => 'One-time', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly', 'annual' => 'Annual', 'yearly' => 'Yearly'];
         $freqLabel = $map[$frequency] ?? ucfirst($frequency);
-        $stmt = $this->db->prepare("SELECT reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency LIKE ? AND status = 'active' LIMIT 1");
+        $stmt = $this->db->prepare("SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency LIKE ? AND status = 'active' LIMIT 1");
         $stmt->execute([$orgId, $department, '%' . $freqLabel . '%']);
         $r = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($r) {
-            return [(int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0), (string)($r['workflow_level'] ?? '')];
+            return [(int)($r['maker_id'] ?? 0), (int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0), (string)($r['workflow_level'] ?? '')];
         }
-        return [0, 0, ''];
+
+        return [0, 0, 0, ''];
     }
 
     /** JSON endpoint: return authority matrix data for a department (used by create form JS) */
@@ -436,6 +437,8 @@ class ComplianceController extends BaseController
         $this->json([
             'found'          => true,
             'workflow'       => $wl,
+            'maker_id'       => (int)($r['maker_id'] ?? 0),
+            'maker_name'     => $r['maker_name'] ?? '',
             'reviewer_id'    => (int)($r['reviewer_id'] ?? 0),
             'reviewer_name'  => $r['reviewer_name'] ?? '',
             'approver_id'    => (int)($r['approver_id'] ?? 0),
@@ -504,7 +507,7 @@ class ComplianceController extends BaseController
         $department = $_GET['department'] ?? '';
         $priority = $_GET['priority'] ?? '';
         $owner = $_GET['owner'] ?? '';
-        $from = $_GET['from'] ?? '';
+        $from = trim((string)($_GET['from'] ?? ''));
         $to = $_GET['to'] ?? '';
         $dueFilter = $_GET['due'] ?? $_GET['dueFilter'] ?? '';
         $search = trim($_GET['search'] ?? '');
@@ -558,6 +561,15 @@ class ComplianceController extends BaseController
         if ($owner !== '') {
             $where[] = 'c.owner_id = ?';
             $params[] = $owner;
+        }
+        if ($from !== '') {
+            $fromTs = strtotime($from . ' 00:00:00');
+            $todayTs = strtotime(date('Y-m-d') . ' 00:00:00');
+            if ($fromTs === false) {
+                $from = '';
+            } elseif ($fromTs > $todayTs) {
+                $from = date('Y-m-d');
+            }
         }
         if ($from !== '') {
             $where[] = 'c.due_date >= ?';
@@ -648,9 +660,6 @@ class ComplianceController extends BaseController
         $objectiveText = trim($_POST['objective_text'] ?? '');
         $penaltyImpact = trim($_POST['penalty_impact'] ?? '');
         $ownerId = (int)($_POST['owner_id'] ?? 0);
-        if (Auth::isMaker() && $ownerId < 1) {
-            $ownerId = (int) Auth::id();
-        }
         $workflow = in_array($_POST['workflow_type'] ?? '', ['two-level', 'three-level']) ? $_POST['workflow_type'] : 'three-level';
         // Keep reviewer assignment even for two-level workflow so assigned-user display
         // always reflects what was configured during create.
@@ -672,34 +681,37 @@ class ComplianceController extends BaseController
         if (!$evidenceRequired || !$hasEvidenceTypeCol) {
             $evidenceType = $hasEvidenceTypeCol && $evidenceRequired ? $evidenceType : null;
         }
-        $startDate = $_POST['start_date'] ?? null;
-        $dueDate = $_POST['due_date'] ?? null;
-        $expectedDate = $_POST['expected_date'] ?? null;
-        $reminderDate = $_POST['reminder_date'] ?? null;
+        $startDate = $this->normalizeIsoDate($_POST['start_date'] ?? null);
+        $dueDate = $this->normalizeIsoDate($_POST['due_date'] ?? null);
+        $expectedDate = $this->normalizeIsoDate($_POST['expected_date'] ?? null);
+        $reminderDate = $this->normalizeIsoDate($_POST['reminder_date'] ?? null);
         $checklist = $_POST['checklist'] ?? [];
         if (is_string($checklist)) {
             $checklist = array_filter(array_map('trim', explode("\n", $checklist)));
         }
 
-        if (!$title || !$department || !$ownerId || !$startDate || !$dueDate || !$expectedDate || !$reminderDate) {
-            $_SESSION['flash_error'] = 'Title, Department, Maker (Owner), Start Date, Due Date, Expected Date, and Reminder Date are required.';
+        if (!$title || !$department || !$startDate || !$dueDate || !$expectedDate || !$reminderDate) {
+            $_SESSION['flash_error'] = 'Title, Department, Start Date, Due Date, Expected Date, and Reminder Date are required.';
+            $this->redirect('/compliances/create');
+        }
+        if ($this->isFutureIsoDate($dueDate)) {
+            $_SESSION['flash_error'] = 'Due date cannot be in the future.';
             $this->redirect('/compliances/create');
         }
 
-        [$mRev, $mApp, $mWl] = $this->matrixReviewerApprover($orgId, $department, $frequency);
-        if ($mWl !== '') {
-            // normalise legacy values
-            if (in_array($mWl, ['Single-Level', 'two-level'])) $mWl = 'two-level';
-            else $mWl = 'three-level';
-            // Respect explicit assignees from form; matrix only fills missing values.
-            $workflow = $mWl;
-            if (!$reviewerId && $mRev) { $reviewerId = (int)$mRev; }
-            if (!$approverId && $mApp) { $approverId = (int)$mApp; }
-        } else {
-            // no matrix — fall back to form values
-            if ($workflow !== 'two-level' && !$reviewerId && $mRev) { $reviewerId = $mRev; }
-            if (!$approverId && $mApp) { $approverId = $mApp; }
+        [$mMaker, $mRev, $mApp, $mWl] = $this->matrixWorkflowUsers($orgId, $department, $frequency);
+        if ($mWl === '' || $mMaker < 1 || $mApp < 1 || ($mWl !== 'two-level' && $mRev < 1)) {
+            $_SESSION['flash_error'] = 'Authority Matrix mapping is required for this department. Please configure maker/reviewer/approver in Authority Matrix first.';
+            $this->redirect('/compliances/create');
         }
+        if (in_array($mWl, ['Single-Level', 'Two-Level', 'two-level'], true)) {
+            $workflow = 'two-level';
+        } else {
+            $workflow = 'three-level';
+        }
+        $ownerId = $mMaker;
+        $reviewerId = $workflow === 'three-level' ? $mRev : 0;
+        $approverId = $mApp;
 
         $stmt = $this->db->prepare('SELECT COALESCE(MAX(CAST(SUBSTRING(compliance_code, 5) AS UNSIGNED)), 0) + 1 FROM compliances WHERE organization_id = ?');
         $stmt->execute([$orgId]);
@@ -794,7 +806,6 @@ class ComplianceController extends BaseController
         $orgId = Auth::organizationId();
         $this->ensureOverdueRemarkColumns();
         $this->ensurePracticalFlowSchema();
-        DoaEngine::ensureSchema($this->db);
         $stmt = $this->db->prepare('
             SELECT c.*, a.name AS authority_name,
              (SELECT full_name FROM users WHERE id = c.owner_id) AS owner_name,
@@ -886,22 +897,6 @@ class ComplianceController extends BaseController
         $doaLevelProgress = [];
         $doaCurrentRoleSlug = '';
         $doaHasDelegationNotes = false;
-        if (!empty($compliance['doa_rule_set_id'])) {
-            $doaFlowText = DoaEngine::flowSummaryText($this->db, (int) $orgId, (int) $compliance['doa_rule_set_id']);
-            $lg = $this->db->prepare('SELECT l.*, u.full_name AS user_name FROM doa_logs l LEFT JOIN users u ON u.id = l.user_id WHERE l.compliance_id = ? AND l.organization_id = ? ORDER BY l.id ASC');
-            $lg->execute([$id, $orgId]);
-            $doaLogs = $lg->fetchAll(\PDO::FETCH_ASSOC);
-            $doaLevelProgress = DoaEngine::buildLevelProgress($this->db, (int) $orgId, $compliance);
-            if (($compliance['status'] ?? '') === 'under_review') {
-                $doaCurrentRoleSlug = $this->doaRoleAtLevel((int) $orgId, (int) $compliance['doa_rule_set_id'], (int) ($compliance['doa_current_level'] ?? 2));
-            }
-            try {
-                $nq = $this->db->prepare('SELECT delegation_notes FROM doa_rules WHERE organization_id = ? AND rule_set_id = ? ORDER BY id ASC LIMIT 1');
-                $nq->execute([$orgId, (int) $compliance['doa_rule_set_id']]);
-                $doaHasDelegationNotes = trim((string) $nq->fetchColumn()) !== '';
-            } catch (\Throwable $e) {
-            }
-        }
 
         $discussion = $this->loadDiscussion((int)$orgId, $id);
         $checkpoints = $this->loadOrCreateCheckpoints($compliance, (int)$orgId);
@@ -1117,8 +1112,11 @@ class ComplianceController extends BaseController
         }
         $allowedPri = ['low', 'medium', 'high', 'critical'];
         $priority = in_array($_POST['priority'] ?? '', $allowedPri, true) ? $_POST['priority'] : 'medium';
-        $dueRaw = trim($_POST['due_date'] ?? '');
-        $dueDate = $dueRaw !== '' ? $dueRaw : null;
+        $dueDate = $this->normalizeIsoDate($_POST['due_date'] ?? null);
+        if ($dueDate !== null && $this->isFutureIsoDate($dueDate)) {
+            $_SESSION['flash_error'] = 'Due date cannot be in the future.';
+            $this->redirect('/compliance/view/' . $id);
+        }
         $this->db->prepare('
             UPDATE compliances SET due_date=?, priority=?, updated_at=NOW()
             WHERE id=? AND organization_id=?
@@ -1203,21 +1201,14 @@ class ComplianceController extends BaseController
             ]);
         }
 
-        DoaEngine::ensureSchema($this->db);
-        $applied = DoaEngine::applyOnSubmit($this->db, (int) $orgId, $id, $c);
-        if (!$applied) {
-            $isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
-            $newStatus = $isTwoLevel ? 'under_review' : 'submitted';
-            $this->db->prepare('UPDATE compliances SET status = ? WHERE id = ?')->execute([$newStatus, $id]);
-        }
+        $isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
+        $newStatus = $isTwoLevel ? 'under_review' : 'submitted';
+        $this->db->prepare('UPDATE compliances SET status = ? WHERE id = ?')->execute([$newStatus, $id]);
 
         $name = Auth::user()['full_name'] ?? 'User';
         $this->logHistory($id, 'Submitted', 'Submitted by ' . $name, $uid, $comment ?: null);
 
-        $c2 = $this->loadCompliance($id, $orgId);
-        if (DoaEngine::complianceUsesDoa($c2 ?? [])) {
-            $_SESSION['flash_success'] = 'Compliance submitted. DOA routing applied — next action at level L' . (int) ($c2['doa_current_level'] ?? 2) . '.';
-        } elseif (($c['workflow_type'] ?? 'three-level') === 'two-level') {
+        if (($c['workflow_type'] ?? 'three-level') === 'two-level') {
             $_SESSION['flash_success'] = 'Compliance submitted. Awaiting approver.';
         } else {
             $_SESSION['flash_success'] = 'Compliance submitted. Awaiting reviewer.';
@@ -1240,25 +1231,13 @@ class ComplianceController extends BaseController
             $this->redirect('/compliance/view/' . $id . '?tab=checklist');
         }
 
-        if (DoaEngine::complianceUsesDoa($c)) {
-            if (!Auth::isAdmin() && (int) Auth::id() !== (int) ($c['doa_active_user_id'] ?? 0)) {
-                $_SESSION['flash_error'] = 'Only the user assigned for this DOA level can forward.';
-                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
+        if (!Auth::isAdmin()) {
+            if (!Auth::isReviewer() || Auth::id() !== (int) ($c['reviewer_id'] ?? 0)) {
+                $_SESSION['flash_error'] = 'Only the assigned reviewer can forward.';
+                $this->redirect('/compliance/view/' . $id);
             }
-            $err = DoaEngine::advanceForward($this->db, (int) $orgId, $id, $c, $remark, (int) Auth::id());
-            if ($err) {
-                $_SESSION['flash_error'] = $err;
-                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
-            }
-        } else {
-            if (!Auth::isAdmin()) {
-                if (!Auth::isReviewer() || Auth::id() !== (int) ($c['reviewer_id'] ?? 0)) {
-                    $_SESSION['flash_error'] = 'Only the assigned reviewer can forward.';
-                    $this->redirect('/compliance/view/' . $id);
-                }
-            }
-            $this->db->prepare("UPDATE compliances SET status = 'under_review' WHERE id = ?")->execute([$id]);
         }
+        $this->db->prepare("UPDATE compliances SET status = 'under_review' WHERE id = ?")->execute([$id]);
 
         $stmt = $this->db->prepare('SELECT id FROM compliance_submissions WHERE compliance_id = ? ORDER BY id DESC LIMIT 1');
         $stmt->execute([$id]);
@@ -1286,20 +1265,10 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Comment is required to approve.';
             $this->redirect('/compliance/view/' . $id . '?tab=checklist');
         }
-        $canFinal = Auth::isAdmin()
-            || (DoaEngine::complianceUsesDoa($c) && (int) Auth::id() === (int) ($c['doa_active_user_id'] ?? 0))
-            || (!DoaEngine::complianceUsesDoa($c) && Auth::isApprover() && (int) Auth::id() === (int) ($c['approver_id'] ?? 0));
+        $canFinal = Auth::isAdmin() || (Auth::isApprover() && (int) Auth::id() === (int) ($c['approver_id'] ?? 0));
         if (!$canFinal) {
             $_SESSION['flash_error'] = 'Only the assigned approver can approve.';
             $this->redirect('/compliance/view/' . $id);
-        }
-        if (DoaEngine::complianceUsesDoa($c)) {
-            $lvl = (int) ($c['doa_current_level'] ?? 2);
-            $role = $this->doaRoleAtLevel((int) $orgId, (int) $c['doa_rule_set_id'], $lvl);
-            if (!Auth::isAdmin() && !DoaEngine::roleMayFinalApprove($role)) {
-                $_SESSION['flash_error'] = 'Your DOA role at this level cannot give final approval. Only Approver, Compliance Head, Management, or Admin may complete the decision.';
-                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
-            }
         }
         $this->db->prepare("UPDATE compliances SET status = 'completed' WHERE id = ?")->execute([$id]);
         $stmt = $this->db->prepare('SELECT id FROM compliance_submissions WHERE compliance_id = ? ORDER BY id DESC LIMIT 1');
@@ -1310,11 +1279,6 @@ class ComplianceController extends BaseController
                 ->execute([Auth::id(), $remark ?: 'Approved', $sid]);
         }
         $this->logHistory($id, 'Approved', 'Compliance approved by ' . (Auth::user()['full_name'] ?? 'Approver'), Auth::id(), $remark);
-        if (DoaEngine::complianceUsesDoa($c)) {
-            $lvl = (int) ($c['doa_current_level'] ?? 2);
-            $role = $this->doaRoleAtLevel((int) $orgId, (int) $c['doa_rule_set_id'], $lvl);
-            $this->logDoaCompliance($id, $lvl, $role, 'Approved', $remark);
-        }
         $_SESSION['flash_success'] = 'Compliance approved and completed.';
         $this->redirect('/compliance/view/' . $id . '?tab=overview');
     }
@@ -1333,20 +1297,10 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Comment is required to reject.';
             $this->redirect('/compliance/view/' . $id . '?tab=checklist');
         }
-        $canFinal = Auth::isAdmin()
-            || (DoaEngine::complianceUsesDoa($c) && (int) Auth::id() === (int) ($c['doa_active_user_id'] ?? 0))
-            || (!DoaEngine::complianceUsesDoa($c) && Auth::isApprover() && (int) Auth::id() === (int) ($c['approver_id'] ?? 0));
+        $canFinal = Auth::isAdmin() || (Auth::isApprover() && (int) Auth::id() === (int) ($c['approver_id'] ?? 0));
         if (!$canFinal) {
             $_SESSION['flash_error'] = 'Only the assigned approver can reject.';
             $this->redirect('/compliance/view/' . $id);
-        }
-        if (DoaEngine::complianceUsesDoa($c)) {
-            $lvl = (int) ($c['doa_current_level'] ?? 2);
-            $role = $this->doaRoleAtLevel((int) $orgId, (int) $c['doa_rule_set_id'], $lvl);
-            if (!Auth::isAdmin() && !DoaEngine::roleMayFinalApprove($role)) {
-                $_SESSION['flash_error'] = 'Your DOA role at this level cannot issue a final rejection. Only Approver, Compliance Head, Management, or Admin may reject at the final step.';
-                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
-            }
         }
         $this->db->prepare("UPDATE compliances SET status = 'rejected' WHERE id = ?")->execute([$id]);
         $stmt = $this->db->prepare('SELECT id FROM compliance_submissions WHERE compliance_id = ? ORDER BY id DESC LIMIT 1');
@@ -1357,11 +1311,6 @@ class ComplianceController extends BaseController
                 ->execute([Auth::id(), $remark ?: 'Rejected', $sid]);
         }
         $this->logHistory($id, 'Rejected', 'Compliance rejected by ' . (Auth::user()['full_name'] ?? 'Approver'), Auth::id(), $remark);
-        if (DoaEngine::complianceUsesDoa($c)) {
-            $lvl = (int) ($c['doa_current_level'] ?? 2);
-            $role = $this->doaRoleAtLevel((int) $orgId, (int) $c['doa_rule_set_id'], $lvl);
-            $this->logDoaCompliance($id, $lvl, $role, 'Rejected', $remark);
-        }
         $_SESSION['flash_success'] = 'Compliance rejected.';
         $this->redirect('/compliance/view/' . $id);
     }
@@ -1380,24 +1329,13 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Comment is required for rework.';
             $this->redirect('/compliance/view/' . $id . '?tab=checklist');
         }
-        if (DoaEngine::complianceUsesDoa($c)) {
-            if (!Auth::isAdmin() && (int) Auth::id() !== (int) ($c['doa_active_user_id'] ?? 0)) {
-                $_SESSION['flash_error'] = 'Only the user assigned for this DOA level can request rework.';
-                $this->redirect('/compliance/view/' . $id);
-            }
-            $lvl = (int) ($c['doa_current_level'] ?? 2);
-            $role = $this->doaRoleAtLevel((int) $orgId, (int) ($c['doa_rule_set_id'] ?? 0), $lvl);
-            $this->logDoaCompliance($id, $lvl, $role, 'Rework', $remark);
-            DoaEngine::clearDoaState($this->db, (int) $orgId, $id);
-        } else {
-            if (Auth::isMaker() && !Auth::isAdmin()) {
-                $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
-                $this->redirect('/compliance/view/' . $id);
-            }
-            if (!Auth::isAdmin() && (!Auth::isReviewer() || Auth::id() !== (int) $c['reviewer_id'])) {
-                $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
-                $this->redirect('/compliance/view/' . $id);
-            }
+        if (Auth::isMaker() && !Auth::isAdmin()) {
+            $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
+            $this->redirect('/compliance/view/' . $id);
+        }
+        if (!Auth::isAdmin() && (!Auth::isReviewer() || Auth::id() !== (int) $c['reviewer_id'])) {
+            $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
+            $this->redirect('/compliance/view/' . $id);
         }
         $this->db->prepare("UPDATE compliances SET status = 'rework' WHERE id = ?")->execute([$id]);
         $stmt = $this->db->prepare('SELECT id FROM compliance_submissions WHERE compliance_id = ? ORDER BY id DESC LIMIT 1');

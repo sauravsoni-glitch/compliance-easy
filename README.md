@@ -78,14 +78,16 @@ cd c:\Users\Saurav.Soni\Desktop\compliance
 
 Same idea for the batch file: `.\start-server.bat`.
 
-**Any shell** (sets `APP_URL` for local links if you use the scripts above; otherwise set it yourself):
+**Any shell** (if `php` is not found on Windows, use **`.\start-server.bat`** or the full path to `php.exe`, e.g. `C:\xampp\php\php.exe`):
 
 ```bash
 cd c:\Users\Saurav.Soni\Desktop\compliance
-php -S localhost:8000 -t public
+php -S localhost:8000 -t public public/index.php
 ```
 
-Open **http://localhost:8000** in the browser.
+The trailing **`public/index.php`** is the router script so URLs like `/login` are handled by the app (not only static files). With the built-in server, the app also infers **`APP_URL`** from the request when unset, so any port works for assets.
+
+Open **http://localhost:8000** (or the host/port shown by `.\start-server.ps1` if it picked another port).
 
 ### 4. Run with Apache
 

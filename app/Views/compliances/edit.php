@@ -1,5 +1,6 @@
 <?php
 $c = $compliance;
+$today = date('Y-m-d');
 ?>
 <div class="page-header">
     <div>
@@ -13,7 +14,7 @@ $c = $compliance;
     <form method="post" action="<?= $basePath ?>/compliances/edit/<?= (int)$c['id'] ?>">
         <div class="form-group">
             <label class="form-label">Due date</label>
-            <input type="date" name="due_date" class="form-control" value="<?= htmlspecialchars($c['due_date'] ?? '') ?>">
+            <input type="date" name="due_date" class="form-control" value="<?= htmlspecialchars($c['due_date'] ?? '') ?>" max="<?= htmlspecialchars($today) ?>">
         </div>
         <div class="form-group">
             <label class="form-label">Priority</label>

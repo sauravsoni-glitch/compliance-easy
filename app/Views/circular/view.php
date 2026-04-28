@@ -103,6 +103,7 @@ $approverTags = array_filter(array_map('trim', explode(',', $c['ai_approver_tags
                         <option value="<?= (int)$u['id'] ?>" <?= (int)($c['review_owner_id'] ?? 0) === (int)$u['id'] ? 'selected' : '' ?>><?= htmlspecialchars($u['full_name'] . ' — ' . ($u['department'] ?? '') . ($u['role_name'] ? ' (' . $u['role_name'] . ')' : '')) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <p class="form-help">Assignment follows Authority Matrix for selected department; manual selections are ignored.</p>
                 </div>
                 <div class="form-group" id="ci-reviewer-group" style="<?= $savedWorkflow === 'three-level' ? '' : 'display:none;' ?>">
                     <label class="form-label">Reviewer <span class="text-danger">*</span></label>

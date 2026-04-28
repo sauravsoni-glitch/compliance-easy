@@ -3,6 +3,7 @@ $flashError = $_SESSION['flash_error'] ?? null;
 unset($_SESSION['flash_error']);
 $checklistItems = is_array($_POST['checklist'] ?? null) ? $_POST['checklist'] : [];
 $evYes = ($_POST['evidence_required'] ?? '1') === '1';
+$today = date('Y-m-d');
 $evTypePost = $_POST['evidence_type'] ?? '';
 ?>
 <div class="page-header">
@@ -81,7 +82,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 </div>
                 <div class="form-group">
                     <label class="form-label">Due date *</label>
-                    <input type="date" name="due_date" class="form-control" value="<?= htmlspecialchars($_POST['due_date'] ?? '') ?>" required>
+                    <input type="date" name="due_date" class="form-control" value="<?= htmlspecialchars($_POST['due_date'] ?? '') ?>" max="<?= htmlspecialchars($today) ?>" required>
                 </div>
             </div>
             <div class="form-group">
@@ -110,6 +111,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                         <option value="<?= $u['id'] ?>" <?= (int)($_POST['owner_id'] ?? 0) === (int)$u['id'] ? 'selected' : '' ?>><?= htmlspecialchars($u['full_name']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <p class="form-help">Auto-assigned from Authority Matrix based on selected department.</p>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Approval Workflow *</label>
@@ -283,6 +285,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
 
 (function(){
     var wf       = document.getElementById('workflow_type');
+    var ownerSel = document.querySelector('select[name="owner_id"]');
     var revField = document.getElementById('reviewer-field');
     var revSel   = document.getElementById('reviewer_id');
     var appSel   = document.querySelector('select[name="approver_id"]');
@@ -317,18 +320,14 @@ $evTypePost = $_POST['evidence_type'] ?? '';
         wf.value = data.workflow;
         toggleWorkflow(true); // lock dropdown
 
-        // only auto-fill when user has not selected anyone yet
-        if (data.reviewer_id && revSel && !revSel.value) {
-            revSel.value = data.reviewer_id;
-        }
-        // only auto-fill when user has not selected anyone yet
-        if (data.approver_id && appSel && !appSel.value) {
-            appSel.value = data.approver_id;
-        }
+        // Matrix is source-of-truth: always apply mapped users for selected department.
+        if (data.maker_id && ownerSel) ownerSel.value = String(data.maker_id);
+        if (data.reviewer_id && revSel) revSel.value = String(data.reviewer_id);
+        if (data.approver_id && appSel) appSel.value = String(data.approver_id);
 
         // show hint
         var wfLabel = data.workflow === 'two-level' ? 'Two Level' : 'Three Level';
-        hint.textContent = '⚡ Authority Matrix found: ' + wfLabel + ' workflow applied automatically.';
+        hint.textContent = '⚡ Authority Matrix applied: workflow and maker/reviewer/approver are auto-assigned.';
         hint.style.display = 'block';
     }
 

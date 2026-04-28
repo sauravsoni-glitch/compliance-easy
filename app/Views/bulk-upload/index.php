@@ -45,7 +45,6 @@ $fileIcon = function (string $name) {
                 <select name="upload_type" id="bu-upload-type" class="form-control bu-type-select">
                     <option value="compliance">Compliance Upload</option>
                     <option value="financial_ratios">Financial Ratios Upload</option>
-                    <option value="doa">DOA Upload</option>
                     <option value="authority_matrix">Authority Matrix Upload</option>
                 </select>
             </div>
@@ -83,7 +82,6 @@ $fileIcon = function (string $name) {
   var templates = {
     compliance: 'compliance',
     financial_ratios: 'ratios',
-    doa: 'doa',
     authority_matrix: 'matrix'
   };
   function sync(){
@@ -101,7 +99,7 @@ $fileIcon = function (string $name) {
     var f = fi.files[0];
     if (f && f.size > 50*1024*1024) { e.preventDefault(); alert('File exceeds 50MB'); return false; }
     var sb = document.getElementById('bu-submit-btn');
-    if (sb) { sb.disabled = true; sb.textContent = 'Uploading...'; }
+    if (sb) { sb.disabled = true; }
   });
 })();
     </script>
@@ -169,3 +167,4 @@ $fileIcon = function (string $name) {
     </div>
     <?php endif; ?>
 </div>
+
