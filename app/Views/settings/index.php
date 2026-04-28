@@ -248,8 +248,9 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         $depts = $escalation['depts'] ?? [];
     ?>
     <h3 class="card-title mt-3">Escalation Matrix</h3>
-    <p class="text-muted text-sm">Configure department-wise escalation rules and workflows.</p>
+    <p class="text-muted text-sm">Smart engine active. Department digest uses fixed escalation slots: <strong>T+0, T+3, T+7, T+14</strong>.</p>
     <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/escalation">
+        <input type="hidden" name="esc_action" id="esc_action_field" value="save">
         <div class="st-toggle-row st-toggle-inline">
             <div>
                 <strong>Enable Department-wise Escalation</strong>
@@ -330,16 +331,20 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
             <?php if ($isExp): ?>
             <div class="st-levels-table-wrap">
                 <table class="data-table st-levels-table">
-                    <thead><tr><th>Level</th><th>Days After Due</th><th>Escalate To</th><th>Email Template</th></tr></thead>
+                    <thead><tr><th>Level</th><th>T-Slot</th><th>Escalate To</th><th>Email Template</th></tr></thead>
                     <tbody>
                         <?php
                         $lvls = $d['levels'] ?? [];
+                        $fixedEscSlots = ['T+0', 'T+3', 'T+7', 'T+14'];
                         for ($i = 0; $i < 4; $i++):
                             $L = $lvls[$i] ?? ['d' => '', 'to' => '', 'tpl' => ''];
                         ?>
                         <tr>
                             <td><?= $i + 1 ?></td>
-                            <td><input type="number" class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][d]" value="<?= htmlspecialchars((string)($L['d'] ?? '')) ?>" min="0"></td>
+                            <td>
+                                <span class="badge badge-info"><?= htmlspecialchars($fixedEscSlots[$i] ?? '') ?></span>
+                                <input type="hidden" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][d]" value="<?= [0,3,7,14][$i] ?>">
+                            </td>
                             <td>
                                 <?php $selectedTo = (int) ($L['to'] ?? 0); ?>
                                 <select class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][to]">
@@ -366,13 +371,14 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         <?php endforeach; ?>
         <p class="text-muted text-sm st-fallback-note"><strong>Note:</strong> Department-wise escalation is active for all departments. High-risk items follow accelerated rules when enabled.</p>
         <div class="st-actions-right">
-            <button type="submit" class="btn btn-primary">Save Escalation Settings</button>
+            <button type="submit" class="btn btn-secondary" onclick="document.getElementById('esc_action_field').value='trigger';">Manual Trigger</button>
+            <button type="submit" class="btn btn-primary" onclick="document.getElementById('esc_action_field').value='save';">Save Escalation Settings</button>
         </div>
     </form>
 
     <?php elseif ($automationSub === 'pre-due'): ?>
     <h3 class="card-title mt-3">Pre-Due Date Reminder &amp; Escalation</h3>
-    <p class="text-muted text-sm">Configure automated reminders before compliance due dates with department-wise escalation.</p>
+    <p class="text-muted text-sm">Smart engine active. Pre-due reminder slots are fixed to <strong>T-7, T-3, T-1</strong> with automatic short-timeline catch-up.</p>
     <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/pre-due">
         <input type="hidden" name="pre_action" id="pre_action_field" value="save">
         <div class="st-toggle-row st-toggle-inline">
@@ -425,16 +431,11 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                 <input type="hidden" name="daily_time" value="<?= htmlspecialchars($preTime) ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">First Reminder</label>
-                <div class="st-input-suffix"><input type="number" name="first_days" class="form-control" value="<?= (int)($preDue['first'] ?? 7) ?>" min="0"><span>days before</span></div>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Second Reminder</label>
-                <div class="st-input-suffix"><input type="number" name="second_days" class="form-control" value="<?= (int)($preDue['second'] ?? 3) ?>" min="0"><span>days before</span></div>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Final Reminder</label>
-                <div class="st-input-suffix"><input type="number" name="final_days" class="form-control" value="<?= (int)($preDue['final'] ?? 1) ?>" min="0"><span>day before</span></div>
+                <label class="form-label">Pre-due T-Slots</label>
+                <div class="st-input-suffix"><input type="text" class="form-control" value="T-7, T-3, T-1 (fixed)" readonly></div>
+                <input type="hidden" name="first_days" value="7">
+                <input type="hidden" name="second_days" value="3">
+                <input type="hidden" name="final_days" value="1">
             </div>
         </div>
         <div class="st-escalation-logic card-inner-muted">
@@ -502,34 +503,12 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                 </tbody>
             </table>
         </div>
-        <h4 class="st-subhead">Email Template</h4>
-        <div class="st-var-tags">
-            <?php foreach (['{{Compliance Name}}', '{{Compliance ID}}', '{{Department}}', '{{Due Date}}', '{{Days Remaining}}', '{{Assigned To}}', '{{Owner_Name}}', '{{Reviewer_Name}}', '{{Approver_Name}}'] as $tag): ?>
-            <button type="button" class="btn btn-sm btn-secondary st-var-btn" data-tag="<?= htmlspecialchars($tag) ?>"><?= htmlspecialchars($tag) ?></button>
-            <?php endforeach; ?>
-        </div>
-        <div class="form-group">
-            <label class="form-label">Subject</label>
-            <input type="text" name="pre_subject" class="form-control" value="<?= htmlspecialchars($preDue['subject'] ?? '') ?>">
-        </div>
-        <div class="form-group">
-            <label class="form-label">Body</label>
-            <textarea name="pre_body" class="form-control" rows="8" id="pre_body_ta"><?= htmlspecialchars($preDue['body'] ?? '') ?></textarea>
-        </div>
         <div class="st-actions-right st-pre-actions">
             <button type="submit" class="btn btn-secondary" onclick="document.getElementById('pre_action_field').value='test';">Send Test Email</button>
             <button type="submit" class="btn btn-secondary" onclick="document.getElementById('pre_action_field').value='trigger';">Manual Trigger</button>
             <button type="submit" class="btn btn-primary" onclick="document.getElementById('pre_action_field').value='save';">Save Configuration</button>
         </div>
     </form>
-    <script>
-    document.querySelectorAll('.st-var-btn').forEach(function(b) {
-        b.addEventListener('click', function() {
-            var ta = document.getElementById('pre_body_ta');
-            if (ta) { ta.value += this.getAttribute('data-tag'); ta.focus(); }
-        });
-    });
-    </script>
 
     <?php else: /* logs */ ?>
     <h3 class="card-title mt-3">Pre-Due Reminder Logs</h3>

@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\BaseController;
+use App\Core\EscalationAutomationService;
 use App\Core\PreDueAutomationService;
 
 class SettingsController extends BaseController
@@ -428,6 +429,7 @@ class SettingsController extends BaseController
             'daily_time' => $escTime24,
             'depts' => [],
         ];
+        $fixedThresholds = [0, 3, 7, 14];
         // Pre-fetch the set of valid active user_ids in this org so we can validate
         // every "Escalate To" pick (rejects 0 / cross-org / inactive ids).
         $userIdStmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND status = ' . "'active'");
@@ -438,7 +440,7 @@ class SettingsController extends BaseController
             $useGlobal = false;
             $levels = [];
             if (!empty($row['levels']) && is_array($row['levels'])) {
-                foreach ($row['levels'] as $L) {
+                foreach ($row['levels'] as $idx => $L) {
                     if (!is_array($L)) {
                         continue;
                     }
@@ -448,7 +450,8 @@ class SettingsController extends BaseController
                         $toUid = 0; // foreign / inactive id — reject silently
                     }
                     $levels[] = [
-                        'd' => max(0, (int) ($L['d'] ?? 0)),
+                        // Keep escalation dates fixed to T+0, T+3, T+7, T+14.
+                        'd' => $fixedThresholds[$idx] ?? max(0, (int) ($L['d'] ?? 0)),
                         'to' => $toUid,
                         'tpl' => trim($L['tpl'] ?? ''),
                     ];
@@ -465,7 +468,14 @@ class SettingsController extends BaseController
             ];
         }
         $this->setJson($orgId, self::KEYS['escalation'], $out);
-        $_SESSION['flash_success'] = 'Escalation settings saved.';
+        $action = $_POST['esc_action'] ?? 'save';
+        if ($action === 'trigger') {
+            $runner = new EscalationAutomationService($this->db, $this->appConfig);
+            $r = $runner->runForOrganization($orgId, true);
+            $_SESSION['flash_success'] = 'Manual escalation trigger completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.';
+        } else {
+            $_SESSION['flash_success'] = 'Escalation settings saved.';
+        }
         $this->redirect('/settings?tab=automation&sub=escalation');
     }
 
@@ -502,9 +512,10 @@ class SettingsController extends BaseController
             $preTime24 = (string) $_POST['daily_time'];
         }
         $pre['daily_time'] = $preTime24;
-        $pre['first'] = max(0, (int) ($_POST['first_days'] ?? 7));
-        $pre['second'] = max(0, (int) ($_POST['second_days'] ?? 3));
-        $pre['final'] = max(0, (int) ($_POST['final_days'] ?? 1));
+        // Force centralized T-rule slots for pre-due reminders.
+        $pre['first'] = 7;
+        $pre['second'] = 3;
+        $pre['final'] = 1;
         $pre['subject'] = trim($_POST['pre_subject'] ?? $pre['subject']);
         $pre['body'] = trim($_POST['pre_body'] ?? $pre['body']);
         $depts = [];

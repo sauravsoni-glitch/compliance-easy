@@ -3,7 +3,6 @@ $flashError = $_SESSION['flash_error'] ?? null;
 unset($_SESSION['flash_error']);
 $checklistItems = is_array($_POST['checklist'] ?? null) ? $_POST['checklist'] : [];
 $evYes = ($_POST['evidence_required'] ?? '1') === '1';
-$today = date('Y-m-d');
 $evTypePost = $_POST['evidence_type'] ?? '';
 ?>
 <div class="page-header">
@@ -82,7 +81,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 </div>
                 <div class="form-group">
                     <label class="form-label">Due date *</label>
-                    <input type="date" name="due_date" class="form-control" value="<?= htmlspecialchars($_POST['due_date'] ?? '') ?>" max="<?= htmlspecialchars($today) ?>" required>
+                    <input type="date" name="due_date" class="form-control" value="<?= htmlspecialchars($_POST['due_date'] ?? '') ?>" required>
                 </div>
             </div>
             <div class="form-group">

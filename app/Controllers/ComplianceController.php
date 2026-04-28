@@ -80,6 +80,265 @@ class ComplianceController extends BaseController
     }
 
     /**
+     * @return list<array<string,mixed>>
+     */
+    private function orgTemplates(int $orgId): array
+    {
+        $stmt = $this->db->prepare('SELECT value FROM settings WHERE organization_id = ? AND key_name = ? LIMIT 1');
+        $stmt->execute([$orgId, 'ui_email_templates']);
+        $raw = $stmt->fetchColumn();
+        if ($raw === false || $raw === null || $raw === '') {
+            return [];
+        }
+        $decoded = json_decode((string) $raw, true);
+        $list = is_array($decoded) ? ($decoded['list'] ?? []) : [];
+
+        return is_array($list) ? $list : [];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $templates
+     * @return array<string,mixed>|null
+     */
+    private function pickWorkflowTemplate(array $templates, string $type, string $department): ?array
+    {
+        $type = strtolower(trim($type));
+        $dept = trim($department);
+        $fallback = null;
+        foreach ($templates as $t) {
+            if (!is_array($t) || empty($t['enabled'])) {
+                continue;
+            }
+            $tt = strtolower(trim((string) ($t['type'] ?? '')));
+            if ($tt !== $type) {
+                continue;
+            }
+            $td = trim((string) ($t['dept'] ?? 'All Departments'));
+            if ($dept !== '' && strcasecmp($td, $dept) === 0) {
+                return $t;
+            }
+            if (strcasecmp($td, 'All Departments') === 0 && $fallback === null) {
+                $fallback = $t;
+            }
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param array<string,string> $extra
+     * @return array<string,string>
+     */
+    private function complianceTemplateTokens(array $row, array $extra = []): array
+    {
+        $due = !empty($row['due_date']) ? date('M j, Y', strtotime((string) $row['due_date'])) : '';
+        $expected = !empty($row['expected_date']) ? date('M j, Y', strtotime((string) $row['expected_date'])) : '';
+        $reminder = !empty($row['reminder_date']) ? date('M j, Y', strtotime((string) $row['reminder_date'])) : '';
+        $ownerName = trim((string) ($row['owner_name'] ?? '')) ?: 'Owner';
+        $reviewerName = trim((string) ($row['reviewer_name'] ?? '')) ?: 'Reviewer';
+        $approverName = trim((string) ($row['approver_name'] ?? '')) ?: 'Approver';
+        $ownerEmail = trim((string) ($row['owner_email'] ?? ''));
+        $reviewerEmail = trim((string) ($row['reviewer_email'] ?? ''));
+        $approverEmail = trim((string) ($row['approver_email'] ?? ''));
+        $daysOverdue = 0;
+        if (!empty($row['due_date'])) {
+            $daysOverdue = max(0, (int) floor((time() - strtotime((string) $row['due_date'] . ' 00:00:00')) / 86400));
+        }
+
+        return array_merge([
+            '{{Compliance_ID}}' => (string) ($row['compliance_code'] ?? ''),
+            '{{Compliance ID}}' => (string) ($row['compliance_code'] ?? ''),
+            '{{Compliance_Title}}' => (string) ($row['title'] ?? ''),
+            '{{Compliance Title}}' => (string) ($row['title'] ?? ''),
+            '{{Compliance Name}}' => (string) ($row['title'] ?? ''),
+            '{{Department}}' => (string) ($row['department'] ?? ''),
+            '{{Due_Date}}' => $due,
+            '{{Due Date}}' => $due,
+            '{{Expected_Date}}' => $expected,
+            '{{Reminder_Date}}' => $reminder,
+            '{{Owner_Name}}' => $ownerName,
+            '{{Owner Name}}' => $ownerName,
+            '{{Reviewer_Name}}' => $reviewerName,
+            '{{Reviewer Name}}' => $reviewerName,
+            '{{Approver_Name}}' => $approverName,
+            '{{Approver Name}}' => $approverName,
+            '{{Owner_Email}}' => $ownerEmail,
+            '{{Owner Email}}' => $ownerEmail,
+            '{{Reviewer_Email}}' => $reviewerEmail,
+            '{{Reviewer Email}}' => $reviewerEmail,
+            '{{Approver_Email}}' => $approverEmail,
+            '{{Approver Email}}' => $approverEmail,
+            '{{Days_Overdue}}' => (string) $daysOverdue,
+            '{{Days Overdue}}' => (string) $daysOverdue,
+            '{{Overdue Days}}' => (string) $daysOverdue,
+            '{{Risk_Level}}' => ucfirst((string) ($row['risk_level'] ?? '')),
+        ], $extra);
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function activeUserById(int $orgId, int $userId): ?array
+    {
+        if ($orgId < 1 || $userId < 1) {
+            return null;
+        }
+        $st = $this->db->prepare('SELECT id, full_name, email FROM users WHERE organization_id = ? AND id = ? LIMIT 1');
+        $st->execute([$orgId, $userId]);
+        $row = $st->fetch(\PDO::FETCH_ASSOC);
+        if (!$row || trim((string) ($row['email'] ?? '')) === '') {
+            return null;
+        }
+
+        return $row;
+    }
+
+    private function mailProviderName(): string
+    {
+        $path = dirname(__DIR__, 2) . '/config/mail.php';
+        if (!is_file($path)) {
+            return 'unknown';
+        }
+        $cfg = require $path;
+        $provider = strtolower(trim((string) ($cfg['provider'] ?? 'smtp')));
+        if ($provider === '') {
+            $provider = 'smtp';
+        }
+
+        return $provider;
+    }
+
+    private function sendTemplateNotification(array $row, string $type, string $fallbackSubject, string $fallbackBody, array $extraTokens = [], array $targetRoles = ['owner', 'reviewer', 'approver']): array
+    {
+        $orgId = (int) ($row['organization_id'] ?? 0);
+        if ($orgId < 1) {
+            return ['attempted' => 0, 'sent' => 0, 'failed' => 0, 'to' => []];
+        }
+        $templates = $this->orgTemplates($orgId);
+        $tpl = $this->pickWorkflowTemplate($templates, $type, (string) ($row['department'] ?? ''));
+        $subjectTpl = trim((string) ($tpl['subject'] ?? '')) ?: $fallbackSubject;
+        $bodyTpl = trim((string) ($tpl['body'] ?? '')) ?: $fallbackBody;
+        $tokens = $this->complianceTemplateTokens($row, $extraTokens);
+        $subject = strtr($subjectTpl, $tokens);
+        $plainBody = strtr($bodyTpl, $tokens);
+        $htmlBody = $this->buildWorkflowTemplateCard($row, ucfirst($type), $plainBody);
+
+        $targets = [];
+        $ownerEmail = (string) ($row['owner_email'] ?? '');
+        $ownerName = (string) ($row['owner_name'] ?? 'Owner');
+        $reviewerEmail = (string) ($row['reviewer_email'] ?? '');
+        $reviewerName = (string) ($row['reviewer_name'] ?? 'Reviewer');
+        $approverEmail = (string) ($row['approver_email'] ?? '');
+        $approverName = (string) ($row['approver_name'] ?? 'Approver');
+
+        // In some legacy/two-level assignments, final-stage user may be stored in reviewer fields.
+        if (trim($approverEmail) === '' && trim($reviewerEmail) !== '') {
+            $approverEmail = $reviewerEmail;
+            $approverName = trim($reviewerName) !== '' ? $reviewerName : $approverName;
+        }
+
+        $roleTargets = [
+            ['email' => $ownerEmail, 'name' => $ownerName],
+            ['email' => $reviewerEmail, 'name' => $reviewerName],
+            ['email' => $approverEmail, 'name' => $approverName],
+        ];
+        $selected = [];
+        if (in_array('owner', $targetRoles, true)) {
+            $selected[] = $roleTargets[0];
+        }
+        if (in_array('reviewer', $targetRoles, true)) {
+            $selected[] = $roleTargets[1];
+        }
+        if (in_array('approver', $targetRoles, true)) {
+            $selected[] = $roleTargets[2];
+        }
+        // If filtered recipient set is empty (legacy assignment edge-cases), fallback to all roles.
+        if ($selected === []) {
+            $selected = $roleTargets;
+        }
+        foreach ($selected as $t) {
+            $email = trim((string) ($t['email'] ?? ''));
+            if ($email === '') {
+                continue;
+            }
+            $targets[strtolower($email)] = ['email' => $email, 'name' => (string) ($t['name'] ?? '')];
+        }
+
+        // Hard fallback by workflow-assigned user IDs (handles stale/missing joined email fields).
+        if ($targets === []) {
+            $idMap = [
+                'owner' => (int) ($row['owner_id'] ?? 0),
+                'reviewer' => (int) ($row['reviewer_id'] ?? 0),
+                'approver' => (int) ($row['approver_id'] ?? 0),
+            ];
+            foreach ($targetRoles as $role) {
+                $u = $this->activeUserById($orgId, (int) ($idMap[$role] ?? 0));
+                if ($u) {
+                    $targets[strtolower((string) $u['email'])] = ['email' => (string) $u['email'], 'name' => (string) ($u['full_name'] ?? ucfirst($role))];
+                }
+            }
+        }
+
+        $stats = ['attempted' => 0, 'sent' => 0, 'failed' => 0, 'to' => []];
+        foreach ($targets as $t) {
+            $stats['attempted']++;
+            [$ok, ] = Mailer::sendGeneric(
+                $this->appConfig,
+                (string) $t['email'],
+                (string) $t['name'],
+                $subject,
+                $htmlBody,
+                $plainBody
+            );
+            $stats['to'][] = (string) $t['email'];
+            if ($ok) {
+                $stats['sent']++;
+            } else {
+                $stats['failed']++;
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function buildWorkflowTemplateCard(array $row, string $kind, string $message): string
+    {
+        $kindSafe = htmlspecialchars($kind, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $codeSafe = htmlspecialchars((string) ($row['compliance_code'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $titleSafe = htmlspecialchars((string) ($row['title'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $deptSafe = htmlspecialchars((string) ($row['department'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $dueSafe = htmlspecialchars(!empty($row['due_date']) ? date('M j, Y', strtotime((string) $row['due_date'])) : '—', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $ownerSafe = htmlspecialchars(trim((string) ($row['owner_name'] ?? '')) ?: 'Owner', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $reviewerSafe = htmlspecialchars(trim((string) ($row['reviewer_name'] ?? '')) ?: 'Reviewer', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $approverSafe = htmlspecialchars(trim((string) ($row['approver_name'] ?? '')) ?: 'Approver', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $msgSafe = nl2br(htmlspecialchars($message, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+        return '<div style="background:#f3f4f6;padding:24px 12px;">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;font-family:Segoe UI,system-ui,Roboto,Helvetica,Arial,sans-serif;">'
+            . '<tr><td style="background:linear-gradient(135deg,#1f2937 0%,#111827 70%,#7c3aed 100%);border-radius:14px 14px 0 0;padding:24px 22px;color:#fff;">'
+            . '<div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.9;">Compliance Notification</div>'
+            . '<div style="margin-top:10px;font-size:22px;line-height:1.3;font-weight:800;">' . $kindSafe . ' Alert</div>'
+            . '<div style="margin-top:8px;font-size:14px;opacity:0.92;">' . $codeSafe . ' · ' . $titleSafe . '</div>'
+            . '</td></tr>'
+            . '<tr><td style="background:#ffffff;padding:18px 20px 0;border-radius:0 0 14px 14px;">'
+            . '<div style="font-size:15px;line-height:1.7;color:#111827;"><strong>' . $msgSafe . '</strong></div>'
+            . '<div style="margin-top:16px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">'
+            . '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+            . '<tr style="background:#f9fafb;"><td style="padding:10px 12px;font-size:12px;color:#6b7280;text-transform:uppercase;width:35%;">Department</td><td style="padding:10px 12px;font-size:13px;color:#111827;">' . $deptSafe . '</td></tr>'
+            . '<tr><td style="padding:10px 12px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;text-transform:uppercase;">Due Date</td><td style="padding:10px 12px;border-top:1px solid #e5e7eb;font-size:13px;color:#111827;">' . $dueSafe . '</td></tr>'
+            . '<tr style="background:#f9fafb;"><td style="padding:10px 12px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;text-transform:uppercase;">Owner</td><td style="padding:10px 12px;border-top:1px solid #e5e7eb;font-size:13px;color:#111827;">' . $ownerSafe . '</td></tr>'
+            . '<tr><td style="padding:10px 12px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;text-transform:uppercase;">Reviewer</td><td style="padding:10px 12px;border-top:1px solid #e5e7eb;font-size:13px;color:#111827;">' . $reviewerSafe . '</td></tr>'
+            . '<tr style="background:#f9fafb;"><td style="padding:10px 12px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;text-transform:uppercase;">Approver</td><td style="padding:10px 12px;border-top:1px solid #e5e7eb;font-size:13px;color:#111827;">' . $approverSafe . '</td></tr>'
+            . '</table></div>'
+            . '<div style="padding:14px 2px 18px;font-size:12px;color:#6b7280;line-height:1.5;">This mail is generated by compliance workflow notifications.</div>'
+            . '</td></tr></table></div>';
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     private function loadComplianceForNotification(int $id, int $orgId): ?array
@@ -694,10 +953,6 @@ class ComplianceController extends BaseController
             $_SESSION['flash_error'] = 'Title, Department, Start Date, Due Date, Expected Date, and Reminder Date are required.';
             $this->redirect('/compliances/create');
         }
-        if ($this->isFutureIsoDate($dueDate)) {
-            $_SESSION['flash_error'] = 'Due date cannot be in the future.';
-            $this->redirect('/compliances/create');
-        }
 
         [$mMaker, $mRev, $mApp, $mWl] = $this->matrixWorkflowUsers($orgId, $department, $frequency);
         if ($mWl === '' || $mMaker < 1 || $mApp < 1 || ($mWl !== 'two-level' && $mRev < 1)) {
@@ -727,7 +982,7 @@ class ComplianceController extends BaseController
         } else {
             $stmt = $this->db->prepare('
                 INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             ');
         }
         if ($authorityId < 1) {
@@ -1113,10 +1368,6 @@ class ComplianceController extends BaseController
         $allowedPri = ['low', 'medium', 'high', 'critical'];
         $priority = in_array($_POST['priority'] ?? '', $allowedPri, true) ? $_POST['priority'] : 'medium';
         $dueDate = $this->normalizeIsoDate($_POST['due_date'] ?? null);
-        if ($dueDate !== null && $this->isFutureIsoDate($dueDate)) {
-            $_SESSION['flash_error'] = 'Due date cannot be in the future.';
-            $this->redirect('/compliance/view/' . $id);
-        }
         $this->db->prepare('
             UPDATE compliances SET due_date=?, priority=?, updated_at=NOW()
             WHERE id=? AND organization_id=?
@@ -1201,15 +1452,29 @@ class ComplianceController extends BaseController
             ]);
         }
 
-        $isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
+        $wf = strtolower(trim((string) ($c['workflow_type'] ?? 'three-level')));
+        $isTwoLevel = in_array($wf, ['two-level', 'single-level'], true);
         $newStatus = $isTwoLevel ? 'under_review' : 'submitted';
         $this->db->prepare('UPDATE compliances SET status = ? WHERE id = ?')->execute([$newStatus, $id]);
 
         $name = Auth::user()['full_name'] ?? 'User';
         $this->logHistory($id, 'Submitted', 'Submitted by ' . $name, $uid, $comment ?: null);
 
-        if (($c['workflow_type'] ?? 'three-level') === 'two-level') {
-            $_SESSION['flash_success'] = 'Compliance submitted. Awaiting approver.';
+        if ($isTwoLevel) {
+            $notifyRow = $this->loadComplianceForNotification($id, $orgId);
+            $mailStats = ['attempted' => 0, 'sent' => 0, 'failed' => 0];
+            if ($notifyRow) {
+                $mailStats = $this->sendTemplateNotification(
+                    $notifyRow,
+                    'Approval',
+                    'Pending approval: {{Compliance_Title}}',
+                    "A compliance item awaits your approval.\nCompliance ID: {{Compliance_ID}}\nTitle: {{Compliance_Title}}\nDepartment: {{Department}}\nDue Date: {{Due_Date}}",
+                    [],
+                    ['approver']
+                );
+            }
+            $toList = implode(', ', array_filter((array) ($mailStats['to'] ?? [])));
+            $_SESSION['flash_success'] = 'Compliance submitted. Awaiting approver. Pending-approval mail sent: ' . (int) ($mailStats['sent'] ?? 0) . ', failed: ' . (int) ($mailStats['failed'] ?? 0) . '. Provider: ' . $this->mailProviderName() . '. Recipients: ' . ($toList !== '' ? $toList : 'none') . '.';
         } else {
             $_SESSION['flash_success'] = 'Compliance submitted. Awaiting reviewer.';
         }
@@ -1247,7 +1512,20 @@ class ComplianceController extends BaseController
                 ->execute([Auth::id(), $remark ?: 'Forwarded', $sid]);
         }
         $this->logHistory($id, 'Reviewed', 'Approved & forwarded by ' . (Auth::user()['full_name'] ?? 'User'), Auth::id(), $remark);
-        $_SESSION['flash_success'] = 'Progress recorded.';
+        $notifyRow = $this->loadComplianceForNotification($id, $orgId);
+        $mailStats = ['attempted' => 0, 'sent' => 0, 'failed' => 0];
+        if ($notifyRow) {
+            $mailStats = $this->sendTemplateNotification(
+                $notifyRow,
+                'Approval',
+                'Pending approval: {{Compliance_Title}}',
+                "A compliance item awaits your approval.\nCompliance ID: {{Compliance_ID}}\nTitle: {{Compliance_Title}}\nDepartment: {{Department}}\nDue Date: {{Due_Date}}",
+                ['{{Action_Remark}}' => $remark, '{{Action Remark}}' => $remark],
+                ['approver']
+            );
+        }
+        $toList = implode(', ', array_filter((array) ($mailStats['to'] ?? [])));
+        $_SESSION['flash_success'] = 'Progress recorded. Pending-approval mail sent: ' . (int) ($mailStats['sent'] ?? 0) . ', failed: ' . (int) ($mailStats['failed'] ?? 0) . '. Provider: ' . $this->mailProviderName() . '. Recipients: ' . ($toList !== '' ? $toList : 'none') . '.';
         $this->redirect('/compliance/view/' . $id . '?tab=checklist');
     }
 
@@ -1311,6 +1589,16 @@ class ComplianceController extends BaseController
                 ->execute([Auth::id(), $remark ?: 'Rejected', $sid]);
         }
         $this->logHistory($id, 'Rejected', 'Compliance rejected by ' . (Auth::user()['full_name'] ?? 'Approver'), Auth::id(), $remark);
+        $notifyRow = $this->loadComplianceForNotification($id, $orgId);
+        if ($notifyRow) {
+            $this->sendTemplateNotification(
+                $notifyRow,
+                'Rejection',
+                'Rejected: {{Compliance_Title}}',
+                "Compliance {{Compliance_ID}} ({{Compliance_Title}}) has been rejected.\nDepartment: {{Department}}\nDue Date: {{Due_Date}}\nRemark: {{Action_Remark}}",
+                ['{{Action_Remark}}' => $remark, '{{Action Remark}}' => $remark]
+            );
+        }
         $_SESSION['flash_success'] = 'Compliance rejected.';
         $this->redirect('/compliance/view/' . $id);
     }
