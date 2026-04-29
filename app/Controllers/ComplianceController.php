@@ -854,7 +854,7 @@ class ComplianceController extends BaseController
                 FROM compliances c
                 LEFT JOIN authorities a ON a.id = c.authority_id
                 WHERE $whereSql
-                ORDER BY c.due_date ASC, c.id DESC
+                ORDER BY c.created_at DESC, c.id DESC
                 LIMIT $perPage OFFSET $offset";
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
