@@ -93,12 +93,14 @@ class AuthController extends BaseController
         $basePath = $this->appConfig['url'] ?? '';
         $error = $_SESSION['login_error'] ?? null;
         $success = $_SESSION['login_success'] ?? $_SESSION['signup_success'] ?? null;
+        $twoFaPending = !empty($_SESSION['pending_2fa_user']);
         unset($_SESSION['login_error'], $_SESSION['login_success'], $_SESSION['signup_success']);
         $this->view('auth/login', [
             'pageTitle' => 'Login',
             'basePath' => $basePath,
             'error' => $error,
             'success' => $success,
+            'twoFaPending' => $twoFaPending,
             'currentPage' => null,
             'user' => null,
         ], false);
@@ -107,6 +109,31 @@ class AuthController extends BaseController
     public function login(): void
     {
         Auth::init();
+        if (!empty($_POST['otp_code']) && !empty($_SESSION['pending_2fa_user'])) {
+            $pending = $_SESSION['pending_2fa_user'];
+            $code = trim((string)($_POST['otp_code'] ?? ''));
+            $uid = (int)($pending['id'] ?? 0);
+            if ($uid < 1) {
+                unset($_SESSION['pending_2fa_user']);
+                $_SESSION['login_error'] = '2FA session expired. Please login again.';
+                $this->redirect('/login');
+            }
+            $state = Auth::getTwoFactorState($uid);
+            if (empty($state['enabled']) || !Auth::verifyTotpCode((string)$state['secret'], $code)) {
+                $_SESSION['login_error'] = 'Invalid authentication code.';
+                $_SESSION['pending_2fa_user'] = $pending;
+                $this->redirect('/login');
+            }
+            unset($_SESSION['pending_2fa_user']);
+            Auth::login($pending);
+            try {
+                $this->db->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')->execute([$uid]);
+            } catch (\Throwable $e) {
+            }
+            $_SESSION['post_login_opening'] = 1;
+            $this->redirect($this->dashboardPathForRole((string) ($pending['role_slug'] ?? '')));
+        }
+
         $email = trim($_POST['email'] ?? '');
         $password = $_POST['password'] ?? '';
         if (!$email || !$password) {
@@ -126,6 +153,12 @@ class AuthController extends BaseController
             $this->redirect('/login');
         }
         unset($user['password']);
+        $twoFa = Auth::getTwoFactorState((int)$user['id']);
+        if (!empty($twoFa['enabled'])) {
+            $_SESSION['pending_2fa_user'] = $user;
+            $_SESSION['login_success'] = 'Enter your 6-digit authenticator code.';
+            $this->redirect('/login');
+        }
         Auth::login($user);
         try {
             $this->db->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')->execute([(int) $user['id']]);

@@ -308,6 +308,8 @@ class SettingsController extends BaseController
         $roleRow = $this->db->prepare('SELECT name FROM roles WHERE id = ?');
         $roleRow->execute([(int) ($profileUser['role_id'] ?? 0)]);
         $profileRoleName = $roleRow->fetchColumn() ?: 'Admin';
+        $twoFaState = Auth::getTwoFactorState((int)($profileUser['id'] ?? 0));
+        $activeSessions = Auth::listActiveSessions((int)($profileUser['id'] ?? 0), (int)$orgId);
 
         $legacy = [];
         $ls = $this->db->prepare('SELECT key_name, value FROM settings WHERE organization_id = ?');
@@ -333,6 +335,8 @@ class SettingsController extends BaseController
             'orgUsers' => $orgUsers,
             'profileUser' => $profileUser,
             'profileRoleName' => $profileRoleName,
+            'twoFaState' => $twoFaState,
+            'activeSessions' => $activeSessions,
             'legacySettings' => $legacy,
         ]);
     }
@@ -384,8 +388,29 @@ class SettingsController extends BaseController
     public function saveSecurity(): void
     {
         Auth::requireAuth();
-        if (($_POST['security_action'] ?? '') === 'enable_2fa') {
-            $_SESSION['flash_success'] = 'Two-factor authentication will be available in a future update. Use a strong, unique password in the meantime.';
+        $action = (string)($_POST['security_action'] ?? '');
+        if ($action === 'enable_2fa') {
+            $uid = (int)Auth::id();
+            $secret = Auth::enableTwoFactor($uid);
+            $_SESSION['flash_success'] = 'Two-factor authentication enabled. Add this secret in your authenticator app: ' . $secret;
+            $this->redirect('/settings?tab=security');
+        }
+        if ($action === 'disable_2fa') {
+            $uid = (int)Auth::id();
+            Auth::disableTwoFactor($uid);
+            $_SESSION['flash_success'] = 'Two-factor authentication disabled.';
+            $this->redirect('/settings?tab=security');
+        }
+        if ($action === 'revoke_session') {
+            $sessionId = trim((string)($_POST['session_id'] ?? ''));
+            if ($sessionId !== '') {
+                Auth::revokeSession($sessionId, (int)Auth::id(), (int)Auth::organizationId());
+                if ($sessionId === session_id()) {
+                    Auth::logout();
+                    $this->redirect('/login');
+                }
+            }
+            $_SESSION['flash_success'] = 'Session revoked.';
             $this->redirect('/settings?tab=security');
         }
         $uid = Auth::id();

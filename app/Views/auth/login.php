@@ -31,6 +31,14 @@
                 <?= htmlspecialchars($success) ?>
             </div>
             <?php endif; ?>
+            <?php if (!empty($twoFaPending)): ?>
+            <div class="form-group form-group-icon">
+                <label class="form-label" for="otp_code">Authenticator Code</label>
+                <span class="input-icon"><i class="fas fa-shield-alt"></i></span>
+                <input type="text" id="otp_code" name="otp_code" class="form-control" placeholder="Enter 6-digit code" maxlength="6" pattern="\d{6}" required>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block btn-lg">Verify Code</button>
+            <?php else: ?>
             <div class="form-group form-group-icon">
                 <label class="form-label" for="email">Email</label>
                 <span class="input-icon"><i class="fas fa-envelope"></i></span>
@@ -43,6 +51,7 @@
                 <button type="button" class="input-icon-right toggle-password" aria-label="Toggle password"><i class="fas fa-eye"></i></button>
             </div>
             <button type="submit" class="btn btn-primary btn-block btn-lg">Sign In</button>
+            <?php endif; ?>
             <div class="auth-form-links">
                 <a href="<?= $basePath ?? '' ?>/forgot-password">Forgot Password</a>
                 <a href="<?= $basePath ?? '' ?>/pricing">View Pricing</a>

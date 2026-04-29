@@ -12,7 +12,7 @@
  *   MAIL_USERNAME=you@gmail.com
  *   MAIL_PASSWORD=xxxx xxxx xxxx xxxx   (Gmail App Password)
  *   MAIL_FROM=you@gmail.com
- *   MAIL_FROM_NAME=Easy Home Finance
+ *   MAIL_FROM_NAME=Easy Home Compliance System
  *   MAILGUN_DOMAIN=mg.example.com
  *   MAILGUN_API_KEY=key-xxxxxxxxxxxxxxxx
  *   MAILGUN_ENDPOINT=https://api.mailgun.net
@@ -32,7 +32,7 @@ $config = [
     'username' => (string) (getenv('MAIL_USERNAME') ?: ''),
     'password' => (string) (getenv('MAIL_PASSWORD') ?: ''),
     'from_email' => (string) (getenv('MAIL_FROM') ?: ''),
-    'from_name' => (string) (getenv('MAIL_FROM_NAME') ?: 'Easy Home Finance'),
+    'from_name' => (string) (getenv('MAIL_FROM_NAME') ?: 'Easy Home Compliance System'),
     'mailgun_domain' => (string) (getenv('MAILGUN_DOMAIN') ?: ''),
     'mailgun_api_key' => (string) (getenv('MAILGUN_API_KEY') ?: ''),
     'mailgun_endpoint' => rtrim((string) (getenv('MAILGUN_ENDPOINT') ?: 'https://api.mailgun.net'), '/'),

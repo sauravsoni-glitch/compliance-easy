@@ -15,6 +15,8 @@ $orgUsers = $orgUsers ?? [];
 $profileUser = $profileUser ?? [];
 $profileRoleName = $profileRoleName ?? '';
 $isAdmin = (bool)($isAdmin ?? false);
+$twoFaState = $twoFaState ?? ['enabled' => false, 'secret' => ''];
+$activeSessions = $activeSessions ?? [];
 
 function st_initials(string $name): string {
     $p = preg_split('/\s+/', trim($name));
@@ -184,22 +186,38 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
     <div class="st-2fa-row">
         <div>
             <strong>Two-Factor Authentication</strong>
-            <p class="text-muted text-sm mb-0">Add an extra layer of security to your account</p>
+            <p class="text-muted text-sm mb-0">Add an extra layer of security to your account<?php if (!empty($twoFaState['enabled'])): ?>. Status: <strong>Enabled</strong><?php endif; ?></p>
         </div>
         <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/security">
-            <input type="hidden" name="security_action" value="enable_2fa">
-            <button type="submit" class="btn btn-secondary">Enable</button>
+            <input type="hidden" name="security_action" value="<?= !empty($twoFaState['enabled']) ? 'disable_2fa' : 'enable_2fa' ?>">
+            <button type="submit" class="btn btn-secondary"><?= !empty($twoFaState['enabled']) ? 'Disable' : 'Enable' ?></button>
         </form>
     </div>
+    <?php if (!empty($twoFaState['enabled']) && !empty($twoFaState['secret'])): ?>
+    <p class="text-muted text-sm mb-0 mt-2">Authenticator Secret: <code><?= htmlspecialchars((string)$twoFaState['secret']) ?></code></p>
+    <?php endif; ?>
     <hr class="st-hr">
     <h4 class="st-subhead">Active Sessions</h4>
+    <?php foreach ($activeSessions as $sess): ?>
     <div class="st-session-row">
         <div>
-            <strong>Current Session</strong>
-            <p class="text-muted text-sm mb-0">Windows • Chrome • Active now</p>
+            <strong><?= !empty($sess['is_current']) ? 'Current Session' : 'Active Session' ?></strong>
+            <p class="text-muted text-sm mb-0"><?= htmlspecialchars((string)($sess['user_agent'] ?? 'Unknown device')) ?> • <?= htmlspecialchars((string)($sess['ip_address'] ?? '')) ?> • Last seen <?= htmlspecialchars((string)($sess['last_seen_at'] ?? '')) ?></p>
         </div>
+        <?php if (!empty($sess['is_current'])): ?>
         <span class="badge badge-success">Current</span>
+        <?php else: ?>
+        <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/security">
+            <input type="hidden" name="security_action" value="revoke_session">
+            <input type="hidden" name="session_id" value="<?= htmlspecialchars((string)($sess['session_id'] ?? '')) ?>">
+            <button type="submit" class="btn btn-sm btn-danger">Revoke</button>
+        </form>
+        <?php endif; ?>
     </div>
+    <?php endforeach; ?>
+    <?php if (empty($activeSessions)): ?>
+    <p class="text-muted text-sm">No active sessions found.</p>
+    <?php endif; ?>
 
 <?php elseif ($isAdmin && $activeTab === 'users'): ?>
     <div class="st-users-head">
