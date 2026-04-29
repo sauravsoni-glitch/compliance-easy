@@ -14,6 +14,7 @@ if (is_file($root . '/vendor/autoload.php')) {
 }
 
 $appConfig = require $root . '/config/app.php';
+\App\Core\MailIstTime::ensureDefaultTimezone($appConfig);
 $db = \App\Core\Database::getConnection();
 
 $max = isset($argv[1]) ? (int) $argv[1] : 50;

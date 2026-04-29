@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\BaseController;
+use App\Core\MailIstTime;
 
 class DashboardController extends BaseController
 {
@@ -92,9 +93,9 @@ class DashboardController extends BaseController
         $upcomingDueCount = (int) $upcomingDueCnt->fetchColumn();
 
         [$rbC, $rbCP] = Auth::complianceScopeSql('c.');
-        $monthStart = date('Y-m-01');
-        $nextMonthStart = date('Y-m-01', strtotime('+1 month'));
-        $sixMonthStart = date('Y-m-01', strtotime('-5 months'));
+        $monthStart = MailIstTime::firstDayOfMonthOffsetFromToday(0);
+        $nextMonthStart = MailIstTime::firstDayOfMonthOffsetFromToday(1);
+        $sixMonthStart = MailIstTime::firstDayOfMonthOffsetFromToday(-5);
 
         $onTimeMonthQ = $db->prepare("
             SELECT COUNT(*)

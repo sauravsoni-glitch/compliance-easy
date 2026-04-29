@@ -8,6 +8,8 @@ if (is_file($root . '/vendor/autoload.php')) {
     require $root . '/app/autoload.php';
 }
 
+\App\Core\MailIstTime::ensureDefaultTimezone();
+
 use App\Core\AutomationEmailTemplates;
 use App\Core\ComplianceCreatedMailReport;
 use App\Core\Database;

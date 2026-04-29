@@ -248,7 +248,10 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
         $depts = $escalation['depts'] ?? [];
     ?>
     <h3 class="card-title mt-3">Escalation Matrix</h3>
-    <p class="text-muted text-sm">Smart engine active. Department digest uses fixed escalation slots: <strong>T+0, T+3, T+7, T+14</strong>.</p>
+    <p class="text-muted text-sm">Smart engine active. Department digest uses fixed escalation slots: <strong>T+0, T+3, T+7, T+14</strong> (days <strong>after</strong> the due date — overdue only).</p>
+    <div class="alert alert-info text-sm mb-3" style="border-radius:8px;">
+        <strong>Why “Skipped” or no mail?</strong> Escalation runs on <strong>past due</strong> dates (calendar “today” uses your app timezone, typically IST). Items due <strong>today or later</strong> are skipped for escalation. You also need <strong>enabled</strong> templates of type <strong>Escalation</strong> under Notification Templates, the maker’s email, and working mail settings (<code>config/mail.php</code> / env).
+    </div>
     <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/escalation">
         <input type="hidden" name="esc_action" id="esc_action_field" value="save">
         <div class="st-toggle-row st-toggle-inline">
@@ -311,7 +314,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     </select>
                 </div>
                 <input type="hidden" name="esc_daily_time" value="<?= htmlspecialchars($escTime) ?>">
-                <p class="text-muted text-sm mb-0">Escalation mails are sent only at this configured time (AM/PM): <strong><?= htmlspecialchars($escMeridiem) ?></strong>.</p>
+                <p class="text-muted text-sm mb-0"><strong>Scheduled</strong> escalation runs use this time (AM/PM): <strong><?= htmlspecialchars($escMeridiem) ?></strong>. <strong>Manual Trigger</strong> runs immediately and ignores this clock.</p>
             </div>
         </div>
         <h4 class="st-subhead mt-3">Department Escalation Configuration</h4>
@@ -379,6 +382,9 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
     <?php elseif ($automationSub === 'pre-due'): ?>
     <h3 class="card-title mt-3">Pre-Due Date Reminder &amp; Escalation</h3>
     <p class="text-muted text-sm">Smart engine active. Pre-due reminder slots are fixed to <strong>T-7, T-3, T-1</strong> with automatic short-timeline catch-up.</p>
+    <div class="alert alert-info text-sm mb-3" style="border-radius:8px;">
+        <strong>Why “Skipped” on manual trigger?</strong> Pre-due reminders only run for compliances that are still <strong>Pending</strong> (maker has not submitted yet). Items in <strong>Submitted</strong> or <strong>Under review</strong> are skipped — the maker already progressed the workflow. Past-due dates (already overdue for pre-due), missing notification templates, or users without email can also increase skips.
+    </div>
     <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/pre-due">
         <input type="hidden" name="pre_action" id="pre_action_field" value="save">
         <div class="st-toggle-row st-toggle-inline">
@@ -439,12 +445,12 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
             </div>
         </div>
         <div class="st-escalation-logic card-inner-muted">
-            <strong>Escalation logic</strong>
+            <strong>Who receives pre-due mail</strong>
             <ul class="text-sm mb-0">
                 <li>First Reminder: mail to Compliance Owner</li>
                 <li>Second Reminder: Owner + CC Reporting Manager</li>
                 <li>Final Reminder: Owner + CC Manager + CC Department Head</li>
-                <li>Reminders stop once compliance is submitted or approved.</li>
+                <li>No pre-due mail when status is <strong>Submitted</strong>, <strong>Under review</strong>, <strong>Approved</strong>, <strong>Completed</strong>, or <strong>Rejected</strong> — reminders are for upcoming pending work only.</li>
             </ul>
         </div>
         <h4 class="st-subhead">Department Wise Escalation Mapping</h4>

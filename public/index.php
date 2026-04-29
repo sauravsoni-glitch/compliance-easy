@@ -40,6 +40,8 @@ if (is_file(ROOT_PATH . '/vendor/autoload.php')) {
     require ROOT_PATH . '/app/autoload.php';
 }
 
+\App\Core\MailIstTime::ensureDefaultTimezone();
+
 use App\Core\Router;
 use App\Core\Auth;
 use App\Core\Database;

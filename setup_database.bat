@@ -4,10 +4,24 @@ cd /d "%~dp0"
 
 REM Step 1: Create database using PHP (no mysql.exe needed)
 set PHP_CMD=
-where php >nul 2>&1 && set PHP_CMD=php
+if exist "%LOCALAPPDATA%\Programs\Php\php.exe" set PHP_CMD=%LOCALAPPDATA%\Programs\Php\php.exe
 if not defined PHP_CMD if exist "C:\xampp\php\php.exe" set PHP_CMD=C:\xampp\php\php.exe
 if not defined PHP_CMD if exist "C:\laragon\bin\php\php.exe" set PHP_CMD=C:\laragon\bin\php\php.exe
-if not defined PHP_CMD for /d %%D in (C:\laragon\bin\php\php-*) do if exist "%%D\php.exe" set "PHP_CMD=%%D\php.exe"
+if not defined PHP_CMD if exist "D:\laragon\bin\php\php.exe" set PHP_CMD=D:\laragon\bin\php\php.exe
+if not defined PHP_CMD for /d %%D in ("C:\laragon\bin\php\*") do (
+  if exist "%%~D\php.exe" (
+    set "PHP_CMD=%%~D\php.exe"
+    goto :php_ok
+  )
+)
+if not defined PHP_CMD for /d %%D in ("D:\laragon\bin\php\*") do (
+  if exist "%%~D\php.exe" (
+    set "PHP_CMD=%%~D\php.exe"
+    goto :php_ok
+  )
+)
+if not defined PHP_CMD where php >nul 2>&1 && set PHP_CMD=php
+:php_ok
 if not defined PHP_CMD (
     echo PHP not found. Install XAMPP or add PHP to PATH.
     pause

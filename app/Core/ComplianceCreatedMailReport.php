@@ -85,7 +85,9 @@ final class ComplianceCreatedMailReport
             'due_date_fmt' => self::fmtDate($row['due_date'] ?? null),
             'expected_date_fmt' => self::fmtDate($row['expected_date'] ?? null),
             'reminder_date_fmt' => self::fmtDate($row['reminder_date'] ?? null),
-            'creation_fmt' => date('M j, Y g:i A'),
+            'creation_fmt' => !empty($row['created_at'])
+                ? MailIstTime::formatDbDateTime((string) $row['created_at'])
+                : MailIstTime::formatMailStampNow(),
             'checklist' => $checklist,
         ];
     }
@@ -155,9 +157,9 @@ final class ComplianceCreatedMailReport
         if ($raw === null || $raw === '') {
             return '—';
         }
-        $t = strtotime((string) $raw);
+        $f = MailIstTime::formatDateOnly((string) $raw);
 
-        return $t ? date('M j, Y', $t) : '—';
+        return $f !== '' ? $f : '—';
     }
 
     private static function h(string $s): string

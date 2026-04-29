@@ -56,6 +56,7 @@ final class EmailTemplateVars
             'Owner_Name' => ['Owner Name', 'OwnerName', 'owner_name', 'Assigned To', 'AssignedTo', 'Maker'],
             'Reviewer_Name' => ['Reviewer Name', 'ReviewerName', 'reviewer_name', 'Checker'],
             'Approver_Name' => ['Approver Name', 'ApproverName', 'approver_name'],
+            'Sent_At' => ['Sent At', 'sent_at', 'Current_Time', 'Current Time', 'Notification_Time', 'Notification Time'],
         ];
 
         foreach ($canonical as $key => $value) {

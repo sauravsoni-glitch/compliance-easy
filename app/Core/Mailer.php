@@ -25,6 +25,7 @@ final class Mailer
         string $roleLabel,
         string $department
     ): array {
+        MailIstTime::ensureDefaultTimezone($appConfig);
         $cfg = self::config();
         if (empty($cfg['enabled'])) {
             return [false, null];
@@ -63,6 +64,7 @@ final class Mailer
         string $altBody,
         array $ccEmails = []
     ): array {
+        MailIstTime::ensureDefaultTimezone($appConfig);
         $cfg = self::config();
         if (empty($cfg['enabled'])) {
             return [false, null];

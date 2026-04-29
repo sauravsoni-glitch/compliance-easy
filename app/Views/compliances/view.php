@@ -42,7 +42,7 @@ $canMakerAct = !empty($auth['isAdmin']) || (!empty($auth['isMaker']) && $isOwner
 $st = $c['status'];
 $isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
 $isOverdue = !empty($c['due_date'])
-    && $c['due_date'] < date('Y-m-d')
+    && $c['due_date'] < \App\Core\MailIstTime::todayYmd()
     && !in_array($c['status'], ['completed', 'approved', 'rejected'], true);
 $usesDoa = \App\Core\DoaEngine::complianceUsesDoa($c);
 $canDoaLevelAct = !empty($auth['isAdmin']) || (int)($auth['id'] ?? 0) === (int)($c['doa_active_user_id'] ?? 0);
@@ -67,7 +67,9 @@ $historyRows = $historyTimeline ?? [];
 $latestSubmission = !empty($submissionRows) ? $submissionRows[0] : null;
 $latestDocLabel = !empty($latestSubmission['document_name']) ? (string)$latestSubmission['document_name'] : 'No document uploaded yet';
 $latestCheckerRemark = trim((string)($latestSubmission['checker_remark'] ?? ''));
-$latestMakerCompletion = !empty($latestSubmission['maker_completion_date']) ? date('j M Y', strtotime((string)$latestSubmission['maker_completion_date'])) : '—';
+$latestMakerCompletion = !empty($latestSubmission['maker_completion_date'])
+    ? \App\Core\MailIstTime::formatUiDate((string) $latestSubmission['maker_completion_date'], null, 'j M Y')
+    : '—';
 $latestActionByRole = ['maker' => '', 'reviewer' => '', 'approver' => ''];
 foreach ($historyRows as $hrow) {
     $act = strtolower((string)($hrow['action'] ?? ''));
@@ -106,7 +108,7 @@ foreach ($historyRows as $hrow) {
             </div>
         </div>
         <div class="compliance-meta-bar">
-            <div class="cmb-item<?= !empty($isOverdue) ? ' cmb-overdue' : '' ?>"><span class="cmb-label">Due date</span><span class="cmb-val <?= !empty($isOverdue) ? 'text-danger font-weight-600' : '' ?>"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
+            <div class="cmb-item<?= !empty($isOverdue) ? ' cmb-overdue' : '' ?>"><span class="cmb-label">Due date</span><span class="cmb-val <?= !empty($isOverdue) ? 'text-danger font-weight-600' : '' ?>"><?= \App\Core\MailIstTime::formatUiDate($c['due_date'] ?? null) ?></span></div>
             <div class="cmb-item"><span class="cmb-label">Risk</span><span class="cmb-val"><span class="badge <?= in_array($c['risk_level'], ['critical','high'], true) ? 'badge-doarisk' : 'badge-secondary' ?>"><?= htmlspecialchars(ucfirst($c['risk_level'])) ?></span></span></div>
             <div class="cmb-item"><span class="cmb-label">Priority</span><span class="cmb-val"><span class="badge badge-<?= in_array($c['priority'], ['critical','high'], true) ? 'danger' : 'secondary' ?>"><?= htmlspecialchars(ucfirst($c['priority'])) ?></span></span></div>
             <div class="cmb-item cmb-team"><span class="cmb-label">Maker</span><span class="cmb-val"><?= htmlspecialchars($c['owner_name'] ?? '—') ?></span></div>
@@ -178,7 +180,7 @@ foreach ($historyRows as $hrow) {
                         <tbody>
                             <?php foreach ($doaLogs as $log): ?>
                             <tr>
-                                <td class="text-muted"><?= !empty($log['created_at']) ? htmlspecialchars(date('M j, Y H:i', strtotime($log['created_at']))) : '—' ?></td>
+                                <td class="text-muted"><?= !empty($log['created_at']) ? htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string) $log['created_at'])) : '—' ?></td>
                                 <td><?= htmlspecialchars((string)($log['user_name'] ?? '—')) ?></td>
                                 <td><?= htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($log['role'] ?? '')))) ?></td>
                                 <td>L<?= (int)($log['level'] ?? 0) ?></td>
@@ -234,7 +236,7 @@ foreach ($historyRows as $hrow) {
 
 <?php if ($tab === 'overview'): ?>
 <?php if ($isOverdue): ?>
-<?php $overdueDays = (int)((strtotime(date('Y-m-d')) - strtotime($c['due_date'])) / 86400); ?>
+<?php $overdueDays = \App\Core\MailIstTime::wholeCalendarDaysPastDue((string) ($c['due_date'] ?? '')); ?>
 <?php $hasRemark = !empty($c['overdue_remark']); ?>
 <div class="overdue-remark-card">
     <div class="orc-top">
@@ -248,7 +250,7 @@ foreach ($historyRows as $hrow) {
     <?php if ($hasRemark): ?>
     <div class="orc-view" id="orc-view">
         <span class="orc-remark-text"><?= nl2br(htmlspecialchars($c['overdue_remark'])) ?></span>
-        <span class="orc-who"><i class="far fa-user"></i> <?= htmlspecialchars($c['overdue_remark_by_name'] ?? '—') ?> · <?= !empty($c['overdue_remark_at']) ? date('M j, Y', strtotime($c['overdue_remark_at'])) : '' ?></span>
+        <span class="orc-who"><i class="far fa-user"></i> <?= htmlspecialchars($c['overdue_remark_by_name'] ?? '—') ?> · <?= !empty($c['overdue_remark_at']) ? htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string) $c['overdue_remark_at'])) : '' ?></span>
     </div>
     <?php endif; ?>
 
@@ -306,7 +308,7 @@ foreach ($historyRows as $hrow) {
         <div><span class="co-label">Evidence required</span><span class="co-val">No</span></div>
         <?php endif; ?>
         <div><span class="co-label">Status</span><span class="co-val"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $c['status']))) ?></span></div>
-        <div><span class="co-label">Due date</span><span class="co-val"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div>
+        <div><span class="co-label">Due date</span><span class="co-val"><?= \App\Core\MailIstTime::formatUiDate($c['due_date'] ?? null) ?></span></div>
     </div>
     <?php if (!empty($c['circular_reference'])): ?>
     <p class="mt-2"><span class="co-label">Reference</span> <?= htmlspecialchars($c['circular_reference']) ?></p>
@@ -342,7 +344,7 @@ foreach ($historyRows as $hrow) {
             <div class="activity-tl-body">
                 <strong><?= htmlspecialchars($d['user_name'] ?? 'User') ?></strong>
                 <div><?= nl2br(htmlspecialchars((string)($d['comment'] ?? ''))) ?></div>
-                <div class="activity-tl-meta"><?= date('M j, Y H:i', strtotime((string)($d['created_at'] ?? 'now'))) ?></div>
+                <div class="activity-tl-meta"><?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($d['created_at'] ?? ''))) ?></div>
             </div>
         </li>
         <?php endforeach; ?>
@@ -370,7 +372,7 @@ foreach ($historyRows as $hrow) {
             <tbody>
                 <?php foreach ($doaLogs as $lg): ?>
                 <tr>
-                    <td class="text-sm"><?= htmlspecialchars($lg['created_at'] ?? '') ?></td>
+                    <td class="text-sm"><?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($lg['created_at'] ?? ''))) ?></td>
                     <td>L<?= (int)($lg['level'] ?? 0) ?></td>
                     <td><?= htmlspecialchars(ucfirst((string)($lg['role'] ?? ''))) ?></td>
                     <td><?= htmlspecialchars($lg['user_name'] ?? '—') ?></td>
@@ -386,10 +388,10 @@ foreach ($historyRows as $hrow) {
 <div class="card">
     <h3 class="card-title">Important dates</h3>
     <div class="important-dates-row">
-        <div class="id-item"><i class="far fa-calendar-alt text-muted"></i><div><span class="id-label">Start</span><span class="id-date"><?= $c['start_date'] ? date('M j, Y', strtotime($c['start_date'])) : '—' ?></span></div></div>
-        <div class="id-item id-item-due"><i class="far fa-clock text-danger"></i><div><span class="id-label">Due</span><span class="id-date"><?= $c['due_date'] ? date('M j, Y', strtotime($c['due_date'])) : '—' ?></span></div></div>
-        <div class="id-item id-item-rem"><i class="fas fa-exclamation-triangle text-warning"></i><div><span class="id-label">Reminder</span><span class="id-date"><?= $c['reminder_date'] ? date('M j, Y', strtotime($c['reminder_date'])) : '—' ?></span></div></div>
-        <div class="id-item"><i class="far fa-calendar"></i><div><span class="id-label">Created</span><span class="id-date"><?= date('M j, Y', strtotime($c['created_at'])) ?></span></div></div>
+        <div class="id-item"><i class="far fa-calendar-alt text-muted"></i><div><span class="id-label">Start</span><span class="id-date"><?= \App\Core\MailIstTime::formatUiDate($c['start_date'] ?? null) ?></span></div></div>
+        <div class="id-item id-item-due"><i class="far fa-clock text-danger"></i><div><span class="id-label">Due</span><span class="id-date"><?= \App\Core\MailIstTime::formatUiDate($c['due_date'] ?? null) ?></span></div></div>
+        <div class="id-item id-item-rem"><i class="fas fa-exclamation-triangle text-warning"></i><div><span class="id-label">Reminder</span><span class="id-date"><?= \App\Core\MailIstTime::formatUiDate($c['reminder_date'] ?? null) ?></span></div></div>
+        <div class="id-item"><i class="far fa-calendar"></i><div><span class="id-label">Created</span><span class="id-date"><?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($c['created_at'] ?? ''))) ?></span></div></div>
     </div>
 </div>
 
@@ -519,7 +521,7 @@ if ($isTwoLevel) {
             <div class="maker-doc-item">
                 <span class="maker-doc-icon"><i class="far fa-file-alt"></i></span>
                 <span class="maker-doc-name"><?= htmlspecialchars($d['file_name']) ?></span>
-                <span class="maker-doc-meta"><?= date('d M Y', strtotime($d['uploaded_at'])) ?></span>
+                <span class="maker-doc-meta"><?= \App\Core\MailIstTime::formatUiDateTime((string)($d['uploaded_at'] ?? '')) ?></span>
                 <div class="maker-doc-actions">
                     <a href="<?= $basePath ?>/uploads/<?= htmlspecialchars($d['file_path']) ?>" target="_blank" class="btn btn-sm btn-secondary" title="View"><i class="fas fa-eye"></i> View</a>
                     <a href="<?= $basePath ?>/uploads/<?= htmlspecialchars($d['file_path']) ?>" download class="btn btn-sm btn-secondary" title="Download"><i class="fas fa-download"></i></a>
@@ -546,7 +548,7 @@ if ($isTwoLevel) {
     <form method="post" action="<?= $basePath ?>/compliances/submit/<?= (int)$c['id'] ?>">
         <div class="form-group">
             <label class="form-label">Completion date</label>
-            <input type="date" name="completion_date" class="form-control" style="max-width:200px" value="<?= htmlspecialchars(date('Y-m-d')) ?>" max="<?= htmlspecialchars(date('Y-m-d')) ?>">
+            <input type="date" name="completion_date" class="form-control" style="max-width:200px" value="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>" max="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>">
         </div>
         <div class="form-group">
             <label class="form-label">Comment</label>
@@ -678,7 +680,7 @@ if ($isTwoLevel) {
                 <tr>
                     <td><i class="far fa-file-pdf text-danger"></i> <?= htmlspecialchars($d['file_name']) ?></td>
                     <td>Evidence</td>
-                    <td><?= date('M d, Y', strtotime($d['uploaded_at'])) ?></td>
+                    <td><?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($d['uploaded_at'] ?? ''))) ?></td>
                     <td><?= htmlspecialchars($d['uploader_name'] ?? '—') ?></td>
                     <td><?= htmlspecialchars($documentVersions[(int)$d['id']] ?? 'v1.0') ?></td>
                     <td><span class="badge badge-success"><?= htmlspecialchars(ucfirst($d['status'])) ?></span></td>
@@ -739,29 +741,29 @@ if ($isTwoLevel) {
                 <?php
                 $stRaw = (string)($s['status'] ?? '');
                 $detail = [
-                    'month' => $s['submit_for_month'] ? date('F Y', strtotime($s['submit_for_month'])) : '—',
-                    'submission_date' => $s['submission_date'] ? date('j M Y, H:i', strtotime($s['submission_date'])) : '—',
+                    'month' => $s['submit_for_month'] ? \App\Core\MailIstTime::formatUiDate(substr((string) $s['submit_for_month'], 0, 10), null, 'F Y') : '—',
+                    'submission_date' => $s['submission_date'] ? \App\Core\MailIstTime::formatUiDateTime((string) $s['submission_date']) : '—',
                     'uploader' => $s['uploader_name'] ?? '—',
-                    'completion' => !empty($s['maker_completion_date']) ? date('j M Y', strtotime($s['maker_completion_date'])) : '—',
+                    'completion' => !empty($s['maker_completion_date']) ? \App\Core\MailIstTime::formatUiDate((string) $s['maker_completion_date'], null, 'j M Y') : '—',
                     'document' => $s['document_name'] ?? '—',
                     'document_path' => $s['document_path'] ?? '',
                     'status' => $stRaw === 'uploaded' ? 'On file' : ($stRaw !== '' ? $stRaw : '—'),
                     'checker' => $s['checker_name'] ?? '—',
                     'remark' => $s['checker_remark'] ?? '—',
-                    'checker_date' => $s['checker_date'] ? date('j M Y', strtotime($s['checker_date'])) : '—',
+                    'checker_date' => $s['checker_date'] ? \App\Core\MailIstTime::formatUiDate((string) $s['checker_date'], null, 'j M Y') : '—',
                     'escalation' => $s['escalation_level'] ?? '',
                 ];
                 ?>
                 <tr class="history-row-detail" style="cursor:pointer" data-submission="<?= base64_encode(json_encode($detail)) ?>">
-                    <td><?= $s['submit_for_month'] ? date('M Y', strtotime($s['submit_for_month'])) : '—' ?></td>
-                    <td><?= $s['submission_date'] ? date('j M Y', strtotime($s['submission_date'])) : '—' ?></td>
+                    <td><?= $s['submit_for_month'] ? \App\Core\MailIstTime::formatUiDate(substr((string) $s['submit_for_month'], 0, 10), null, 'M Y') : '—' ?></td>
+                    <td><?= $s['submission_date'] ? htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string) $s['submission_date'])) : '—' ?></td>
                     <td><?= htmlspecialchars($s['uploader_name'] ?? '—') ?></td>
-                    <td><?= !empty($s['maker_completion_date']) ? date('j M Y', strtotime($s['maker_completion_date'])) : '—' ?></td>
+                    <td><?= !empty($s['maker_completion_date']) ? \App\Core\MailIstTime::formatUiDate((string) $s['maker_completion_date'], null, 'j M Y') : '—' ?></td>
                     <td><?php if (!empty($s['document_name'])): ?><a href="<?= $basePath ?>/uploads/<?= htmlspecialchars($s['document_path'] ?? '') ?>" download onclick="event.stopPropagation()"><i class="fas fa-download"></i> <?= htmlspecialchars(mb_substr($s['document_name'], 0, 20)) ?><?= mb_strlen($s['document_name']) > 20 ? '…' : '' ?></a><?php else: ?>—<?php endif; ?></td>
                     <td><span class="badge badge-<?= ($s['status'] ?? '') === 'approved' ? 'success' : (($s['status'] ?? '') === 'rework' ? 'warning' : (($s['status'] ?? '') === 'rejected' ? 'danger' : (($s['status'] ?? '') === 'uploaded' ? 'info' : 'secondary'))) ?>"><?= htmlspecialchars(($s['status'] ?? '') === 'uploaded' ? 'On file' : ucfirst((string)($s['status'] ?? '—'))) ?></span></td>
                     <td><?= htmlspecialchars($s['checker_name'] ?? '—') ?></td>
                     <td><?= htmlspecialchars(mb_substr($s['checker_remark'] ?? '—', 0, 36)) ?><?= mb_strlen($s['checker_remark'] ?? '') > 36 ? '…' : '' ?></td>
-                    <td><?= $s['checker_date'] ? date('j M Y', strtotime($s['checker_date'])) : '—' ?></td>
+                    <td><?= $s['checker_date'] ? \App\Core\MailIstTime::formatUiDate((string) $s['checker_date'], null, 'j M Y') : '—' ?></td>
                     <td><?= !empty($s['escalation_level']) ? '<span class="badge badge-danger">' . htmlspecialchars($s['escalation_level']) . '</span>' : '—' ?></td>
                 </tr>
                 <?php endforeach; ?>
@@ -786,7 +788,7 @@ if ($isTwoLevel) {
         <button type="submit" class="btn btn-secondary btn-sm">Save Debrief</button>
     </form>
     <?php if (!empty($c['final_debrief_at'])): ?>
-    <p class="text-muted text-sm mt-2 mb-0">Last updated: <?= htmlspecialchars(date('M j, Y H:i', strtotime((string)$c['final_debrief_at']))) ?></p>
+    <p class="text-muted text-sm mt-2 mb-0">Last updated: <?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($c['final_debrief_at'] ?? ''))) ?></p>
     <?php endif; ?>
 </div>
 
@@ -806,7 +808,7 @@ if ($isTwoLevel) {
                 <?php if (!empty($h['comment'])): ?>
                 <div class="activity-tl-comment"><?= htmlspecialchars($h['comment']) ?></div>
                 <?php endif; ?>
-                <div class="activity-tl-meta"><?= htmlspecialchars($h['user_name'] ?? 'System') ?> — <?= date('M j, Y H:i', strtotime($h['created_at'])) ?></div>
+                <div class="activity-tl-meta"><?= htmlspecialchars($h['user_name'] ?? 'System') ?> — <?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($h['created_at'] ?? ''))) ?></div>
             </div>
         </li>
         <?php endforeach; ?>

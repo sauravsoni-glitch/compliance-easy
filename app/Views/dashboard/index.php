@@ -147,9 +147,9 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
                     foreach ($trend as $t):
                         $cnt = (int)$t['cnt'];
                         $h = $maxCnt ? round(($cnt / $maxCnt) * 100) : 0;
-                        $monthLabel = date('M Y', strtotime($t['month'] . '-01'));
+                        $monthLabel = \App\Core\MailIstTime::formatDateOnly($t['month'] . '-01', null, 'M Y');
                     ?>
-                    <a href="<?= $basePath ?>/compliance?from=<?= $t['month'] ?>-01&to=<?= date('Y-m-t', strtotime($t['month'] . '-01')) ?>" class="bar-item" title="<?= $monthLabel ?>: <?= $cnt ?>">
+                    <a href="<?= $basePath ?>/compliance?from=<?= $t['month'] ?>-01&to=<?= htmlspecialchars(\App\Core\MailIstTime::lastDayOfYm((string) $t['month'])) ?>" class="bar-item" title="<?= $monthLabel ?>: <?= $cnt ?>">
                         <span class="bar-fill" style="height: <?= $h ?>%"></span>
                         <span class="bar-label"><?= $monthLabel ?></span>
                     </a>
@@ -172,7 +172,7 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
                         <span class="activity-dot"></span>
                         <div class="activity-body">
                             <strong>Created <?= htmlspecialchars($a['compliance_code']) ?>:</strong> <?= htmlspecialchars($a['title']) ?>
-                            <div class="text-muted activity-meta">by <?= htmlspecialchars($user['full_name'] ?? 'User') ?> · <?= date('M j, Y', strtotime($a['created_at'])) ?></div>
+                            <div class="text-muted activity-meta">by <?= htmlspecialchars($user['full_name'] ?? 'User') ?> · <?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($a['created_at'] ?? ''))) ?></div>
                         </div>
                     </a>
                 </li>
@@ -240,7 +240,7 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
                             <td><?= htmlspecialchars($t['compliance_code']) ?></td>
                             <td><a href="<?= $basePath ?>/compliance/view/<?= (int)$t['id'] ?>"><?= htmlspecialchars(mb_substr($t['title'], 0, 45)) ?><?= mb_strlen($t['title']) > 45 ? '…' : '' ?></a></td>
                             <td><span class="badge badge-secondary"><?= htmlspecialchars($t['status']) ?></span></td>
-                            <td><?= $t['due_date'] ? date('M d, Y', strtotime($t['due_date'])) : '—' ?></td>
+                            <td><?= \App\Core\MailIstTime::formatUiDate($t['due_date'] ?? null) ?></td>
                             <td><a href="<?= $basePath ?>/compliance/view/<?= (int)$t['id'] ?>" class="btn btn-sm btn-secondary">Open</a></td>
                         </tr>
                         <?php endforeach; ?>
@@ -284,15 +284,15 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
     </div>
 
     <div class="dashboard-calendar-span">
-        <div class="card compliance-calendar-card compliance-calendar-ref">
+        <div class="card compliance-calendar-card compliance-calendar-ref" data-today-ist="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>">
             <div class="card-header compliance-cal-header-ref">
                 <h3 class="card-title">Compliance Calendar</h3>
                 <div class="cal-month-nav-ref">
                     <?php
-                    $calMonth = $calendarMonth ?? date('Y-m');
-                    $prevMonth = date('Y-m', strtotime($calMonth . '-01 -1 month'));
-                    $nextMonth = date('Y-m', strtotime($calMonth . '-01 +1 month'));
-                    $monthLabel = date('F Y', strtotime($calMonth . '-01'));
+                    $calMonth = $calendarMonth ?? \App\Core\MailIstTime::yearMonthNow();
+                    $prevMonth = \App\Core\MailIstTime::shiftYearMonth($calMonth, -1);
+                    $nextMonth = \App\Core\MailIstTime::shiftYearMonth($calMonth, 1);
+                    $monthLabel = \App\Core\MailIstTime::formatDateOnly($calMonth . '-01', null, 'F Y');
                     ?>
                     <a href="?cal_month=<?= htmlspecialchars($prevMonth) ?>" class="cal-nav-arrow" aria-label="Previous month">&lt;</a>
                     <span class="cal-month-title-ref"><?= htmlspecialchars($monthLabel) ?></span>
@@ -304,15 +304,15 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
                 foreach (['S', 'M', 'T', 'W', 'T', 'F', 'S'] as $dh) {
                     echo '<span class="cal-head cal-head-ref">' . $dh . '</span>';
                 }
-                $calStartM = ($calendarMonth ?? date('Y-m')) . '-01';
-                $daysInMonth = (int) date('t', strtotime($calStartM));
-                $firstDow = (int) date('w', strtotime($calStartM));
-                $today = date('Y-m-d');
+                $calYm = $calendarMonth ?? \App\Core\MailIstTime::yearMonthNow();
+                $daysInMonth = \App\Core\MailIstTime::daysInMonthYm($calYm);
+                $firstDow = \App\Core\MailIstTime::firstWeekdayOfYm($calYm);
+                $today = \App\Core\MailIstTime::todayYmd();
                 for ($i = 0; $i < $firstDow; $i++) {
                     echo '<span class="cal-cell cal-empty cal-cell-ref-empty"></span>';
                 }
                 for ($day = 1; $day <= $daysInMonth; $day++) {
-                    $date = ($calendarMonth ?? date('Y-m')) . '-' . str_pad((string)$day, 2, '0', STR_PAD_LEFT);
+                    $date = $calYm . '-' . str_pad((string)$day, 2, '0', STR_PAD_LEFT);
                     $events = $calendarEvents[$date] ?? [];
                     $hasEvent = count($events) > 0;
                     echo '<div class="cal-cell cal-cell-ref" data-date="' . htmlspecialchars($date) . '" data-events="' . htmlspecialchars(json_encode($events)) . '" role="button" tabindex="0">';
@@ -341,7 +341,7 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
         <div class="card upcoming-events-panel upcoming-events-ref">
             <div class="card-header">
                 <h3 class="card-title">Upcoming Events</h3>
-                <a href="<?= $basePath ?>/compliance?from=<?= date('Y-m-d') ?>&to=<?= date('Y-m-d', strtotime('+30 days')) ?>" class="btn btn-secondary btn-sm">View All</a>
+                <a href="<?= $basePath ?>/compliance?from=<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>&to=<?= htmlspecialchars(\App\Core\MailIstTime::shiftCalendarDays(\App\Core\MailIstTime::todayYmd(), 30)) ?>" class="btn btn-secondary btn-sm">View All</a>
             </div>
             <?php if (!empty($upcomingDue)): ?>
             <ul class="upcoming-events-list-ref">
@@ -359,11 +359,12 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
                     $pillClass = 'upcoming-pill-pending';
                     $pillText = 'pending';
                 }
-                $rangeStart = !empty($u['start_date']) ? $u['start_date'] : (!empty($u['expected_date']) ? $u['expected_date'] : date('Y-m-d', strtotime($due . ' -6 days')));
-                if ($rangeStart > $due) {
-                    $rangeStart = $due;
+                $dueY = substr((string) $due, 0, 10);
+                $rangeStart = !empty($u['start_date']) ? substr((string) $u['start_date'], 0, 10) : (!empty($u['expected_date']) ? substr((string) $u['expected_date'], 0, 10) : \App\Core\MailIstTime::shiftCalendarDays($dueY, -6));
+                if ($rangeStart > $dueY) {
+                    $rangeStart = $dueY;
                 }
-                $rangeLabel = date('M j', strtotime($rangeStart)) . ' - ' . date('M j', strtotime($due));
+                $rangeLabel = \App\Core\MailIstTime::formatDateOnly($rangeStart, null, 'M j') . ' - ' . \App\Core\MailIstTime::formatDateOnly($dueY, null, 'M j');
                 ?>
                 <li class="upcoming-event-row-ref">
                     <a href="<?= $basePath ?>/compliance/view/<?= (int)$u['id'] ?>" class="upcoming-event-link-ref">
@@ -413,7 +414,7 @@ function renderKpiModal(string $id, string $title, array $list, string $viewAllU
                         ?>
                         <td><span class="badge <?= $statusBadgeClass ?>"><?= htmlspecialchars(ucfirst($statusLabel)) ?></span></td>
                         <td><span class="badge <?= $riskBadgeClass ?>"><?= htmlspecialchars($riskRaw !== '' ? ucfirst($riskRaw) : '—') ?></span></td>
-                        <td><?= !empty($r['due_date']) ? date('M d, Y', strtotime($r['due_date'])) : '—' ?></td>
+                        <td><?= !empty($r['due_date']) ? \App\Core\MailIstTime::formatUiDate((string) $r['due_date']) : '—' ?></td>
                         <td><?= htmlspecialchars((string)($r['owner_name'] ?? '—')) ?></td>
                     </tr>
                     <?php endforeach; ?>
@@ -429,9 +430,11 @@ renderKpiModal('modal-all', 'All Compliances', $allList ?? [], $basePath . '/com
 renderKpiModal('modal-pending', 'Pending Submissions', $pendingList ?? [], $basePath . '/compliance?filter=pending', $basePath);
 renderKpiModal('modal-approved', 'Approved Compliances', $approvedList ?? [], $basePath . '/compliance?filter=approved', $basePath);
 renderKpiModal('modal-rejected', 'Rejected Compliances', $rejectedList ?? [], $basePath . '/compliance?filter=rejected', $basePath);
-renderKpiModal('modal-upcoming', 'Upcoming Due Dates', $upcomingDueList ?? [], $basePath . '/compliance?from=' . date('Y-m-d') . '&to=' . date('Y-m-d', strtotime('+7 days')), $basePath);
-renderKpiModal('modal-ontime-month', 'On-Time Completed (This Month)', $onTimeMonthList ?? [], $basePath . '/compliance?filter=approved&from=' . date('Y-m-01') . '&to=' . date('Y-m-t'), $basePath);
-renderKpiModal('modal-ontime-6m', 'On-Time Completed (Last 6 Months)', $onTime6MonthsList ?? [], $basePath . '/compliance?filter=approved&from=' . date('Y-m-01', strtotime('-5 months')) . '&to=' . date('Y-m-t'), $basePath);
+renderKpiModal('modal-upcoming', 'Upcoming Due Dates', $upcomingDueList ?? [], $basePath . '/compliance?from=' . \App\Core\MailIstTime::todayYmd() . '&to=' . \App\Core\MailIstTime::shiftCalendarDays(\App\Core\MailIstTime::todayYmd(), 7), $basePath);
+[$dashboardMonthFirst, $dashboardMonthLast] = \App\Core\MailIstTime::monthBoundsYmd();
+$dashboardSixMonthFrom = \App\Core\MailIstTime::firstDayOfMonthOffsetFromToday(-5);
+renderKpiModal('modal-ontime-month', 'On-Time Completed (This Month)', $onTimeMonthList ?? [], $basePath . '/compliance?filter=approved&from=' . $dashboardMonthFirst . '&to=' . $dashboardMonthLast, $basePath);
+renderKpiModal('modal-ontime-6m', 'On-Time Completed (Last 6 Months)', $onTime6MonthsList ?? [], $basePath . '/compliance?filter=approved&from=' . $dashboardSixMonthFrom . '&to=' . $dashboardMonthLast, $basePath);
 renderKpiModal('modal-overdue-tasks', 'Overdue Tasks', $overdueTasksList ?? [], $basePath . '/compliance?filter=overdue', $basePath);
 ?>
 
@@ -440,6 +443,8 @@ renderKpiModal('modal-overdue-tasks', 'Overdue Tasks', $overdueTasksList ?? [], 
     var basePath = <?= json_encode($basePath ?? '') ?>;
     /* Reference-style calendar: selected date + inline day panel */
     (function calRef(){
+        var calCard = document.querySelector('.compliance-calendar-ref');
+        var todayIst = calCard && calCard.getAttribute('data-today-ist') ? calCard.getAttribute('data-today-ist') : null;
         var cells = document.querySelectorAll('.cal-grid-ref .cal-cell-ref[data-date]');
         var titleEl = document.getElementById('cal-selected-title-ref');
         var bodyEl = document.getElementById('cal-selected-body-ref');
@@ -454,7 +459,7 @@ renderKpiModal('modal-overdue-tasks', 'Overdue Tasks', $overdueTasksList ?? [], 
         }
         function renderPanel(dateStr, events) {
             var d = dateStr ? new Date(dateStr + 'T12:00:00') : null;
-            titleEl.textContent = d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+            titleEl.textContent = d ? d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric', year: 'numeric' }) : '—';
             var list = dedupeEvents(events);
             if (!list.length) {
                 bodyEl.innerHTML = '<div class="cal-selected-empty"><i class="far fa-calendar-alt cal-selected-empty-icon"></i><p class="text-muted mb-0">No events on this date</p></div>';
@@ -475,9 +480,12 @@ renderKpiModal('modal-overdue-tasks', 'Overdue Tasks', $overdueTasksList ?? [], 
             if (cell) cell.classList.add('cal-selected-ref');
         }
         var calYm = cells[0].getAttribute('data-date').slice(0, 7);
-        var today = new Date();
-        var y = today.getFullYear(), m = String(today.getMonth() + 1).padStart(2, '0'), da = String(today.getDate()).padStart(2, '0');
-        var todayStr = y + '-' + m + '-' + da;
+        var todayStr = todayIst;
+        if (!todayStr) {
+            var today = new Date();
+            var y = today.getFullYear(), m = String(today.getMonth() + 1).padStart(2, '0'), da = String(today.getDate()).padStart(2, '0');
+            todayStr = y + '-' + m + '-' + da;
+        }
         var initial = null;
         if (todayStr.slice(0, 7) === calYm) {
             cells.forEach(function(c) { if (c.getAttribute('data-date') === todayStr) initial = c; });

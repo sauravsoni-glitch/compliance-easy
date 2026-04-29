@@ -42,6 +42,32 @@ final class SmartComplianceAutomationEngine
         return $this->runForOrganization($orgId, 'esc', $forceRun);
     }
 
+    /**
+     * Start of "today" in the app timezone (config/app.php). Avoids UTC vs IST mismatches
+     * where overdue checks think Apr 28 is still "due tomorrow".
+     */
+    private function todayStartInAppTz(): int
+    {
+        $tz = new \DateTimeZone(MailIstTime::timezoneId($this->appConfig));
+
+        return (new \DateTimeImmutable('today', $tz))->getTimestamp();
+    }
+
+    /** Start of calendar due date in app timezone; null if invalid. */
+    private function dueDateStartInAppTz(string $dueDate): ?int
+    {
+        $dueDate = substr(trim($dueDate), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate)) {
+            return null;
+        }
+        $tz = new \DateTimeZone(MailIstTime::timezoneId($this->appConfig));
+        try {
+            return (new \DateTimeImmutable($dueDate . ' 00:00:00', $tz))->getTimestamp();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     private function runForOrganization(int $orgId, string $mode, bool $forceRun = false): array
     {
         $templates = $this->getJson($orgId, self::SETTINGS_TEMPLATES, ['list' => []]);
@@ -61,7 +87,7 @@ final class SmartComplianceAutomationEngine
         $stmt->execute([$orgId]);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $todayTs = strtotime(date('Y-m-d') . ' 00:00:00');
+        $todayTs = $this->todayStartInAppTz();
         $summary = ['processed' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0];
         $events = [];
 
@@ -72,8 +98,8 @@ final class SmartComplianceAutomationEngine
                 $summary['skipped']++;
                 continue;
             }
-            $dueTs = strtotime($dueDate . ' 00:00:00');
-            if ($dueTs === false) {
+            $dueTs = $this->dueDateStartInAppTz($dueDate);
+            if ($dueTs === null) {
                 $summary['skipped']++;
                 continue;
             }
@@ -213,7 +239,7 @@ final class SmartComplianceAutomationEngine
                     'rtype' => $group['slot_label'],
                     'to' => (string) ($to['full_name'] ?? ''),
                     'cc' => implode(', ', array_column(array_slice($recipientRows, 1), 'full_name')),
-                    'dt' => date('Y-m-d H:i'),
+                    'dt' => MailIstTime::formatMailStampNow($this->appConfig),
                     'ok' => $ok,
                     'skey' => $ev['event_key'],
                     'err' => $ok ? '' : (string) $err,
@@ -239,6 +265,9 @@ final class SmartComplianceAutomationEngine
             return null;
         }
         if ($forceRun) {
+            if ($daysToDue <= 0) {
+                return ['code' => 'T-0', 'label' => 'Pre-Due T-0', 'level' => 3];
+            }
             if ($daysToDue <= 1) {
                 return ['code' => 'T-1', 'label' => 'Pre-Due T-1', 'level' => 3];
             }
@@ -248,6 +277,7 @@ final class SmartComplianceAutomationEngine
             return ['code' => 'T-7', 'label' => 'Pre-Due T-7', 'level' => 1];
         }
         $map = [
+            0 => ['code' => 'T-0', 'label' => 'Pre-Due T-0', 'level' => 3],
             7 => ['code' => 'T-7', 'label' => 'Pre-Due T-7', 'level' => 1],
             3 => ['code' => 'T-3', 'label' => 'Pre-Due T-3', 'level' => 2],
             1 => ['code' => 'T-1', 'label' => 'Pre-Due T-1', 'level' => 3],
@@ -258,7 +288,7 @@ final class SmartComplianceAutomationEngine
 
         // Short-timeline catch-up: if due is within 2..6 days and no pre-due mail was sent yet, send an immediate first-level reminder.
         if ($daysToDue >= 2 && $daysToDue <= 6) {
-            foreach (['T-7', 'T-3', 'T-1', 'T-CATCHUP'] as $code) {
+            foreach (['T-7', 'T-3', 'T-1', 'T-0', 'T-CATCHUP'] as $code) {
                 if (isset($sentKeys['pre:' . $orgId . ':' . $complianceId . ':' . $code])) {
                     return null;
                 }
@@ -338,7 +368,8 @@ final class SmartComplianceAutomationEngine
         $first = $events[0]['item'] ?? [];
         $count = count($events);
         $isSingle = $count === 1;
-        $dueDate = !empty($first['due_date']) ? date('M j, Y', strtotime((string) $first['due_date'])) : '';
+        $sentAt = MailIstTime::formatMailStampNow($this->appConfig);
+        $dueDate = !empty($first['due_date']) ? MailIstTime::formatDateOnly((string) $first['due_date'], $this->appConfig) : '';
         $owner = $this->activeUserById($orgId, (int) ($first['owner_id'] ?? 0));
         $reviewer = $this->activeUserById($orgId, (int) ($first['reviewer_id'] ?? 0));
         $approver = $this->activeUserById($orgId, (int) ($first['approver_id'] ?? 0));
@@ -357,8 +388,8 @@ final class SmartComplianceAutomationEngine
             '{{Compliance_Title}}' => $titleValue,
             '{{Compliance_Id}}' => $idValue,
             '{{Due_Date}}' => $dueDate,
-            '{{Expected_Date}}' => !empty($first['expected_date']) ? date('M j, Y', strtotime((string) $first['expected_date'])) : '',
-            '{{Reminder_Date}}' => !empty($first['reminder_date']) ? date('M j, Y', strtotime((string) $first['reminder_date'])) : '',
+            '{{Expected_Date}}' => !empty($first['expected_date']) ? MailIstTime::formatDateOnly((string) $first['expected_date'], $this->appConfig) : '',
+            '{{Reminder_Date}}' => !empty($first['reminder_date']) ? MailIstTime::formatDateOnly((string) $first['reminder_date'], $this->appConfig) : '',
             '{{Owner_Name}}' => $this->displayName($owner, 'Owner'),
             '{{Owner Name}}' => $this->displayName($owner, 'Owner'),
             '{{Reviewer_Name}}' => $this->displayName($reviewer, 'Reviewer'),
@@ -379,6 +410,12 @@ final class SmartComplianceAutomationEngine
             '{{Overdue Days}}' => (string) max(0, (int) ($events[0]['days_overdue'] ?? 0)),
             '{{Overdue_Days}}' => (string) max(0, (int) ($events[0]['days_overdue'] ?? 0)),
             '{{Escalation_Level}}' => (string) ($group['slot_code'] ?? ''),
+            '{{Sent_At}}' => $sentAt,
+            '{{Sent At}}' => $sentAt,
+            '{{Current_Time}}' => $sentAt,
+            '{{Current Time}}' => $sentAt,
+            '{{Notification_Time}}' => $sentAt,
+            '{{Notification Time}}' => $sentAt,
         ];
     }
 
@@ -398,6 +435,7 @@ final class SmartComplianceAutomationEngine
 
     private function buildAutomationHtmlCard(array $group, string $message): string
     {
+        $sentStamp = htmlspecialchars(MailIstTime::formatMailStampNow($this->appConfig), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $mode = (string) ($group['mode'] ?? 'pre');
         $slot = htmlspecialchars((string) ($group['slot_code'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $department = htmlspecialchars((string) ($group['department'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
@@ -410,7 +448,12 @@ final class SmartComplianceAutomationEngine
             $item = (array) ($event['item'] ?? []);
             $code = htmlspecialchars((string) ($item['compliance_code'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
             $name = htmlspecialchars((string) ($item['title'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $due = htmlspecialchars((string) ($item['due_date'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $dueRaw = (string) ($item['due_date'] ?? '');
+            $due = htmlspecialchars(
+                $dueRaw !== '' ? MailIstTime::formatDateOnly($dueRaw, $this->appConfig) : '',
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8'
+            );
             $metric = $mode === 'pre'
                 ? ('Days to due: ' . (string) ($event['days_to_due'] ?? ''))
                 : ('Days overdue: ' . (string) ($event['days_overdue'] ?? ''));
@@ -436,7 +479,7 @@ final class SmartComplianceAutomationEngine
             . '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
             . '<thead><tr style="background:#f9fafb;"><th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;text-transform:uppercase;">Compliance ID</th><th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;text-transform:uppercase;">Title</th><th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;text-transform:uppercase;">Due Date</th><th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;text-transform:uppercase;">Status</th></tr></thead>'
             . '<tbody>' . $rows . '</tbody></table></div>'
-            . '<div style="padding:14px 2px 18px;font-size:12px;color:#6b7280;line-height:1.5;">This mail is generated by compliance automation rules.</div>'
+            . '<div style="padding:14px 2px 18px;font-size:12px;color:#6b7280;line-height:1.5;">This mail is generated by compliance automation rules.<br><span style="color:#9ca3af;">Notification time (IST): ' . $sentStamp . '</span></div>'
             . '</td></tr></table></div>';
     }
 
@@ -476,7 +519,9 @@ final class SmartComplianceAutomationEngine
     private function shouldRunAtConfiguredTime(string $rawTime): bool
     {
         $configured = preg_match('/^\d{2}:\d{2}$/', $rawTime) ? $rawTime : '09:00';
-        return date('H:i') === $configured;
+        $tz = new \DateTimeZone(MailIstTime::timezoneId($this->appConfig));
+
+        return (new \DateTimeImmutable('now', $tz))->format('H:i') === $configured;
     }
 
     private function getJson(int $orgId, string $key, array $default): array

@@ -27,6 +27,12 @@ class Database
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             ]);
+            // Align MySQL session clock with Indian Standard Time so NOW() matches PHP Asia/Kolkata.
+            try {
+                self::$instance->exec("SET SESSION time_zone = '+05:30'");
+            } catch (\Throwable $e) {
+                // Host may restrict time_zone; PHP/app layer still uses MailIstTime + default_timezone.
+            }
         } catch (PDOException $e) {
             throw new \RuntimeException('Database connection failed: ' . $e->getMessage());
         }

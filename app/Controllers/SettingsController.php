@@ -43,6 +43,27 @@ class SettingsController extends BaseController
         return (bool) $stmt->fetchColumn();
     }
 
+    /** Hint appended when manual pre-due run reports skips (most often: not Pending status). */
+    private function preDueSkipHint(int $skipped): string
+    {
+        if ($skipped < 1) {
+            return '';
+        }
+
+        return ' Pre-due only sends for Pending items before the maker submits; Submitted / Under review / Approved items are skipped.';
+    }
+
+    /** Hint when manual escalation reports skips (most often: nothing is overdue yet). */
+    private function escalationSkipHint(int $skipped): string
+    {
+        if ($skipped < 1) {
+            return '';
+        }
+
+        return ' Escalation only sends for past-due compliances (calendar date before today in IST). '
+            . 'Due today or later are skipped. Also required: enabled Escalation templates (Notification Templates), maker email, and mail configured.';
+    }
+
     private function defaultNotifications(): array
     {
         return [
@@ -472,7 +493,8 @@ class SettingsController extends BaseController
         if ($action === 'trigger') {
             $runner = new EscalationAutomationService($this->db, $this->appConfig);
             $r = $runner->runForOrganization($orgId, true);
-            $_SESSION['flash_success'] = 'Manual escalation trigger completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.';
+            $skipHint = $this->escalationSkipHint((int) ($r['skipped'] ?? 0));
+            $_SESSION['flash_success'] = 'Manual escalation trigger completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.' . $skipHint;
         } else {
             $_SESSION['flash_success'] = 'Escalation settings saved.';
         }
@@ -556,11 +578,13 @@ class SettingsController extends BaseController
         if ($action === 'test') {
             $runner = new PreDueAutomationService($this->db, $this->appConfig);
             $r = $runner->runForOrganization($orgId, true);
-            $_SESSION['flash_success'] = 'Pre-due reminder run completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.';
+            $skipHint = $this->preDueSkipHint((int) ($r['skipped'] ?? 0));
+            $_SESSION['flash_success'] = 'Pre-due reminder run completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.' . $skipHint;
         } elseif ($action === 'trigger') {
             $runner = new PreDueAutomationService($this->db, $this->appConfig);
             $r = $runner->runForOrganization($orgId, true);
-            $_SESSION['flash_success'] = 'Manual pre-due trigger completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.';
+            $skipHint = $this->preDueSkipHint((int) ($r['skipped'] ?? 0));
+            $_SESSION['flash_success'] = 'Manual pre-due trigger completed. Sent: ' . (int) ($r['sent'] ?? 0) . ', Failed: ' . (int) ($r['failed'] ?? 0) . ', Skipped: ' . (int) ($r['skipped'] ?? 0) . '.' . $skipHint;
         } else {
             $_SESSION['flash_success'] = 'Pre-due reminder configuration saved.';
         }

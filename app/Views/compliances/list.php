@@ -11,14 +11,14 @@ $isMaker = !empty($auth['isMaker']);
 $isReviewer = !empty($auth['isReviewer']);
 $isApprover = !empty($auth['isApprover']);
 $canCreate = !empty($auth['canCreate']);
-$today = date('Y-m-d');
+$today = \App\Core\MailIstTime::todayYmd();
 
 /**
  * Primary + optional View for compliance list (role + status).
  *
  * @return array{0: string, 1: string} [primary HTML, secondary view HTML]
  */
-$actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMaker, $isReviewer, $isApprover): array {
+$actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMaker, $isReviewer, $isApprover, $today): array {
     $id = (int) $row['id'];
     $st = $row['status'] ?? '';
     $oid = (int) ($row['owner_id'] ?? 0);
@@ -28,7 +28,7 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
     $isAssignedReviewer = $rid === $uid && $rid > 0;
     $isAssignedApprover = $aid === $uid && $aid > 0;
 
-    $dueOver = !empty($row['due_date']) && strtotime($row['due_date']) < strtotime('today')
+    $dueOver = !empty($row['due_date']) && (string) $row['due_date'] < $today
         && !in_array($st, ['approved', 'completed', 'rejected'], true);
 
     $viewBtn = '<a href="' . htmlspecialchars($basePath) . '/compliance/view/' . $id . '" class="btn btn-sm compliance-action-btn action-view"><i class="fas fa-eye"></i> View</a>';
@@ -196,7 +196,7 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
                 <?php
                 foreach ($items as $row):
                     $st = $row['status'] ?? '';
-                    $isOverdueRow = !empty($row['due_date']) && strtotime($row['due_date']) < strtotime('today')
+                    $isOverdueRow = !empty($row['due_date']) && (string) $row['due_date'] < $today
                         && !in_array($st, ['approved', 'completed', 'rejected'], true);
 
                     if ($st === 'draft') {
@@ -247,7 +247,7 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
                     <td><?= htmlspecialchars($row['authority_name'] ?? '—') ?></td>
                     <td><?= htmlspecialchars($row['department']) ?></td>
                     <td><span class="badge <?= $pcls ?>"><?= htmlspecialchars($plab) ?></span></td>
-                    <td><?= !empty($row['due_date']) ? date('M j, Y', strtotime($row['due_date'])) : '—' ?></td>
+                    <td><?= \App\Core\MailIstTime::formatUiDate($row['due_date'] ?? null) ?></td>
                     <td><span class="badge <?= $scls ?>"><?= htmlspecialchars($slab) ?></span></td>
                     <td class="compliance-list-actions">
                         <div class="d-flex flex-wrap align-items-center gap-1">

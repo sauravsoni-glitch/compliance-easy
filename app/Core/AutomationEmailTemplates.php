@@ -64,7 +64,8 @@ final class AutomationEmailTemplates
             }
         }
 
-        return null;
+        // 4) Any enabled escalation template (matrix label / dept may not match — still send mail)
+        return $enabledEscalation[0] ?? null;
     }
 
     /**
@@ -132,7 +133,9 @@ final class AutomationEmailTemplates
             }
         }
 
-        return count($enabled) > 2 ? $enabled[2] : $enabled[0];
+        $idx = count($enabled) > 2 ? 2 : 0;
+
+        return $enabled[$idx] ?? $enabled[0];
     }
 
     private static function nameMatchesLabel(string $templateName, string $label): bool

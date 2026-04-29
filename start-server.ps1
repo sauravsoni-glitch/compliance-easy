@@ -8,6 +8,7 @@ function Get-PhpExecutable {
     $candidates = @(
         'C:\xampp\php\php.exe',
         'C:\laragon\bin\php\php.exe',
+        'D:\laragon\bin\php\php.exe',
         'C:\wamp64\bin\php\php.exe',
         'C:\php\php.exe',
         "$env:LOCALAPPDATA\Programs\Php\php.exe",
@@ -18,9 +19,11 @@ function Get-PhpExecutable {
     foreach ($p in $candidates) {
         if (Test-Path $p) { return $p }
     }
-    foreach ($d in (Get-ChildItem -Path 'C:\laragon\bin\php' -Directory -ErrorAction SilentlyContinue)) {
-        $exe = Join-Path $d.FullName 'php.exe'
-        if (Test-Path $exe) { return $exe }
+    foreach ($laragonRoot in @('C:\laragon\bin\php', 'D:\laragon\bin\php')) {
+        foreach ($d in (Get-ChildItem -Path $laragonRoot -Directory -ErrorAction SilentlyContinue)) {
+            $exe = Join-Path $d.FullName 'php.exe'
+            if (Test-Path $exe) { return $exe }
+        }
     }
     foreach ($d in (Get-ChildItem -Path 'C:\wamp64\bin' -Filter 'php*' -Directory -ErrorAction SilentlyContinue)) {
         $exe = Join-Path $d.FullName 'php.exe'
@@ -63,12 +66,13 @@ function Resolve-BindSpec([int] $Port) {
     if ($env:PHP_SERVER_BIND -and $env:PHP_SERVER_BIND.Trim() -ne '') {
         return @{ Host = $env:PHP_SERVER_BIND.Trim(); Label = $env:PHP_SERVER_BIND.Trim() }
     }
-    # Prefer 0.0.0.0 first: listens on all IPv4 interfaces so http://127.0.0.1 and http://localhost (v4) work.
+    # Prefer 127.0.0.1 first: PHP -S on 0.0.0.0 does NOT accept IPv6; browsers often resolve
+    # "localhost" to ::1, so binding only IPv4 breaks http://localhost:port while 127.0.0.1 works.
     foreach ($pair in @(
-            @{ Host = '0.0.0.0'; Label = '0.0.0.0 (IPv4 all)' },
+            @{ Host = '127.0.0.1'; Label = '127.0.0.1' },
             @{ Host = '[::]'; Label = '[::] (IPv6)' },
-            @{ Host = 'localhost'; Label = 'localhost' },
-            @{ Host = '127.0.0.1'; Label = '127.0.0.1' }
+            @{ Host = '0.0.0.0'; Label = '0.0.0.0 (IPv4 all)' },
+            @{ Host = 'localhost'; Label = 'localhost' }
         )) {
         $h = $pair.Host
         try {
