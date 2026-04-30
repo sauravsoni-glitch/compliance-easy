@@ -554,7 +554,7 @@ class ReportsController extends BaseController
         $completionRate = $total > 0 ? (int) round(100 * $completed / $total) : 0;
         $payload = $this->buildUnifiedDashboardPayload((int)$orgId, $this->dashboardFilterState());
 
-        $this->view('reports/index', [
+        $this->view('reports/index', array_merge([
             'currentPage' => 'reports',
             'pageTitle' => 'Reports & Analytics',
             'user' => Auth::user(),
@@ -577,8 +577,7 @@ class ReportsController extends BaseController
             'overdueAging' => $overdueAging,
             'upcomingDue' => $upcomingDue,
             'recentCompletions' => $recentCompletions,
-            ...$payload,
-        ]);
+        ], $payload));
     }
 
     private function appendSearchFilter(string &$sql, array &$params, string $q): void
