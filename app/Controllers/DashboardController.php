@@ -316,7 +316,7 @@ class DashboardController extends BaseController
         ");
         $stmt->execute(array_merge([$orgId], $calCP, [$calStart, $calEnd]));
         $compliancesForCal = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-        $today = date('Y-m-d');
+        $today = MailIstTime::todayYmd();
         foreach ($compliancesForCal as $c) {
             $d = $c['due_date'];
             if (!isset($calendarEvents[$d])) {
@@ -339,54 +339,8 @@ class DashboardController extends BaseController
                 'status' => $c['status'],
             ];
         }
-        $stmt = $db->prepare("
-            SELECT cs.compliance_id, DATE(cs.submission_date) AS sub_date, cs.escalation_level
-            FROM compliance_submissions cs
-            JOIN compliances c ON c.id = cs.compliance_id
-            WHERE c.organization_id = ? AND ($calC) AND cs.submission_date IS NOT NULL
-            AND DATE(cs.submission_date) BETWEEN ? AND ?
-        ");
-        $stmt->execute(array_merge([$orgId], $calCP, [$calStart, $calEnd]));
-        while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-            $d = $row['sub_date'];
-            $cStmt = $db->prepare('SELECT id, compliance_code, title, department, status FROM compliances WHERE id = ?');
-            $cStmt->execute([$row['compliance_id']]);
-            $c = $cStmt->fetch(\PDO::FETCH_ASSOC);
-            if (!$c) {
-                continue;
-            }
-            if (!isset($calendarEvents[$d])) {
-                $calendarEvents[$d] = [];
-            }
-            $calendarEvents[$d][] = [
-                'type' => !empty($row['escalation_level']) ? 'escalated' : 'submitted',
-                'compliance_id' => (int)$row['compliance_id'],
-                'title' => $c['title'] ?? '',
-                'compliance_code' => $c['compliance_code'] ?? '',
-                'department' => $c['department'] ?? '',
-                'status' => $c['status'] ?? 'submitted',
-            ];
-        }
-        $stmt = $db->prepare("
-            SELECT c.id, c.compliance_code, c.title, c.due_date, c.status, c.department
-            FROM compliances c
-            WHERE c.organization_id = ? AND ($calC) AND c.due_date IS NOT NULL AND c.due_date < ?
-            AND c.status NOT IN ('approved', 'completed', 'rejected')
-        ");
-        $stmt->execute(array_merge([$orgId], $calCP, [$calStart]));
-        while ($c = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-            if (!isset($calendarEvents[$calStart])) {
-                $calendarEvents[$calStart] = [];
-            }
-            $calendarEvents[$calStart][] = [
-                'type' => 'overdue',
-                'compliance_id' => (int)$c['id'],
-                'title' => $c['title'],
-                'compliance_code' => $c['compliance_code'],
-                'department' => $c['department'] ?? '',
-                'status' => $c['status'],
-            ];
-        }
+        // Keep dashboard calendar strictly due-date mapped for the selected month.
+        // Do not add submission-date overlays or carry forward older overdue rows to month start.
 
         // Upcoming events (reference: date range + status pills)
         $stmt = $db->prepare("

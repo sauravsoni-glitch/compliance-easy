@@ -14,9 +14,12 @@ if not exist "public\index.php" (
 )
 
 set "PHP_EXE="
-REM Known installs first — "where php" may hit WindowsApps shim before a real PHP (XAMPP/Laragon).
-if not defined PHP_EXE if exist "%LOCALAPPDATA%\Programs\Php\php.exe" set "PHP_EXE=%LOCALAPPDATA%\Programs\Php\php.exe"
+REM Prefer XAMPP / known installs first — "where php" can hit a broken WindowsApps shim
+REM (user may have no real PHP on PATH, so opening http://localhost/ will not work without this server).
 if not defined PHP_EXE if exist "C:\xampp\php\php.exe" set "PHP_EXE=C:\xampp\php\php.exe"
+if not defined PHP_EXE if exist "D:\xampp\php\php.exe" set "PHP_EXE=D:\xampp\php\php.exe"
+if not defined PHP_EXE if exist "E:\xampp\php\php.exe" set "PHP_EXE=E:\xampp\php\php.exe"
+if not defined PHP_EXE if exist "%LOCALAPPDATA%\Programs\Php\php.exe" set "PHP_EXE=%LOCALAPPDATA%\Programs\Php\php.exe"
 if not defined PHP_EXE if exist "C:\wamp64\bin\php\php.exe" set "PHP_EXE=C:\wamp64\bin\php\php.exe"
 if not defined PHP_EXE if exist "C:\php\php.exe" set "PHP_EXE=C:\php\php.exe"
 if not defined PHP_EXE if exist "%ProgramFiles%\PHP\php.exe" set "PHP_EXE=%ProgramFiles%\PHP\php.exe"
@@ -100,6 +103,9 @@ echo.
 echo  Listen: !BIND!:!PORT!
 echo  Stop: Ctrl+C in this window
 echo.
+
+REM Open browser to the PHP built-in server URL (not plain http://localhost/ unless Apache is configured).
+start "" "http://127.0.0.1:!PORT!/"
 
 "%PHP_EXE%" -S "!BIND!:!PORT!" -t public public/index.php
 

@@ -106,7 +106,10 @@ final class SmartComplianceAutomationEngine
             $daysToDue = (int) floor(($dueTs - $todayTs) / 86400);
 
             if ($mode === 'pre') {
-                if (in_array((string) ($item['status'] ?? ''), ['submitted', 'under_review'], true)) {
+                if (
+                    !$forceRun
+                    && in_array((string) ($item['status'] ?? ''), ['submitted', 'under_review'], true)
+                ) {
                     $summary['skipped']++;
                     continue;
                 }
@@ -138,11 +141,11 @@ final class SmartComplianceAutomationEngine
                 continue;
             }
 
-            if ($daysToDue >= 0) {
+            if (!$forceRun && $daysToDue >= 0) {
                 $summary['skipped']++;
                 continue;
             }
-            $daysOverdue = abs($daysToDue);
+            $daysOverdue = $forceRun ? max(0, abs($daysToDue)) : abs($daysToDue);
             foreach ($this->resolveEscalationSlots($daysOverdue) as $slot) {
                 $eventKey = 'esc:' . $orgId . ':' . (int) ($item['id'] ?? 0) . ':' . $slot['code'];
                 if (!$forceRun && isset($sentKeys[$eventKey])) {
@@ -261,10 +264,13 @@ final class SmartComplianceAutomationEngine
 
     private function resolvePreDueSlot(int $daysToDue, int $orgId, int $complianceId, array $sentKeys, bool $forceRun = false): ?array
     {
-        if ($daysToDue < 0) {
+        if ($daysToDue < 0 && !$forceRun) {
             return null;
         }
         if ($forceRun) {
+            if ($daysToDue < 0) {
+                return ['code' => 'T-0', 'label' => 'Pre-Due T-0', 'level' => 3];
+            }
             if ($daysToDue <= 0) {
                 return ['code' => 'T-0', 'label' => 'Pre-Due T-0', 'level' => 3];
             }
@@ -520,8 +526,14 @@ final class SmartComplianceAutomationEngine
     {
         $configured = preg_match('/^\d{2}:\d{2}$/', $rawTime) ? $rawTime : '09:00';
         $tz = new \DateTimeZone(MailIstTime::timezoneId($this->appConfig));
+        $now = new \DateTimeImmutable('now', $tz);
+        [$h, $m] = array_map('intval', explode(':', $configured, 2));
+        $target = $now->setTime($h, $m, 0);
 
-        return (new \DateTimeImmutable('now', $tz))->format('H:i') === $configured;
+        // Allow a small grace window (10 minutes) so scheduler/cron jitter
+        // does not cause missed automation runs due to exact minute mismatch.
+        $delta = $now->getTimestamp() - $target->getTimestamp();
+        return $delta >= 0 && $delta <= 600;
     }
 
     private function getJson(int $orgId, string $key, array $default): array

@@ -760,10 +760,10 @@ class ComplianceController extends BaseController
                 $filter = $legacyStatus;
             }
         }
-        $framework = $_GET['framework'] ?? '';
-        $department = $_GET['department'] ?? '';
-        $priority = $_GET['priority'] ?? '';
-        $owner = $_GET['owner'] ?? '';
+        $framework = trim((string)($_GET['framework'] ?? ''));
+        $department = trim((string)($_GET['department'] ?? ''));
+        $priority = strtolower(trim((string)($_GET['priority'] ?? '')));
+        $owner = (int)($_GET['owner'] ?? 0);
         $from = trim((string)($_GET['from'] ?? ''));
         $to = $_GET['to'] ?? '';
         $dueFilter = $_GET['due'] ?? $_GET['dueFilter'] ?? '';
@@ -787,7 +787,7 @@ class ComplianceController extends BaseController
         if ($filter !== '') {
             switch ($filter) {
                 case 'pending':
-                    $where[] = "c.status IN ('pending','draft','rework')";
+                    $where[] = "c.status = 'pending'";
                     break;
                 case 'approved':
                     $where[] = "c.status IN ('approved','completed')";
@@ -804,18 +804,18 @@ class ComplianceController extends BaseController
             }
         }
         if ($framework !== '') {
-            $where[] = 'a.name = ?';
+            $where[] = 'LOWER(a.name) = LOWER(?)';
             $params[] = $framework;
         }
         if ($department !== '') {
-            $where[] = 'c.department = ?';
+            $where[] = 'LOWER(c.department) = LOWER(?)';
             $params[] = $department;
         }
         if ($priority !== '') {
-            $where[] = 'c.priority = ?';
+            $where[] = 'LOWER(c.priority) = ?';
             $params[] = $priority;
         }
-        if ($owner !== '') {
+        if ($owner > 0) {
             $where[] = 'c.owner_id = ?';
             $params[] = $owner;
         }
@@ -885,7 +885,7 @@ class ComplianceController extends BaseController
             'authorities' => $this->getAuthorityOptions(),
             'userOptions' => $this->getUserOptions(),
             'departments' => $departments,
-            'filters' => array_merge(compact('filter', 'framework', 'department', 'priority', 'owner', 'from', 'to', 'search'), ['due' => $dueFilter]),
+            'filters' => array_merge(compact('filter', 'framework', 'department', 'priority', 'from', 'to', 'search'), ['owner' => $owner > 0 ? (string)$owner : '', 'due' => $dueFilter]),
         ]);
     }
 

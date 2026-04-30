@@ -365,12 +365,29 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
                     $rangeStart = $dueY;
                 }
                 $rangeLabel = \App\Core\MailIstTime::formatDateOnly($rangeStart, null, 'M j') . ' - ' . \App\Core\MailIstTime::formatDateOnly($dueY, null, 'M j');
+                $todayY = \App\Core\MailIstTime::todayYmd();
+                $daysLeft = (int) floor((strtotime($dueY . ' 00:00:00') - strtotime($todayY . ' 00:00:00')) / 86400);
+                if ($daysLeft < 0) {
+                    $dueMetaText = 'Overdue by ' . abs($daysLeft) . ' day' . (abs($daysLeft) === 1 ? '' : 's');
+                    $dueMetaClass = 'upcoming-due-overdue';
+                } elseif ($daysLeft === 0) {
+                    $dueMetaText = 'Due today';
+                    $dueMetaClass = 'upcoming-due-today';
+                } else {
+                    $dueMetaText = 'Due in ' . $daysLeft . ' day' . ($daysLeft === 1 ? '' : 's');
+                    $dueMetaClass = 'upcoming-due-soon';
+                }
                 ?>
                 <li class="upcoming-event-row-ref">
                     <a href="<?= $basePath ?>/compliance/view/<?= (int)$u['id'] ?>" class="upcoming-event-link-ref">
                         <span class="upcoming-event-main-ref">
                             <span class="upcoming-event-title-ref"><?= htmlspecialchars($u['title']) ?></span>
+                            <span class="upcoming-event-submeta-ref">
+                                <span class="upcoming-code-ref"><?= htmlspecialchars((string)($u['compliance_code'] ?? '')) ?></span>
+                                <span class="upcoming-dept-ref"><?= htmlspecialchars((string)($u['department'] ?? 'General')) ?></span>
+                            </span>
                             <span class="upcoming-event-dates-ref"><?= htmlspecialchars($rangeLabel) ?></span>
+                            <span class="upcoming-due-meta-ref <?= $dueMetaClass ?>"><?= htmlspecialchars($dueMetaText) ?></span>
                         </span>
                         <span class="upcoming-pill <?= $pillClass ?>"><?= htmlspecialchars($pillText) ?></span>
                     </a>
@@ -442,7 +459,7 @@ renderKpiModal('modal-overdue-tasks', 'Overdue Tasks', $overdueTasksList ?? [], 
 (function(){
     var basePath = <?= json_encode($basePath ?? '') ?>;
     /* Reference-style calendar: selected date + inline day panel */
-    (function calRef(){
+    function initCalRef(){
         var calCard = document.querySelector('.compliance-calendar-ref');
         var todayIst = calCard && calCard.getAttribute('data-today-ist') ? calCard.getAttribute('data-today-ist') : null;
         var cells = document.querySelectorAll('.cal-grid-ref .cal-cell-ref[data-date]');
@@ -468,9 +485,24 @@ renderKpiModal('modal-overdue-tasks', 'Overdue Tasks', $overdueTasksList ?? [], 
             var html = '<ul class="cal-day-events-list-ref">';
             list.forEach(function(ev) {
                 var typeLabel = { due: 'Due', overdue: 'Overdue', submitted: 'Submitted', review_pending: 'Review pending', approval_pending: 'Approval pending', completed: 'Completed', escalated: 'Escalated' }[ev.type] || (ev.type || '');
+                var typeClass = {
+                    due: 'ev-chip-due',
+                    overdue: 'ev-chip-overdue',
+                    submitted: 'ev-chip-submitted',
+                    review_pending: 'ev-chip-review',
+                    approval_pending: 'ev-chip-approval',
+                    completed: 'ev-chip-completed',
+                    escalated: 'ev-chip-escalated'
+                }[ev.type] || 'ev-chip-due';
                 html += '<li><a href="' + basePath + '/compliance/view/' + ev.compliance_id + '" class="cal-day-event-link-ref">';
                 html += '<span class="cal-day-event-name-ref">' + (ev.title || ev.compliance_code || '') + '</span>';
-                html += '<span class="cal-day-event-meta-ref">' + (ev.department || '') + ' · ' + typeLabel + '</span></a></li>';
+                html += '<span class="cal-day-event-meta-ref">';
+                html += '<span class="ev-code">' + (ev.compliance_code || '') + '</span>';
+                html += '<span class="ev-sep">•</span>';
+                html += '<span>' + (ev.department || 'Unspecified') + '</span>';
+                html += '</span>';
+                html += '<span class="ev-chip ' + typeClass + '">' + typeLabel + '</span>';
+                html += '</a></li>';
             });
             html += '</ul>';
             bodyEl.innerHTML = html;
@@ -513,7 +545,52 @@ renderKpiModal('modal-overdue-tasks', 'Overdue Tasks', $overdueTasksList ?? [], 
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.click(); }
             });
         });
-    })();
+    }
+
+    function bindCalendarMonthNavigation() {
+        var calCard = document.querySelector('.compliance-calendar-ref');
+        if (!calCard) return;
+        calCard.querySelectorAll('.cal-nav-arrow').forEach(function(link){
+            if (link.dataset.ajaxBound === '1') return;
+            link.dataset.ajaxBound = '1';
+            link.addEventListener('click', function(e){
+                e.preventDefault();
+                var href = this.getAttribute('href');
+                if (!href) return;
+                var grid = calCard.querySelector('.cal-grid-ref');
+                var dir = (this.getAttribute('aria-label') || '').toLowerCase().indexOf('next') >= 0 ? 'next' : 'prev';
+                if (grid) {
+                    grid.classList.remove('cal-slide-out-left', 'cal-slide-out-right');
+                    grid.classList.add(dir === 'next' ? 'cal-slide-out-left' : 'cal-slide-out-right');
+                }
+                fetch(href, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                    .then(function(r){ return r.text(); })
+                    .then(function(html){
+                        var doc = new DOMParser().parseFromString(html, 'text/html');
+                        var newCard = doc.querySelector('.compliance-calendar-ref');
+                        if (!newCard) return;
+                        calCard.innerHTML = newCard.innerHTML;
+                        calCard.setAttribute('data-today-ist', newCard.getAttribute('data-today-ist') || '');
+                        var newGrid = calCard.querySelector('.cal-grid-ref');
+                        if (newGrid) {
+                            newGrid.classList.add(dir === 'next' ? 'cal-slide-in-left' : 'cal-slide-in-right');
+                        }
+                        initCalRef();
+                        bindCalendarMonthNavigation();
+                        if (window.history && window.history.pushState) {
+                            var u = new URL(window.location.href);
+                            var h = new URL(href, window.location.origin);
+                            u.searchParams.set('cal_month', h.searchParams.get('cal_month') || '');
+                            window.history.pushState({}, '', u.toString());
+                        }
+                    })
+                    .catch(function(){ window.location.href = href; });
+            });
+        });
+    }
+
+    initCalRef();
+    bindCalendarMonthNavigation();
 
     document.querySelectorAll('.stat-card-clickable[data-modal]').forEach(function(el){
         el.style.cursor = 'pointer';

@@ -6,6 +6,448 @@ use App\Core\BaseController;
 
 class ReportsController extends BaseController
 {
+    private function normalizedDashboardFilters(array $f): array
+    {
+        if (($f['from'] ?? '') === '' && ($f['to'] ?? '') === '' && ($f['period'] ?? '') !== '') {
+            $now = new \DateTimeImmutable('today');
+            $fromAuto = $f['period'] === '1y' ? $now->modify('-1 year') : $now->modify('-6 months');
+            $f['from'] = $fromAuto->format('Y-m-d');
+            $f['to'] = $now->format('Y-m-d');
+        }
+        return $f;
+    }
+
+    private function dashboardFilterState(): array
+    {
+        $from = trim((string)($_GET['from'] ?? ''));
+        $to = trim((string)($_GET['to'] ?? ''));
+        $department = trim((string)($_GET['department'] ?? ''));
+        $userId = (int)($_GET['user_id'] ?? 0);
+        $status = trim((string)($_GET['status'] ?? ''));
+        $risk = trim((string)($_GET['risk_level'] ?? ''));
+        $priority = trim((string)($_GET['priority'] ?? ''));
+        $drill = trim((string)($_GET['drill'] ?? ''));
+        $period = trim((string)($_GET['period'] ?? ''));
+        if (!in_array($period, ['', '6m', '1y'], true)) {
+            $period = '';
+        }
+
+        if ($from !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+            $from = '';
+        }
+        if ($to !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+            $to = '';
+        }
+
+        return compact('from', 'to', 'department', 'userId', 'status', 'risk', 'priority', 'drill', 'period');
+    }
+
+    private function dashboardFilterSql(int $orgId, array $f): array
+    {
+        $f = $this->normalizedDashboardFilters($f);
+        [$rb, $rbP] = Auth::complianceScopeSql('c.');
+        $where = ['c.organization_id = ?', "($rb)"];
+        $params = array_merge([$orgId], $rbP);
+        if ($f['from'] !== '') {
+            $where[] = 'c.due_date >= ?';
+            $params[] = $f['from'];
+        }
+        if ($f['to'] !== '') {
+            $where[] = 'c.due_date <= ?';
+            $params[] = $f['to'];
+        }
+        if ($f['department'] !== '') {
+            $where[] = 'c.department = ?';
+            $params[] = $f['department'];
+        }
+        if ((int)$f['userId'] > 0) {
+            $where[] = 'c.owner_id = ?';
+            $params[] = (int)$f['userId'];
+        }
+        if ($f['status'] !== '') {
+            if ($f['status'] === 'overdue') {
+                $where[] = "c.due_date < CURDATE() AND c.status NOT IN ('approved','completed','rejected')";
+            } else {
+                $where[] = 'c.status = ?';
+                $params[] = $f['status'];
+            }
+        }
+        if ($f['risk'] !== '') {
+            $where[] = 'c.risk_level = ?';
+            $params[] = $f['risk'];
+        }
+        if ($f['priority'] !== '') {
+            $where[] = 'c.priority = ?';
+            $params[] = $f['priority'];
+        }
+        if ($f['drill'] !== '') {
+            if ($f['drill'] === 'completed') {
+                $where[] = "c.status IN ('approved','completed')";
+            } elseif ($f['drill'] === 'pending') {
+                $where[] = "c.status IN ('pending','draft','submitted','under_review','rework')";
+            } elseif ($f['drill'] === 'high_risk') {
+                $where[] = "c.risk_level IN ('high','critical')";
+            } elseif ($f['drill'] === 'escalated') {
+                $where[] = "EXISTS (SELECT 1 FROM compliance_submissions s WHERE s.compliance_id = c.id AND s.escalation_level IS NOT NULL AND s.escalation_level <> '')";
+            }
+        }
+
+        return [implode(' AND ', $where), $params];
+    }
+
+    private function fetchUnifiedRows(int $orgId, array $filters): array
+    {
+        [$whereSql, $params] = $this->dashboardFilterSql($orgId, $filters);
+        $sql = "SELECT
+                c.id,
+                c.compliance_code,
+                c.title,
+                c.department,
+                c.due_date,
+                c.status,
+                c.risk_level,
+                c.priority,
+                c.penalty_impact,
+                u.id AS owner_id,
+                u.full_name AS owner_name,
+                ls.completion_date,
+                ls.escalation_level
+            FROM compliances c
+            LEFT JOIN users u ON u.id = c.owner_id
+            LEFT JOIN (
+                SELECT s1.compliance_id, s1.checker_date AS completion_date, s1.escalation_level
+                FROM compliance_submissions s1
+                INNER JOIN (
+                    SELECT compliance_id, MAX(id) AS max_id
+                    FROM compliance_submissions
+                    GROUP BY compliance_id
+                ) mx ON mx.compliance_id = s1.compliance_id AND mx.max_id = s1.id
+            ) ls ON ls.compliance_id = c.id
+            WHERE $whereSql
+            ORDER BY c.due_date DESC, c.id DESC";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    private function buildUnifiedDashboardPayload(int $orgId, array $filters): array
+    {
+        $filters = $this->normalizedDashboardFilters($filters);
+        $rows = $this->fetchUnifiedRows($orgId, $filters);
+        $summary = ['total' => 0, 'completed' => 0, 'pending' => 0, 'overdue' => 0, 'high_risk' => 0, 'escalated' => 0];
+        $departmentPerf = [];
+        $userPerf = [];
+        $overdueRows = [];
+        $trendByDate = [];
+        $overdueVsCompleted = ['overdue' => 0, 'completed' => 0];
+        $riskDist = ['low' => 0, 'medium' => 0, 'high' => 0, 'critical' => 0];
+        $deptMonthly = [];
+        $userMonthly = [];
+        $penaltyMonthly = [];
+
+        foreach ($rows as &$r) {
+            $summary['total']++;
+            $st = (string)($r['status'] ?? '');
+            $isCompleted = in_array($st, ['approved', 'completed'], true);
+            $isPending = in_array($st, ['pending', 'draft', 'submitted', 'under_review', 'rework'], true);
+            $isOverdue = !empty($r['due_date']) && ((string)$r['due_date'] < date('Y-m-d')) && !$isCompleted && $st !== 'rejected';
+            $isHighRisk = in_array((string)($r['risk_level'] ?? ''), ['high', 'critical'], true);
+            $isEscalated = !empty($r['escalation_level']);
+
+            if ($isCompleted) {
+                $summary['completed']++;
+                $overdueVsCompleted['completed']++;
+            }
+            if ($isPending) {
+                $summary['pending']++;
+            }
+            if ($isOverdue) {
+                $summary['overdue']++;
+                $overdueVsCompleted['overdue']++;
+            }
+            if ($isHighRisk) {
+                $summary['high_risk']++;
+            }
+            if ($isEscalated) {
+                $summary['escalated']++;
+            }
+            $risk = (string)($r['risk_level'] ?? 'low');
+            if (!isset($riskDist[$risk])) {
+                $risk = 'low';
+            }
+            $riskDist[$risk]++;
+
+            $completionDate = $r['completion_date'] ?? null;
+            $delayDays = null;
+            if (!empty($r['due_date']) && !empty($completionDate)) {
+                $delayDays = (int)floor((strtotime((string)$completionDate) - strtotime((string)$r['due_date'])) / 86400);
+            } elseif ($isOverdue && !empty($r['due_date'])) {
+                $delayDays = (int)floor((strtotime(date('Y-m-d')) - strtotime((string)$r['due_date'])) / 86400);
+            }
+            $r['delay_days'] = $delayDays;
+
+            $dept = (string)($r['department'] ?? 'Unspecified');
+            if (!isset($departmentPerf[$dept])) {
+                $departmentPerf[$dept] = ['department' => $dept, 'total' => 0, 'completed' => 0, 'pending' => 0, 'overdue' => 0, 'delay_sum' => 0, 'delay_count' => 0];
+            }
+            $departmentPerf[$dept]['total']++;
+            $departmentPerf[$dept]['completed'] += $isCompleted ? 1 : 0;
+            $departmentPerf[$dept]['pending'] += $isPending ? 1 : 0;
+            $departmentPerf[$dept]['overdue'] += $isOverdue ? 1 : 0;
+            if ($delayDays !== null) {
+                $departmentPerf[$dept]['delay_sum'] += $delayDays;
+                $departmentPerf[$dept]['delay_count']++;
+            }
+
+            $uid = (int)($r['owner_id'] ?? 0);
+            $uname = (string)($r['owner_name'] ?? 'Unassigned');
+            if (!isset($userPerf[$uid])) {
+                $userPerf[$uid] = ['user_id' => $uid, 'user_name' => $uname, 'role' => 'Maker', 'total' => 0, 'completed' => 0, 'pending' => 0, 'overdue' => 0];
+            }
+            $userPerf[$uid]['total']++;
+            $userPerf[$uid]['completed'] += $isCompleted ? 1 : 0;
+            $userPerf[$uid]['pending'] += $isPending ? 1 : 0;
+            $userPerf[$uid]['overdue'] += $isOverdue ? 1 : 0;
+
+            if ($isOverdue) {
+                $or = $r;
+                $or['days_overdue'] = max(1, (int)$delayDays);
+                $overdueRows[] = $or;
+            }
+
+            $dKey = !empty($r['due_date']) ? (string)$r['due_date'] : date('Y-m-d');
+            if (!isset($trendByDate[$dKey])) {
+                $trendByDate[$dKey] = 0;
+            }
+            $trendByDate[$dKey]++;
+
+            $monthKey = !empty($r['due_date']) ? date('Y-m', strtotime((string)$r['due_date'])) : date('Y-m');
+            if (!isset($deptMonthly[$dept][$monthKey])) {
+                $deptMonthly[$dept][$monthKey] = ['total' => 0, 'completed' => 0];
+            }
+            $deptMonthly[$dept][$monthKey]['total']++;
+            $deptMonthly[$dept][$monthKey]['completed'] += $isCompleted ? 1 : 0;
+
+            if (!isset($userMonthly[$uname][$monthKey])) {
+                $userMonthly[$uname][$monthKey] = ['total' => 0, 'completed' => 0];
+            }
+            $userMonthly[$uname][$monthKey]['total']++;
+            $userMonthly[$uname][$monthKey]['completed'] += $isCompleted ? 1 : 0;
+
+            if (!empty($r['penalty_impact'])) {
+                if (!isset($penaltyMonthly[$monthKey])) {
+                    $penaltyMonthly[$monthKey] = 0;
+                }
+                $penaltyMonthly[$monthKey]++;
+            }
+        }
+        unset($r);
+
+        ksort($trendByDate);
+        foreach ($departmentPerf as &$d) {
+            $d['compliance_pct'] = $d['total'] > 0 ? (int)round(($d['completed'] * 100) / $d['total']) : 0;
+            $d['avg_delay'] = $d['delay_count'] > 0 ? round($d['delay_sum'] / $d['delay_count'], 1) : 0;
+        }
+        unset($d);
+        usort($departmentPerf, static fn($a, $b) => ($b['overdue'] <=> $a['overdue']) ?: ($a['department'] <=> $b['department']));
+        foreach ($userPerf as &$u) {
+            $u['performance_pct'] = $u['total'] > 0 ? (int)round(($u['completed'] * 100) / $u['total']) : 0;
+        }
+        unset($u);
+        $userPerf = array_values($userPerf);
+        usort($userPerf, static fn($a, $b) => ($b['overdue'] <=> $a['overdue']) ?: ($a['user_name'] <=> $b['user_name']));
+
+        $departments = $this->db->prepare('SELECT DISTINCT department FROM compliances WHERE organization_id = ? ORDER BY department');
+        $departments->execute([$orgId]);
+        $departmentOptions = array_values(array_filter(array_map(static fn($r) => (string)$r['department'], $departments->fetchAll(\PDO::FETCH_ASSOC))));
+        $users = $this->db->prepare('SELECT id, full_name FROM users WHERE organization_id = ? AND status = ? ORDER BY full_name');
+        $users->execute([$orgId, 'active']);
+        $userOptions = $users->fetchAll(\PDO::FETCH_ASSOC);
+        $selectedDept = (string)($filters['department'] ?? '');
+        if ($selectedDept === '' && !empty($departmentPerf)) {
+            $selectedDept = (string)$departmentPerf[0]['department'];
+        }
+        $selectedUser = '';
+        if ((int)($filters['userId'] ?? 0) > 0) {
+            foreach ($userOptions as $uo) {
+                if ((int)$uo['id'] === (int)$filters['userId']) {
+                    $selectedUser = (string)$uo['full_name'];
+                    break;
+                }
+            }
+        }
+        if ($selectedUser === '' && !empty($userPerf)) {
+            $selectedUser = (string)$userPerf[0]['user_name'];
+        }
+        $deptSeries = $deptMonthly[$selectedDept] ?? [];
+        ksort($deptSeries);
+        $userSeries = $userMonthly[$selectedUser] ?? [];
+        ksort($userSeries);
+        ksort($penaltyMonthly);
+
+        $allMonthKeys = [];
+        foreach ($deptMonthly as $series) {
+            foreach (array_keys($series) as $m) {
+                $allMonthKeys[$m] = true;
+            }
+        }
+        foreach ($userMonthly as $series) {
+            foreach (array_keys($series) as $m) {
+                $allMonthKeys[$m] = true;
+            }
+        }
+        $allMonthLabels = array_keys($allMonthKeys);
+        sort($allMonthLabels);
+
+        $deptTrendSets = [];
+        $singleDeptMode = ($filters['department'] ?? '') !== '';
+        foreach ($deptMonthly as $deptName => $series) {
+            if ($singleDeptMode && $deptName !== $selectedDept) {
+                continue;
+            }
+            $vals = [];
+            foreach ($allMonthLabels as $m) {
+                $bucket = $series[$m] ?? ['total' => 0, 'completed' => 0];
+                $vals[] = $bucket['total'] > 0 ? (int)round(($bucket['completed'] * 100) / $bucket['total']) : 0;
+            }
+            $deptTrendSets[] = ['label' => (string)$deptName, 'values' => $vals];
+        }
+
+        $userTrendSets = [];
+        $singleUserMode = (int)($filters['userId'] ?? 0) > 0;
+        foreach ($userMonthly as $userName => $series) {
+            if ($singleUserMode && $userName !== $selectedUser) {
+                continue;
+            }
+            $vals = [];
+            foreach ($allMonthLabels as $m) {
+                $bucket = $series[$m] ?? ['total' => 0, 'completed' => 0];
+                $vals[] = $bucket['total'] > 0 ? (int)round(($bucket['completed'] * 100) / $bucket['total']) : 0;
+            }
+            $userTrendSets[] = ['label' => (string)$userName, 'values' => $vals];
+        }
+
+        $runtimeRows = [
+            ['key' => 'penalties', 'name' => 'Penalities', 'records' => array_sum(array_map('intval', $penaltyMonthly)), 'description' => 'Penalty impacted items in selected date range'],
+            ['key' => 'main_report', 'name' => 'Main Report', 'records' => count($rows), 'description' => 'Compliance rows in selected date range'],
+            ['key' => 'department_performance', 'name' => 'Department Performance Panel Report', 'records' => count($departmentPerf), 'description' => 'Department summary rows'],
+            ['key' => 'user_performance', 'name' => 'User Performance Panel Report', 'records' => count($userPerf), 'description' => 'User summary rows'],
+            ['key' => 'overdue_penalty_tracker', 'name' => 'Overdue and Penalty Tracker', 'records' => count($overdueRows), 'description' => 'Overdue/penalty tracker rows'],
+        ];
+
+        return [
+            'filters' => $filters,
+            'departmentOptions' => $departmentOptions,
+            'userOptions' => $userOptions,
+            'summary' => $summary,
+            'mainRows' => $rows,
+            'departmentPerf' => $departmentPerf,
+            'userPerf' => $userPerf,
+            'overdueRows' => $overdueRows,
+            'trendLabels' => array_keys($trendByDate),
+            'trendValues' => array_values($trendByDate),
+            'overdueVsCompleted' => $overdueVsCompleted,
+            'riskDist' => $riskDist,
+            'selectedDept' => $selectedDept,
+            'selectedUserName' => $selectedUser,
+            'deptPerfLabels' => $singleDeptMode ? array_keys($deptSeries) : $allMonthLabels,
+            'deptPerfValues' => $singleDeptMode ? array_map(static fn($v) => ($v['total'] > 0 ? (int)round(($v['completed'] * 100) / $v['total']) : 0), array_values($deptSeries)) : [],
+            'userPerfLabels' => $singleUserMode ? array_keys($userSeries) : $allMonthLabels,
+            'userPerfValues' => $singleUserMode ? array_map(static fn($v) => ($v['total'] > 0 ? (int)round(($v['completed'] * 100) / $v['total']) : 0), array_values($userSeries)) : [],
+            'deptTrendSets' => $deptTrendSets,
+            'userTrendSets' => $userTrendSets,
+            'singleDeptMode' => $singleDeptMode,
+            'singleUserMode' => $singleUserMode,
+            'penaltyLabels' => array_keys($penaltyMonthly),
+            'penaltyValues' => array_values($penaltyMonthly),
+            'runtimeRows' => $runtimeRows,
+            'effectiveFrom' => (string)($filters['from'] ?? ''),
+            'effectiveTo' => (string)($filters['to'] ?? ''),
+        ];
+    }
+
+    public function dashboard(): void
+    {
+        Auth::requireAuth();
+        $orgId = (int)Auth::organizationId();
+        $filters = $this->dashboardFilterState();
+        $payload = $this->buildUnifiedDashboardPayload($orgId, $filters);
+
+        $this->view('reports/dashboard', [
+            'currentPage' => 'reports',
+            'pageTitle' => 'Reports Dashboard',
+            'user' => Auth::user(),
+            'basePath' => $this->appConfig['url'] ?? '',
+            ...$payload,
+        ]);
+    }
+
+    public function dashboardExport(): void
+    {
+        Auth::requireAuth();
+        $orgId = (int)Auth::organizationId();
+        $filters = $this->dashboardFilterState();
+        $rows = $this->fetchUnifiedRows($orgId, $filters);
+        $payload = $this->buildUnifiedDashboardPayload($orgId, $filters);
+        $format = strtolower((string)($_GET['format'] ?? 'csv'));
+        $report = strtolower((string)($_GET['report'] ?? 'main_report'));
+        if (!in_array($report, ['penalties', 'main_report', 'department_performance', 'user_performance', 'overdue_penalty_tracker'], true)) {
+            $report = 'main_report';
+        }
+        if ($format === 'print') {
+            header('Content-Type: text/html; charset=utf-8');
+            echo '<!doctype html><html><head><meta charset="utf-8"><title>Unified Compliance Report</title><style>body{font-family:Arial;padding:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;font-size:12px}th{background:#f3f4f6}</style></head><body>';
+            echo '<h2>Unified Compliance Report</h2><table><thead><tr><th>Compliance Title</th><th>Department</th><th>Assigned User</th><th>Due Date</th><th>Completion Date</th><th>Status</th><th>Delay (Days)</th><th>Risk</th><th>Escalation</th></tr></thead><tbody>';
+            foreach ($rows as $r) {
+                $delay = (!empty($r['due_date']) && !empty($r['completion_date'])) ? (int)floor((strtotime((string)$r['completion_date']) - strtotime((string)$r['due_date'])) / 86400) : '';
+                echo '<tr><td>' . htmlspecialchars((string)$r['title']) . '</td><td>' . htmlspecialchars((string)$r['department']) . '</td><td>' . htmlspecialchars((string)$r['owner_name']) . '</td><td>' . htmlspecialchars((string)($r['due_date'] ?? '')) . '</td><td>' . htmlspecialchars((string)($r['completion_date'] ?? '')) . '</td><td>' . htmlspecialchars((string)$r['status']) . '</td><td>' . htmlspecialchars((string)$delay) . '</td><td>' . htmlspecialchars((string)$r['risk_level']) . '</td><td>' . htmlspecialchars((string)($r['escalation_level'] ?? '')) . '</td></tr>';
+            }
+            echo '</tbody></table><script>window.print()</script></body></html>';
+            exit;
+        }
+        if ($format === 'excel') {
+            header('Content-Type: application/vnd.ms-excel; charset=utf-8');
+            header('Content-Disposition: attachment; filename="' . $report . '-' . date('Y-m-d') . '.xls"');
+        } else {
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="' . $report . '-' . date('Y-m-d') . '.csv"');
+        }
+        $out = fopen('php://output', 'w');
+        if ($report === 'penalties') {
+            fputcsv($out, ['Compliance Code', 'Compliance Title', 'Department', 'Assigned User', 'Due Date', 'Completion Date', 'Status', 'Delay (Days)', 'Risk Level', 'Escalation Level', 'Penalty']);
+            foreach ($rows as $r) {
+                if (trim((string)($r['penalty_impact'] ?? '')) === '') {
+                    continue;
+                }
+                $delay = (!empty($r['due_date']) && !empty($r['completion_date'])) ? (int)floor((strtotime((string)$r['completion_date']) - strtotime((string)$r['due_date'])) / 86400) : '';
+                fputcsv($out, [(string)($r['compliance_code'] ?? ''), (string)$r['title'], (string)$r['department'], (string)$r['owner_name'], (string)($r['due_date'] ?? ''), (string)($r['completion_date'] ?? ''), (string)$r['status'], (string)$delay, (string)$r['risk_level'], (string)($r['escalation_level'] ?? ''), (string)($r['penalty_impact'] ?? '')]);
+            }
+        } elseif ($report === 'department_performance') {
+            fputcsv($out, ['Department', 'Total Tasks', 'Completed', 'Pending', 'Overdue', 'Compliance %', 'Avg Delay (Days)']);
+            foreach (($payload['departmentPerf'] ?? []) as $d) {
+                fputcsv($out, [(string)($d['department'] ?? ''), (int)($d['total'] ?? 0), (int)($d['completed'] ?? 0), (int)($d['pending'] ?? 0), (int)($d['overdue'] ?? 0), (int)($d['compliance_pct'] ?? 0), (string)($d['avg_delay'] ?? 0)]);
+            }
+        } elseif ($report === 'user_performance') {
+            fputcsv($out, ['User Name', 'Role', 'Total Tasks', 'Completed', 'Pending', 'Overdue', 'Performance %']);
+            foreach (($payload['userPerf'] ?? []) as $u) {
+                fputcsv($out, [(string)($u['user_name'] ?? ''), (string)($u['role'] ?? ''), (int)($u['total'] ?? 0), (int)($u['completed'] ?? 0), (int)($u['pending'] ?? 0), (int)($u['overdue'] ?? 0), (int)($u['performance_pct'] ?? 0)]);
+            }
+        } elseif ($report === 'overdue_penalty_tracker') {
+            fputcsv($out, ['Compliance Title', 'Department', 'User', 'Due Date', 'Days Overdue', 'Risk Level', 'Escalation Level', 'Penalty']);
+            foreach (($payload['overdueRows'] ?? []) as $o) {
+                fputcsv($out, [(string)($o['title'] ?? ''), (string)($o['department'] ?? ''), (string)($o['owner_name'] ?? ''), (string)($o['due_date'] ?? ''), (int)($o['days_overdue'] ?? 0), (string)($o['risk_level'] ?? ''), (string)($o['escalation_level'] ?? ''), (string)($o['penalty_impact'] ?? '')]);
+            }
+        } else {
+            fputcsv($out, ['Compliance Code', 'Compliance Title', 'Department', 'Assigned User', 'Due Date', 'Completion Date', 'Status', 'Delay (Days)', 'Risk Level', 'Priority', 'Escalation Level', 'Penalty']);
+            foreach ($rows as $r) {
+                $delay = (!empty($r['due_date']) && !empty($r['completion_date'])) ? (int)floor((strtotime((string)$r['completion_date']) - strtotime((string)$r['due_date'])) / 86400) : '';
+                fputcsv($out, [(string)($r['compliance_code'] ?? ''), (string)$r['title'], (string)$r['department'], (string)$r['owner_name'], (string)($r['due_date'] ?? ''), (string)($r['completion_date'] ?? ''), (string)$r['status'], (string)$delay, (string)$r['risk_level'], (string)($r['priority'] ?? ''), (string)($r['escalation_level'] ?? ''), (string)($r['penalty_impact'] ?? '')]);
+            }
+        }
+        fclose($out);
+        exit;
+    }
+
     private function docKindColumn(): bool
     {
         try {
@@ -18,6 +460,12 @@ class ReportsController extends BaseController
     }
 
     public function index(): void
+    {
+        Auth::requireAuth();
+        $this->legacyIndex();
+    }
+
+    public function legacyIndex(): void
     {
         Auth::requireAuth();
         $orgId = Auth::organizationId();
@@ -104,6 +552,7 @@ class ReportsController extends BaseController
         $totalDocuments = (int) $docCountStmt->fetchColumn();
 
         $completionRate = $total > 0 ? (int) round(100 * $completed / $total) : 0;
+        $payload = $this->buildUnifiedDashboardPayload((int)$orgId, $this->dashboardFilterState());
 
         $this->view('reports/index', [
             'currentPage' => 'reports',
@@ -128,6 +577,7 @@ class ReportsController extends BaseController
             'overdueAging' => $overdueAging,
             'upcomingDue' => $upcomingDue,
             'recentCompletions' => $recentCompletions,
+            ...$payload,
         ]);
     }
 
