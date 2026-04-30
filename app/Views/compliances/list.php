@@ -175,7 +175,10 @@ $actionCell = static function (array $row) use ($basePath, $uid, $isAdmin, $isMa
                 <label class="form-label">Search</label>
                 <input type="text" name="search" class="form-control" placeholder="Search by title or owner..." value="<?= htmlspecialchars($filters['search'] ?? '') ?>">
             </div>
-            <button type="submit" class="btn btn-secondary">Filter</button>
+            <div style="display:flex;gap:.5rem;">
+                <button type="submit" class="btn btn-secondary">Filter</button>
+                <a href="<?= htmlspecialchars($basePath) ?>/compliance" class="btn btn-outline-secondary">Reset</a>
+            </div>
         </div>
     </form>
 

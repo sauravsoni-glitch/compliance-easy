@@ -57,6 +57,7 @@ class DashboardController extends BaseController
     public function index(): void
     {
         Auth::requireAuth();
+        $isDeepDiveView = (string)($_GET['view'] ?? '') === 'deep-dive';
         $orgId = Auth::organizationId();
         $userId = Auth::id();
         if (!$orgId) {
@@ -375,9 +376,13 @@ class DashboardController extends BaseController
             $roleFocusLabel = 'Pending your approval';
         }
 
+        $reportsPayload = (new ReportsController())->dashboardPayloadForCurrentFilters((int)$orgId);
+
         $this->view('dashboard/index', [
             'currentPage' => 'dashboard',
-            'pageTitle' => 'Dashboard',
+            'pageTitle' => $isDeepDiveView ? 'Deep dive' : 'Dashboard',
+            'dashboardTitle' => $isDeepDiveView ? 'Deep dive' : 'Dashboard',
+            'dashboardView' => $isDeepDiveView ? 'deep-dive' : 'dashboard',
             'user' => Auth::user(),
             'basePath' => $this->appConfig['url'] ?? '',
             'totalCompliances' => $totalCompliances,
@@ -413,6 +418,7 @@ class DashboardController extends BaseController
             'calendarMonth' => $calMonth,
             'roleFocusCount' => $roleFocusCount,
             'roleFocusLabel' => $roleFocusLabel,
+            'reportsPayload' => $reportsPayload,
         ]);
     }
 }

@@ -3,9 +3,38 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\BaseController;
+use App\Core\MailIstTime;
 
 class ReportsController extends BaseController
 {
+    private function reportRecordCount(string $report, array $rows, array $payload): int
+    {
+        if ($report === 'penalties') {
+            $count = 0;
+            foreach ($rows as $r) {
+                if (trim((string)($r['penalty_impact'] ?? '')) !== '') {
+                    $count++;
+                }
+            }
+            return $count;
+        }
+        if ($report === 'department_performance') {
+            return count($payload['departmentPerf'] ?? []);
+        }
+        if ($report === 'user_performance') {
+            return count($payload['userPerf'] ?? []);
+        }
+        if ($report === 'overdue_penalty_tracker') {
+            return count($payload['overdueRows'] ?? []);
+        }
+        return count($rows);
+    }
+
+    public function dashboardPayloadForCurrentFilters(int $orgId): array
+    {
+        return $this->buildUnifiedDashboardPayload($orgId, $this->dashboardFilterState());
+    }
+
     private function normalizedDashboardFilters(array $f): array
     {
         if (($f['from'] ?? '') === '' && ($f['to'] ?? '') === '' && ($f['period'] ?? '') !== '') {
@@ -37,6 +66,16 @@ class ReportsController extends BaseController
         }
         if ($to !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
             $to = '';
+        }
+        $today = MailIstTime::todayYmd();
+        if ($from !== '' && $from > $today) {
+            $from = $today;
+        }
+        if ($to !== '' && $to > $today) {
+            $to = $today;
+        }
+        if ($from !== '' && $to !== '' && $from > $to) {
+            [$from, $to] = [$to, $from];
         }
 
         return compact('from', 'to', 'department', 'userId', 'status', 'risk', 'priority', 'drill', 'period');
@@ -394,6 +433,17 @@ class ReportsController extends BaseController
         if (!in_array($report, ['penalties', 'main_report', 'department_performance', 'user_performance', 'overdue_penalty_tracker'], true)) {
             $report = 'main_report';
         }
+        if ($format === 'count') {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'ok' => true,
+                'report' => $report,
+                'count' => $this->reportRecordCount($report, $rows, $payload),
+                'from' => (string)($filters['from'] ?? ''),
+                'to' => (string)($filters['to'] ?? ''),
+            ]);
+            exit;
+        }
         if ($format === 'print') {
             header('Content-Type: text/html; charset=utf-8');
             echo '<!doctype html><html><head><meta charset="utf-8"><title>Unified Compliance Report</title><style>body{font-family:Arial;padding:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;font-size:12px}th{background:#f3f4f6}</style></head><body>';
@@ -554,7 +604,7 @@ class ReportsController extends BaseController
         $completionRate = $total > 0 ? (int) round(100 * $completed / $total) : 0;
         $payload = $this->buildUnifiedDashboardPayload((int)$orgId, $this->dashboardFilterState());
 
-        $this->view('reports/index', array_merge([
+        $this->view('reports/index', [
             'currentPage' => 'reports',
             'pageTitle' => 'Reports & Analytics',
             'user' => Auth::user(),
@@ -577,7 +627,10 @@ class ReportsController extends BaseController
             'overdueAging' => $overdueAging,
             'upcomingDue' => $upcomingDue,
             'recentCompletions' => $recentCompletions,
-        ], $payload));
+            'runtimeRows' => $payload['runtimeRows'] ?? [],
+            'effectiveFrom' => $payload['effectiveFrom'] ?? '',
+            'effectiveTo' => $payload['effectiveTo'] ?? '',
+        ]);
     }
 
     private function appendSearchFilter(string &$sql, array &$params, string $q): void

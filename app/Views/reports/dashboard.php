@@ -47,8 +47,8 @@ $badgeClass = static function (string $status): string {
 
     <form method="get" action="<?= htmlspecialchars($basePath) ?>/reports/dashboard" class="u-card u-filter">
         <div class="u-grid u-grid-7">
-            <input type="date" name="from" class="form-control" value="<?= htmlspecialchars((string)($filters['from'] ?? '')) ?>" placeholder="From Date">
-            <input type="date" name="to" class="form-control" value="<?= htmlspecialchars((string)($filters['to'] ?? '')) ?>" placeholder="To Date">
+            <input type="date" name="from" class="form-control" value="<?= htmlspecialchars((string)($filters['from'] ?? '')) ?>" placeholder="From Date" max="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>">
+            <input type="date" name="to" class="form-control" value="<?= htmlspecialchars((string)($filters['to'] ?? '')) ?>" placeholder="To Date" max="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>">
             <select name="department" class="form-control">
                 <option value="">All Departments</option>
                 <?php foreach (($departmentOptions ?? []) as $d): ?>

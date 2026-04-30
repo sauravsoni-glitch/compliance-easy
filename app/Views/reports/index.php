@@ -353,7 +353,110 @@ $sba = $statusByAuthority ?? [
     </div>
 
     <?php elseif ($activeTab === 'reports'): ?>
-    <?php require __DIR__ . '/_unified_reports_tab.php'; ?>
+    <div class="card mt-3">
+        <h3 class="card-title">Date-wise Report Run Summary</h3>
+        <p class="text-muted text-sm">Use each row's date range filter to download only that specific report for the selected period.</p>
+        <div class="table-wrap mt-3">
+            <table class="data-table rpt-table">
+                <thead>
+                    <tr>
+                        <th>Report Name</th>
+                        <th>Description</th>
+                        <th>Date Range</th>
+                        <th>Records</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach (($runtimeRows ?? []) as $rr): ?>
+                    <?php
+                    $reportKey = (string)($rr['key'] ?? 'main_report');
+                    $rowFormId = 'report-range-form-' . preg_replace('/[^a-z0-9\-_]/i', '-', $reportKey);
+                    $defaultRecords = (int)($rr['records'] ?? 0);
+                    ?>
+                    <tr>
+                        <td><strong><?= htmlspecialchars((string)($rr['name'] ?? 'Report')) ?></strong></td>
+                        <td><?= htmlspecialchars((string)($rr['description'] ?? '')) ?></td>
+                        <td>
+                            <form id="<?= htmlspecialchars($rowFormId) ?>" method="get" action="<?= htmlspecialchars($basePath) ?>/reports/dashboard-export" class="rpt-row-range-form">
+                                <input type="hidden" name="tab" value="reports">
+                                <input type="hidden" name="report_focus" value="<?= htmlspecialchars($reportKey) ?>">
+                                <input type="hidden" name="report" value="<?= htmlspecialchars($reportKey) ?>">
+                                <input type="date" name="from" class="form-control rpt-row-date-input" value="<?= htmlspecialchars((string)($effectiveFrom ?? '')) ?>" max="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>">
+                                <span class="text-muted rpt-row-to-text">to</span>
+                                <input type="date" name="to" class="form-control rpt-row-date-input" value="<?= htmlspecialchars((string)($effectiveTo ?? '')) ?>" max="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>">
+                            </form>
+                        </td>
+                        <td data-record-cell="<?= htmlspecialchars($rowFormId) ?>" data-default-records="<?= $defaultRecords ?>"><?= $defaultRecords ?></td>
+                        <td class="rpt-row-actions-cell">
+                            <div class="rpt-row-actions">
+                                <button type="button" class="btn btn-sm btn-primary js-report-apply" data-form-id="<?= htmlspecialchars($rowFormId) ?>">Apply Filter</button>
+                                <button
+                                    type="submit"
+                                    form="<?= htmlspecialchars($rowFormId) ?>"
+                                    formaction="<?= htmlspecialchars($basePath) ?>/reports/dashboard-export"
+                                    formmethod="get"
+                                    name="format"
+                                    value="csv"
+                                    class="btn btn-sm btn-secondary rpt-row-download-btn">Download CSV</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary js-report-reset" data-form-id="<?= htmlspecialchars($rowFormId) ?>">Reset</button>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($runtimeRows ?? [])): ?>
+                    <tr><td colspan="5" class="text-muted">No report summary rows available.</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <script>
+    (function() {
+        function getRecordCell(formId) {
+            return document.querySelector('[data-record-cell="' + formId + '"]');
+        }
+        document.querySelectorAll('.js-report-apply').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var formId = this.getAttribute('data-form-id');
+                var form = document.getElementById(formId);
+                if (!form) return;
+                var params = new URLSearchParams(new FormData(form));
+                params.set('format', 'count');
+                this.disabled = true;
+                this.textContent = 'Applying...';
+                fetch(form.getAttribute('action') + '?' + params.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        var cell = getRecordCell(formId);
+                        if (cell && data && data.ok) {
+                            cell.textContent = String(data.count || 0);
+                        }
+                    })
+                    .catch(function() {})
+                    .finally(() => {
+                        btn.disabled = false;
+                        btn.textContent = 'Apply Filter';
+                    });
+            });
+        });
+        document.querySelectorAll('.js-report-reset').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var formId = this.getAttribute('data-form-id');
+                var form = document.getElementById(formId);
+                if (!form) return;
+                var from = form.querySelector('input[name="from"]');
+                var to = form.querySelector('input[name="to"]');
+                if (from) from.value = '';
+                if (to) to.value = '';
+                var cell = getRecordCell(formId);
+                if (cell) {
+                    cell.textContent = cell.getAttribute('data-default-records') || '0';
+                }
+            });
+        });
+    })();
+    </script>
 
     <?php endif; ?>
 </div>

@@ -48,10 +48,6 @@ $wl = in_array($wlRaw, ['Single-Level', 'two-level']) ? 'two-level' : 'three-lev
                     </select>
                 </div>
             </div>
-            <div class="form-group">
-                <label class="form-label">Escalation (days before due)</label>
-                <input type="number" name="escalation_days_before" class="form-control" min="0" max="90" value="<?= (int)($r['escalation_days_before'] ?? 2) ?>">
-            </div>
             <hr class="am-form-hr">
             <div class="form-group">
                 <label class="form-label">Maker (user) *</label>

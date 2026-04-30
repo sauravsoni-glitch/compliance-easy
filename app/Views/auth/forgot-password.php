@@ -10,7 +10,7 @@
 <body class="auth-layout">
     <div class="auth-card">
         <div class="auth-logo-wrap">
-            <a href="<?= $basePath ?? '' ?>/" class="logo">easy</a>
+            <a href="<?= $basePath ?? '' ?>/" class="logo"><span class="app-brand-wordmark">easy</span></a>
         </div>
         <h1>Forgot Password</h1>
         <p class="subtitle">Enter your email and we'll send you a link to reset your password.</p>

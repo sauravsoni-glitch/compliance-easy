@@ -237,6 +237,7 @@ final class ComplianceCreatedMailReport
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;font-family:Segoe UI,system-ui,Roboto,Helvetica,Arial,sans-serif;">
   <tr>
     <td style="background:linear-gradient(135deg,#1f2937 0%,#111827 55%,#7f1d1d 100%);border-radius:14px 14px 0 0;padding:28px 24px;color:#fff;">
+      <div style="font-size:24px;line-height:1;font-weight:800;letter-spacing:0.01em;color:#ef4444;margin-bottom:10px;text-transform:lowercase;">easy</div>
       <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.85;">New compliance</div>
       <h1 style="margin:10px 0 6px;font-size:22px;line-height:1.25;font-weight:700;">' . self::h($s['title']) . '</h1>
       <div style="font-size:15px;opacity:0.95;font-weight:600;">' . self::h($s['compliance_code']) . '</div>

@@ -12,7 +12,7 @@
 <body class="auth-layout">
     <div class="auth-card">
         <div class="auth-logo-wrap">
-            <a href="<?= htmlspecialchars($basePath ?? '') ?>/" class="logo">easy</a>
+            <a href="<?= htmlspecialchars($basePath ?? '') ?>/" class="logo"><span class="app-brand-wordmark">easy</span></a>
         </div>
         <h1>Set a new password</h1>
         <p class="subtitle">Choose a strong password you haven&rsquo;t used elsewhere.</p>

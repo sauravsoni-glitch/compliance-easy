@@ -16,7 +16,7 @@ if ($showPostLoginOpening) {
 <body>
     <div id="post-login-opening" class="post-login-opening<?= $showPostLoginOpening ? ' active' : '' ?>" aria-hidden="<?= $showPostLoginOpening ? 'false' : 'true' ?>">
         <div class="post-login-opening-card">
-            <div class="post-login-opening-logo">easy</div>
+            <div class="post-login-opening-logo"><span class="app-brand-wordmark">easy</span></div>
             <div class="post-login-opening-title">Opening your workspace...</div>
             <div class="post-login-opening-bar"><span></span></div>
         </div>
@@ -30,7 +30,7 @@ if ($showPostLoginOpening) {
     <div class="app-layout">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <a href="<?= $basePath ?? '' ?>/dashboard" class="logo">easy</a>
+                <a href="<?= $basePath ?? '' ?>/dashboard" class="logo"><span class="app-brand-wordmark">easy</span></a>
                 <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
             </div>
             <nav class="sidebar-nav">

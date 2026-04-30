@@ -9,7 +9,7 @@
 </head>
 <body class="pricing-layout">
     <header class="pricing-header">
-        <a href="<?= $basePath ?? '' ?>/" class="logo logo-square">easy</a>
+        <a href="<?= $basePath ?? '' ?>/" class="logo logo-square"><span class="app-brand-wordmark">easy</span></a>
         <a href="<?= $basePath ?? '' ?>/login" class="btn btn-secondary">Sign In</a>
     </header>
 

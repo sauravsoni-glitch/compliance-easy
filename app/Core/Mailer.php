@@ -108,6 +108,7 @@ final class Mailer
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;font-family:Segoe UI,system-ui,Roboto,Helvetica,Arial,sans-serif;">
   <tr>
     <td style="background:linear-gradient(135deg,#1f2937 0%,#111827 50%,#7f1d1d 100%);border-radius:14px 14px 0 0;padding:26px 24px;color:#fff;">
+      <div style="font-size:24px;line-height:1;font-weight:800;letter-spacing:0.01em;color:#ef4444;margin-bottom:10px;text-transform:lowercase;">easy</div>
       <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.88;">Workspace invitation</div>
       <h1 style="margin:10px 0 4px;font-size:21px;line-height:1.3;font-weight:700;">You&rsquo;re invited to Easy Home Compliance Management system</h1>
       <p style="margin:0;font-size:14px;opacity:0.9;line-height:1.5;">Hi ' . $safeName . ', use the secure link below to finish setup and access the <strong>compliance workspace</strong>.</p>

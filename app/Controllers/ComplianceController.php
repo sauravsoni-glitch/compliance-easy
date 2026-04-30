@@ -318,6 +318,7 @@ class ComplianceController extends BaseController
         return '<div style="background:#f3f4f6;padding:24px 12px;">'
             . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;font-family:Segoe UI,system-ui,Roboto,Helvetica,Arial,sans-serif;">'
             . '<tr><td style="background:linear-gradient(135deg,#1f2937 0%,#111827 70%,#7c3aed 100%);border-radius:14px 14px 0 0;padding:24px 22px;color:#fff;">'
+            . '<div style="font-size:24px;line-height:1;font-weight:800;letter-spacing:0.01em;color:#ef4444;margin-bottom:10px;text-transform:lowercase;">easy</div>'
             . '<div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.9;">Compliance Notification</div>'
             . '<div style="margin-top:10px;font-size:22px;line-height:1.3;font-weight:800;">' . $kindSafe . ' Alert</div>'
             . '<div style="margin-top:8px;font-size:14px;opacity:0.92;">' . $codeSafe . ' · ' . $titleSafe . '</div>'

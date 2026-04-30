@@ -24,10 +24,16 @@ $penaltyValues = $penaltyValues ?? [];
 $runtimeRows = $runtimeRows ?? [];
 $effectiveFrom = $effectiveFrom ?? '';
 $effectiveTo = $effectiveTo ?? '';
+$reportsHostPage = $reportsHostPage ?? 'reports';
+$isDashboardHost = $reportsHostPage === 'dashboard';
+$reportsPageUrl = ($basePath ?? '') . ($isDashboardHost ? '/dashboard' : '/reports');
+$exportBaseUrl = ($basePath ?? '') . '/reports/dashboard-export';
+$todayYmd = \App\Core\MailIstTime::todayYmd();
 $queryWithoutDrill = $_GET;
 unset($queryWithoutDrill['drill']);
+$queryWithoutDrill = array_merge($queryWithoutDrill, $isDashboardHost ? [] : ['tab' => 'reports']);
 $baseQuery = http_build_query($queryWithoutDrill);
-$detailBase = ($basePath ?? '') . '/reports' . ($baseQuery !== '' ? ('?' . $baseQuery . '&') : '?');
+$detailBase = $reportsPageUrl . ($baseQuery !== '' ? ('?' . $baseQuery . '&') : '?');
 ?>
 <style>
 .u-grid-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}.u-grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}
@@ -46,19 +52,21 @@ $detailBase = ($basePath ?? '') . '/reports' . ($baseQuery !== '' ? ('?' . $base
 @media(max-width:1200px){.u-grid-4,.u-grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <div class="card u-dashboard-glass u-soft-card u-anim">
-    <h3 class="card-title u-title-glow">Reports Dashboard</h3>
-    <form method="get" action="<?= htmlspecialchars($basePath) ?>/reports" class="rpt-search-form" style="display:grid;gap:.5rem;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:.75rem;position:sticky;top:8px;background:#fff;z-index:5;padding:.5rem;border-radius:10px;">
-        <input type="hidden" name="tab" value="reports">
-        <input type="date" name="from" class="form-control" value="<?= htmlspecialchars((string)($filters['from'] ?? '')) ?>" max="<?= htmlspecialchars(date('Y-m-d')) ?>">
-        <input type="date" name="to" class="form-control" value="<?= htmlspecialchars((string)($filters['to'] ?? '')) ?>">
+    <h3 class="card-title u-title-glow"><?= $isDashboardHost ? 'Deep dive' : 'Reports Dashboard' ?></h3>
+    <form method="get" action="<?= htmlspecialchars($reportsPageUrl) ?>" class="rpt-search-form" style="display:grid;gap:.5rem;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:.75rem;position:sticky;top:8px;background:#fff;z-index:5;padding:.5rem;border-radius:10px;">
+        <?php if (!$isDashboardHost): ?><input type="hidden" name="tab" value="reports"><?php endif; ?>
+        <?php if ($isDashboardHost): ?><input type="hidden" name="view" value="deep-dive"><?php endif; ?>
+        <input type="date" name="from" class="form-control" value="<?= htmlspecialchars((string)($filters['from'] ?? '')) ?>" max="<?= htmlspecialchars($todayYmd) ?>">
+        <input type="date" name="to" class="form-control" value="<?= htmlspecialchars((string)($filters['to'] ?? '')) ?>" max="<?= htmlspecialchars($todayYmd) ?>">
         <select name="period" class="form-control"><option value="">Custom Range</option><option value="6m" <?= (($filters['period'] ?? '') === '6m') ? 'selected' : '' ?>>Last 6 Months</option><option value="1y" <?= (($filters['period'] ?? '') === '1y') ? 'selected' : '' ?>>Last 1 Year</option></select>
         <div style="display:flex;gap:.5rem;">
             <button type="submit" class="btn btn-primary">Apply Filter</button>
-            <a href="<?= htmlspecialchars($basePath) ?>/reports?tab=reports" class="btn btn-secondary">Reset</a>
-            <a href="<?= htmlspecialchars($basePath) ?>/reports/dashboard-export?<?= htmlspecialchars(http_build_query(array_merge($_GET, ['tab' => 'reports', 'format' => 'csv']))) ?>" class="btn btn-secondary">Export Selected Range</a>
+            <a href="<?= htmlspecialchars($reportsPageUrl) ?><?= $isDashboardHost ? '' : '?tab=reports' ?>" class="btn btn-secondary">Reset</a>
+            <a href="<?= htmlspecialchars($exportBaseUrl) ?>?<?= htmlspecialchars(http_build_query(array_merge($_GET, $isDashboardHost ? ['format' => 'csv'] : ['tab' => 'reports', 'format' => 'csv']))) ?>" class="btn btn-secondary">Export Selected Range</a>
         </div>
     </form>
 </div>
+<?php if (!$isDashboardHost): ?>
 <div class="card u-dashboard-glass u-soft-card u-anim">
     <h3 class="card-title">Date-wise Report Run Summary</h3>
     <p class="text-muted text-sm">Showing reports for <strong><?= htmlspecialchars($effectiveFrom !== '' ? $effectiveFrom : 'all dates') ?></strong> to <strong><?= htmlspecialchars($effectiveTo !== '' ? $effectiveTo : 'all dates') ?></strong>.</p>
@@ -77,8 +85,7 @@ $detailBase = ($basePath ?? '') . '/reports' . ($baseQuery !== '' ? ('?' . $base
             <tbody>
                 <?php foreach ($runtimeRows as $rr): ?>
                 <?php
-                    $downloadQuery = array_merge($_GET, [
-                        'tab' => 'reports',
+                    $downloadQuery = array_merge($_GET, $isDashboardHost ? [] : ['tab' => 'reports'], [
                         'format' => 'csv',
                         'report' => (string)($rr['key'] ?? 'main_report'),
                     ]);
@@ -89,7 +96,7 @@ $detailBase = ($basePath ?? '') . '/reports' . ($baseQuery !== '' ? ('?' . $base
                     <td><?= htmlspecialchars($effectiveTo !== '' ? $effectiveTo : 'All') ?></td>
                     <td><?= (int)($rr['records'] ?? 0) ?></td>
                     <td><?= htmlspecialchars((string)($rr['description'] ?? '')) ?></td>
-                    <td><a class="btn btn-sm btn-secondary" href="<?= htmlspecialchars($basePath) ?>/reports/dashboard-export?<?= htmlspecialchars(http_build_query($downloadQuery)) ?>">Download CSV</a></td>
+                    <td><a class="btn btn-sm btn-secondary" href="<?= htmlspecialchars($exportBaseUrl) ?>?<?= htmlspecialchars(http_build_query($downloadQuery)) ?>">Download CSV</a></td>
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($runtimeRows)): ?>
@@ -99,6 +106,7 @@ $detailBase = ($basePath ?? '') . '/reports' . ($baseQuery !== '' ? ('?' . $base
         </table>
     </div>
 </div>
+<?php endif; ?>
 <div class="u-grid-4">
     <a href="<?= htmlspecialchars($detailBase . 'drill=total#main-report') ?>" class="card u-kpi-link u-soft-card u-accent-bar u-anim"><div class="u-kpi-title">Total Compliances</div><div class="u-kpi-value"><?= (int)($summary['total'] ?? 0) ?></div></a>
     <a href="<?= htmlspecialchars($detailBase . 'drill=completed#main-report') ?>" class="card u-kpi-link u-soft-card u-accent-bar u-anim"><div class="u-kpi-title">Completed</div><div class="u-kpi-value" style="color:#15803d;"><?= (int)($summary['completed'] ?? 0) ?></div></a>
@@ -132,7 +140,7 @@ $detailBase = ($basePath ?? '') . '/reports' . ($baseQuery !== '' ? ('?' . $base
     <div class="table-wrap mt-3">
         <table class="data-table rpt-table"><thead><tr><th>Department</th><th>Total Tasks</th><th>Completed</th><th>Pending</th><th>Overdue</th><th>Compliance %</th><th>Avg Delay</th></tr></thead><tbody>
             <?php foreach ($departmentPerf as $d): ?>
-                <tr><td><a href="<?= htmlspecialchars($basePath) ?>/reports?<?= htmlspecialchars(http_build_query(array_merge($_GET, ['tab' => 'reports', 'department' => $d['department']]))) ?>#main-report"><?= htmlspecialchars((string)$d['department']) ?></a></td><td><?= (int)$d['total'] ?></td><td><?= (int)$d['completed'] ?></td><td><?= (int)$d['pending'] ?></td><td><?= (int)$d['overdue'] ?></td><td><?= (int)$d['compliance_pct'] ?>%</td><td><?= htmlspecialchars((string)$d['avg_delay']) ?></td></tr>
+                <tr><td><a href="<?= htmlspecialchars($reportsPageUrl) ?>?<?= htmlspecialchars(http_build_query(array_merge($_GET, $isDashboardHost ? ['department' => $d['department']] : ['tab' => 'reports', 'department' => $d['department']]))) ?>#main-report"><?= htmlspecialchars((string)$d['department']) ?></a></td><td><?= (int)$d['total'] ?></td><td><?= (int)$d['completed'] ?></td><td><?= (int)$d['pending'] ?></td><td><?= (int)$d['overdue'] ?></td><td><?= (int)$d['compliance_pct'] ?>%</td><td><?= htmlspecialchars((string)$d['avg_delay']) ?></td></tr>
             <?php endforeach; ?>
             <?php if (empty($departmentPerf)): ?><tr><td colspan="7" class="text-muted">No department rows.</td></tr><?php endif; ?>
         </tbody></table>
@@ -143,7 +151,7 @@ $detailBase = ($basePath ?? '') . '/reports' . ($baseQuery !== '' ? ('?' . $base
     <div class="table-wrap mt-3">
         <table class="data-table rpt-table"><thead><tr><th>User</th><th>Role</th><th>Total</th><th>Completed</th><th>Pending</th><th>Overdue</th><th>Performance %</th></tr></thead><tbody>
             <?php foreach ($userPerf as $u): ?>
-                <tr><td><a href="<?= htmlspecialchars($basePath) ?>/reports?<?= htmlspecialchars(http_build_query(array_merge($_GET, ['tab' => 'reports', 'user_id' => (int)$u['user_id']]))) ?>#main-report"><?= htmlspecialchars((string)$u['user_name']) ?></a></td><td><?= htmlspecialchars((string)$u['role']) ?></td><td><?= (int)$u['total'] ?></td><td><?= (int)$u['completed'] ?></td><td><?= (int)$u['pending'] ?></td><td><?= (int)$u['overdue'] ?></td><td><?= (int)$u['performance_pct'] ?>%</td></tr>
+                <tr><td><a href="<?= htmlspecialchars($reportsPageUrl) ?>?<?= htmlspecialchars(http_build_query(array_merge($_GET, $isDashboardHost ? ['user_id' => (int)$u['user_id']] : ['tab' => 'reports', 'user_id' => (int)$u['user_id']]))) ?>#main-report"><?= htmlspecialchars((string)$u['user_name']) ?></a></td><td><?= htmlspecialchars((string)$u['role']) ?></td><td><?= (int)$u['total'] ?></td><td><?= (int)$u['completed'] ?></td><td><?= (int)$u['pending'] ?></td><td><?= (int)$u['overdue'] ?></td><td><?= (int)$u['performance_pct'] ?>%</td></tr>
             <?php endforeach; ?>
             <?php if (empty($userPerf)): ?><tr><td colspan="7" class="text-muted">No user rows.</td></tr><?php endif; ?>
         </tbody></table>

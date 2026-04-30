@@ -12,7 +12,7 @@
     <div class="auth-bg-orb auth-bg-orb-2" aria-hidden="true"></div>
     <div class="auth-card auth-card-login">
         <div class="auth-logo-wrap">
-            <a href="<?= $basePath ?? '' ?>/" class="logo">easy</a>
+            <a href="<?= $basePath ?? '' ?>/" class="logo"><span class="app-brand-wordmark">easy</span></a>
         </div>
         <div class="auth-tabs">
             <span class="auth-tab active">Sign In</span>

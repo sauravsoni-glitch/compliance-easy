@@ -1,6 +1,6 @@
 <div class="page-header">
     <div>
-        <h1 class="page-title">Dashboard</h1>
+        <h1 class="page-title"><?= htmlspecialchars((string)($dashboardTitle ?? 'Dashboard')) ?></h1>
         <p class="page-subtitle"><?= ($user['role_slug'] ?? '') === 'admin' ? 'Compliance Management Overview' : 'Your assigned compliances and tasks' ?></p>
     </div>
 </div>
@@ -14,6 +14,8 @@ unset($_SESSION['flash_error'], $_SESSION['flash_success']);
 
 <?php
 $basePath = $basePath ?? '';
+$dashboardView = (string)($dashboardView ?? 'dashboard');
+$isDeepDiveView = $dashboardView === 'deep-dive';
 $role = $user['role_slug'] ?? '';
 $isAdmin = $role === 'admin';
 $isMaker = $role === 'maker';
@@ -23,6 +25,16 @@ $roleFocusCount = (int)($roleFocusCount ?? 0);
 $roleFocusLabel = $roleFocusLabel ?? 'Action items';
 ?>
 
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="rpt-tabs" style="margin:0;">
+            <a href="<?= htmlspecialchars($basePath) ?>/dashboard" class="rpt-tab <?= !$isDeepDiveView ? 'active' : '' ?>"><i class="fas fa-th-large"></i> Dashboard</a>
+            <a href="<?= htmlspecialchars($basePath) ?>/dashboard?view=deep-dive" class="rpt-tab <?= $isDeepDiveView ? 'active' : '' ?>"><i class="fas fa-magnifying-glass-chart"></i> Deep dive</a>
+        </div>
+    </div>
+</div>
+
+<?php if (!$isDeepDiveView): ?>
 <div class="card mb-3" style="border-left: 4px solid var(--primary, #c41e3a);">
     <div class="card-body py-3 d-flex flex-wrap align-items-center justify-content-between gap-2">
         <div>
@@ -134,55 +146,44 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
     </div>
 </div>
 
+<div class="card mb-3">
+    <div class="card-header">
+        <h3 class="card-title">Activity Timeline</h3>
+        <a href="<?= htmlspecialchars($basePath) ?>/compliance" class="btn btn-secondary btn-sm">View All</a>
+    </div>
+    <?php if (!empty($recentActivity)): ?>
+    <ul class="activity-timeline">
+        <?php foreach ($recentActivity as $a): ?>
+        <li class="activity-item">
+            <a href="<?= $basePath ?>/compliance/view/<?= (int)$a['id'] ?>" class="activity-link">
+                <span class="activity-dot"></span>
+                <div class="activity-body">
+                    <strong>Created <?= htmlspecialchars((string)($a['compliance_code'] ?? '')) ?>:</strong>
+                    <?= htmlspecialchars((string)($a['title'] ?? '')) ?>
+                    <div class="text-muted activity-meta">
+                        by <?= htmlspecialchars($user['full_name'] ?? 'User') ?> ·
+                        <?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($a['created_at'] ?? ''))) ?>
+                    </div>
+                </div>
+            </a>
+        </li>
+        <?php endforeach; ?>
+    </ul>
+    <?php else: ?>
+    <p class="text-muted mb-0">No recent activity.</p>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
+<?php if ($isDeepDiveView && !empty($reportsPayload) && is_array($reportsPayload)): ?>
+<?php extract($reportsPayload, EXTR_SKIP); ?>
+<?php $reportsHostPage = 'dashboard'; ?>
+<?php require __DIR__ . '/../reports/_unified_reports_tab.php'; ?>
+<?php endif; ?>
+
+<?php if (!$isDeepDiveView): ?>
 <div class="dashboard-grid">
     <div class="dashboard-main">
-        <div class="chart-row">
-            <div class="card chart-card">
-                <h3 class="card-title">Compliance Trend (Last 6 Months)</h3>
-                <div class="bar-chart-wrap">
-                    <?php
-                    $trend = $monthlyTrend ?? [];
-                    $maxCnt = 1;
-                    foreach ($trend as $t) { if ((int)$t['cnt'] > $maxCnt) $maxCnt = (int)$t['cnt']; }
-                    foreach ($trend as $t):
-                        $cnt = (int)$t['cnt'];
-                        $h = $maxCnt ? round(($cnt / $maxCnt) * 100) : 0;
-                        $monthLabel = \App\Core\MailIstTime::formatDateOnly($t['month'] . '-01', null, 'M Y');
-                    ?>
-                    <a href="<?= $basePath ?>/compliance?from=<?= $t['month'] ?>-01&to=<?= htmlspecialchars(\App\Core\MailIstTime::lastDayOfYm((string) $t['month'])) ?>" class="bar-item" title="<?= $monthLabel ?>: <?= $cnt ?>">
-                        <span class="bar-fill" style="height: <?= $h ?>%"></span>
-                        <span class="bar-label"><?= $monthLabel ?></span>
-                    </a>
-                    <?php endforeach; ?>
-                    <?php if (empty($trend)): ?><p class="text-muted mb-0">No data yet.</p><?php endif; ?>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Recent Activity</h3>
-                <a href="<?= $basePath ?>/compliance" class="btn btn-secondary btn-sm">View All</a>
-            </div>
-            <?php if (!empty($recentActivity)): ?>
-            <ul class="activity-timeline">
-                <?php foreach ($recentActivity as $a): ?>
-                <li class="activity-item">
-                    <a href="<?= $basePath ?>/compliance/view/<?= (int)$a['id'] ?>" class="activity-link">
-                        <span class="activity-dot"></span>
-                        <div class="activity-body">
-                            <strong>Created <?= htmlspecialchars($a['compliance_code']) ?>:</strong> <?= htmlspecialchars($a['title']) ?>
-                            <div class="text-muted activity-meta">by <?= htmlspecialchars($user['full_name'] ?? 'User') ?> · <?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($a['created_at'] ?? ''))) ?></div>
-                        </div>
-                    </a>
-                </li>
-                <?php endforeach; ?>
-            </ul>
-            <?php else: ?>
-            <p class="text-muted mb-0">No recent activity.</p>
-            <?php endif; ?>
-        </div>
-
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Delayed Departments (Last 6 Months)</h3>
@@ -227,28 +228,6 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
                 </table>
             </div>
         </div>
-
-        <?php if (!empty($myTasks)): ?>
-        <div class="card">
-            <h3 class="card-title"><?= $isAdmin ? 'Open pipeline (admin)' : ($isMaker ? 'My assigned compliances' : ($isReviewer ? 'Pending reviews' : 'Pending approvals')) ?></h3>
-            <div class="table-wrap">
-                <table class="data-table">
-                    <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Due Date</th><th></th></tr></thead>
-                    <tbody>
-                        <?php foreach ($myTasks as $t): ?>
-                        <tr>
-                            <td><?= htmlspecialchars($t['compliance_code']) ?></td>
-                            <td><a href="<?= $basePath ?>/compliance/view/<?= (int)$t['id'] ?>"><?= htmlspecialchars(mb_substr($t['title'], 0, 45)) ?><?= mb_strlen($t['title']) > 45 ? '…' : '' ?></a></td>
-                            <td><span class="badge badge-secondary"><?= htmlspecialchars($t['status']) ?></span></td>
-                            <td><?= \App\Core\MailIstTime::formatUiDate($t['due_date'] ?? null) ?></td>
-                            <td><a href="<?= $basePath ?>/compliance/view/<?= (int)$t['id'] ?>" class="btn btn-sm btn-secondary">Open</a></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <?php endif; ?>
 
     </div>
 
@@ -400,6 +379,7 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <?php
 function renderKpiModal(string $id, string $title, array $list, string $viewAllUrl, string $basePath): void {

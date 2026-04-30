@@ -23,6 +23,19 @@ $logoSrc = '';
 if (!empty($org['logo_path'])) {
     $logoSrc = rtrim($basePath, '/') . '/uploads/' . str_replace('\\', '/', $org['logo_path']);
 }
+$orgNameForLogo = trim((string)($org['name'] ?? 'Organization'));
+$orgInitials = '';
+foreach (preg_split('/\s+/', $orgNameForLogo) as $part) {
+    if ($part !== '') {
+        $orgInitials .= strtoupper(substr($part, 0, 1));
+    }
+    if (strlen($orgInitials) >= 2) {
+        break;
+    }
+}
+if ($orgInitials === '') {
+    $orgInitials = 'OR';
+}
 ?>
 <div class="org-page org-page-v2">
     <?php if (!$isAdmin && $step < 3): ?>
@@ -122,6 +135,16 @@ if (!empty($org['logo_path'])) {
     <div class="org-section-head org-head-done">
         <h1 class="page-title"><?= ($justDone && $isAdmin) ? 'Organization setup complete' : 'Organization' ?></h1>
         <p class="page-subtitle"><?= ($justDone && $isAdmin) ? 'Your profile and team are ready.' : 'Profile and team overview.' ?></p>
+    </div>
+
+    <div class="card org-brand-banner">
+        <div class="org-brand-logo-wrap">
+            <span class="app-brand-wordmark org-brand-wordmark">easy</span>
+        </div>
+        <div class="org-brand-meta">
+            <div class="org-brand-title"><?= htmlspecialchars($orgNameForLogo) ?></div>
+            <div class="org-brand-subtitle">Organization brand identity</div>
+        </div>
     </div>
 
     <div class="card org-form-card org-profile-readonly">

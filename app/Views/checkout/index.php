@@ -9,7 +9,7 @@
 </head>
 <body class="checkout-layout">
     <header class="checkout-header">
-        <a href="<?= $basePath ?? '' ?>/" class="logo">easy</a>
+        <a href="<?= $basePath ?? '' ?>/" class="logo"><span class="app-brand-wordmark">easy</span></a>
         <a href="<?= $basePath ?? '' ?>/pricing" class="back-link"><i class="fas fa-arrow-left"></i> Back</a>
     </header>
 

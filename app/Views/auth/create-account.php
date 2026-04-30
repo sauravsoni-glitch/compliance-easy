@@ -10,7 +10,7 @@
 <body class="auth-layout">
     <div class="auth-card auth-card-create">
         <div class="auth-logo-wrap">
-            <a href="<?= $basePath ?? '' ?>/" class="logo">easy</a>
+            <a href="<?= $basePath ?? '' ?>/" class="logo"><span class="app-brand-wordmark">easy</span></a>
         </div>
 
         <?php if (!empty($cardVerified) && empty($inviteMode)): ?>

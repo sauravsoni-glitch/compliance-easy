@@ -61,8 +61,22 @@ a:hover {
     font-size: 1.25rem;
     color: var(--primary);
     text-decoration: none;
+    display: inline-flex;
+    align-items: center;
 }
 .logo:hover { text-decoration: none; color: #ef4444; }
+.app-brand-wordmark {
+    font-weight: 800;
+    font-size: 1.45rem;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    color: #ef4444;
+    text-transform: lowercase;
+    font-family: inherit;
+}
+.logo.logo-square .app-brand-wordmark {
+    font-size: 1.55rem;
+}
 .sidebar-toggle {
     background: none;
     border: none;
@@ -1243,6 +1257,9 @@ textarea.form-control { min-height: 80px; resize: vertical; }
     margin-bottom: 0.35rem;
     animation: post-login-pop 0.55s ease;
 }
+.post-login-opening-logo .app-brand-wordmark {
+    font-size: 2.2rem;
+}
 .post-login-opening-title {
     font-size: 0.9rem;
     color: #4b5563;
@@ -1877,6 +1894,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
     color: #fff;
     border-color: #16a34a;
 }
+
 
 /* Modal */
 .modal-overlay {
@@ -2882,6 +2900,46 @@ textarea.form-control { min-height: 80px; resize: vertical; }
 .rpt-drop-ico { font-size: 2rem; color: var(--text-muted); margin-bottom: 0.5rem; display: block; }
 .rpt-file-name { display: block; margin-top: 0.75rem; font-size: 0.85rem; color: var(--primary); font-weight: 600; }
 .rpt-upload-submit { margin-top: 0.5rem; }
+.rpt-row-range-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 320px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.35rem 0.5rem;
+}
+.rpt-row-date-input {
+    min-width: 138px;
+    height: 34px;
+    border-radius: 9px;
+}
+.rpt-row-to-text {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #64748b;
+}
+.rpt-row-actions-cell { min-width: 300px; }
+.rpt-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+.rpt-row-actions .btn.btn-sm {
+    border-radius: 10px;
+    padding: 0.4rem 0.8rem;
+    font-weight: 600;
+}
+.rpt-row-download-btn {
+    border-color: #cbd5e1;
+    background: #fff;
+}
+.rpt-row-download-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+}
 
 /* ---------- Circular Intelligence ---------- */
 .ci-page { max-width: 1200px; }
@@ -4871,6 +4929,54 @@ a.am-kpi.am-kpi-link:focus-visible {
 .org-setup-grid { margin-top: 0.5rem; }
 .org-logo-thumb { margin-bottom: 1rem; }
 .org-logo-thumb img { max-height: 64px; max-width: 120px; object-fit: contain; }
+.org-brand-banner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.1rem;
+    border: 1px solid #e5edf7;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+.org-brand-logo-wrap {
+    width: 64px;
+    height: 64px;
+    border-radius: 14px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+.org-brand-wordmark {
+    font-size: 1.45rem;
+}
+.org-brand-logo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 0.3rem;
+}
+.org-brand-logo-fallback {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: 0.03em;
+}
+.org-brand-meta { min-width: 0; }
+.org-brand-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.2;
+}
+.org-brand-subtitle {
+    font-size: 0.8rem;
+    color: #64748b;
+    margin-top: 0.2rem;
+}
 .org-invite-card-v2 {
     padding: 1.75rem 2rem;
     border-radius: 20px;
