@@ -224,7 +224,7 @@ function rp_status_label(string $status): string {
                         <tr><td>Create compliance</td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-times rp-m-no"></i></td><td><i class="fas fa-times rp-m-no"></i></td></tr>
                         <tr><td>Reports</td><td><i class="fas fa-check rp-m-ok"></i></td><td>Limited</td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-check rp-m-ok"></i></td></tr>
                         <tr><td>Financial Ratios</td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-check rp-m-ok"></i></td></tr>
-                        <tr><td>Circular Intelligence</td><td><i class="fas fa-check rp-m-ok"></i></td><td>View</td><td>View</td><td>View</td></tr>
+                        <tr><td>Circular Intelligence</td><td><i class="fas fa-check rp-m-ok"></i></td><td>View + upload</td><td>View</td><td>View</td></tr>
                         <tr><td>DOA</td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-times rp-m-no"></i></td><td><i class="fas fa-times rp-m-no"></i></td><td><i class="fas fa-times rp-m-no"></i></td></tr>
                         <tr><td>Authority Matrix</td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-times rp-m-no"></i></td><td><i class="fas fa-times rp-m-no"></i></td><td><i class="fas fa-times rp-m-no"></i></td></tr>
                         <tr><td>Bulk Upload</td><td><i class="fas fa-check rp-m-ok"></i></td><td><i class="fas fa-times rp-m-no"></i></td><td><i class="fas fa-times rp-m-no"></i></td><td><i class="fas fa-times rp-m-no"></i></td></tr>

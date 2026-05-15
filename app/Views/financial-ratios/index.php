@@ -41,7 +41,6 @@ function fr_row_badge(string $s): array {
         <p class="page-subtitle">Monitor regulatory compliance ratios as per RBI/NHB guidelines</p>
     </div>
     <div class="fr-header-actions">
-        <a href="<?= $basePath ?>/financial-ratios/download-template" class="btn btn-secondary"><i class="fas fa-download"></i> Download Template</a>
     </div>
 </div>
 <?php if ($flashSuccess): ?><div class="alert alert-success"><?= htmlspecialchars($flashSuccess) ?></div><?php endif; ?>
@@ -120,11 +119,6 @@ $block = $bySlug[$activeTab] ?? null;
             <?php endif; ?>
         </div>
         <div class="fr-category-actions">
-            <?php if ($reminderFeatureEnabled): ?>
-            <button type="button" class="btn btn-secondary btn-sm" id="fr-open-reminder"><i class="far fa-clock"></i> Set Reminder</button>
-            <?php else: ?>
-            <button type="button" class="btn btn-secondary btn-sm" disabled title="Run database migration 006_financial_ratio_reminders.sql"><i class="far fa-clock"></i> Set Reminder</button>
-            <?php endif; ?>
             <button type="button" class="btn btn-secondary btn-sm" id="fr-open-edit" <?= empty($block['ratios']) ? 'disabled title="No ratios to edit"' : '' ?>><i class="fas fa-pencil-alt"></i> Edit</button>
         </div>
     </div>

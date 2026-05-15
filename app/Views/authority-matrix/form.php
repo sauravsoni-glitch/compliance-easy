@@ -20,12 +20,17 @@ $wl = in_array($wlRaw, ['Single-Level', 'two-level']) ? 'two-level' : 'three-lev
             <div class="form-row-2">
                 <div class="form-group">
                     <label class="form-label">Department *</label>
-                    <input type="text" name="department" class="form-control" required value="<?= htmlspecialchars($r['department'] ?? '') ?>" placeholder="Compliance, Finance…">
+                    <select name="department" class="form-control" required>
+                        <option value="">Select department</option>
+                        <?php foreach (['Compliance', 'Finance', 'Legal', 'Operations', 'Risk', 'IT'] as $dept): ?>
+                        <option value="<?= $dept ?>" <?= ($r['department'] ?? '') === $dept ? 'selected' : '' ?>><?= $dept ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Frequency *</label>
                     <select name="frequency" class="form-control">
-                        <?php foreach (['Monthly', 'Quarterly', 'One-time', 'Annual'] as $f): ?>
+                        <?php foreach (['One-time', 'Daily', 'Weekly', 'Fortnightly', 'Monthly', 'Quarterly', 'Half-yearly', 'Annual', 'Yearly'] as $f): ?>
                         <option value="<?= $f ?>" <?= ($r['frequency'] ?? '') === $f ? 'selected' : '' ?>><?= $f ?></option>
                         <?php endforeach; ?>
                     </select>

@@ -84,17 +84,27 @@ $basePath = $basePath ?? '';
                 $pillClass = 'upcoming-pill-pending';
                 $pillText = 'pending';
             }
-            $rangeStart = !empty($u['start_date']) ? $u['start_date'] : (!empty($u['expected_date']) ? $u['expected_date'] : date('Y-m-d', strtotime($due . ' -6 days')));
-            if ($rangeStart > $due) {
-                $rangeStart = $due;
+            $dueY = substr((string) $due, 0, 10);
+            $rangeLabel = 'Due: ' . date('M j, Y', strtotime($dueY));
+            $todayY = date('Y-m-d');
+            $daysLeft = (int) floor((strtotime($dueY . ' 00:00:00') - strtotime($todayY . ' 00:00:00')) / 86400);
+            if ($daysLeft < 0) {
+                $dueMetaText = 'Overdue by ' . abs($daysLeft) . ' day' . (abs($daysLeft) === 1 ? '' : 's');
+                $dueMetaClass = 'upcoming-due-overdue';
+            } elseif ($daysLeft === 0) {
+                $dueMetaText = 'Due today';
+                $dueMetaClass = 'upcoming-due-today';
+            } else {
+                $dueMetaText = 'Due in ' . $daysLeft . ' day' . ($daysLeft === 1 ? '' : 's');
+                $dueMetaClass = 'upcoming-due-soon';
             }
-            $rangeLabel = date('M j', strtotime($rangeStart)) . ' - ' . date('M j', strtotime($due));
             ?>
             <li class="upcoming-event-row-ref">
                 <a href="<?= $basePath ?>/compliance/view/<?= (int)$u['id'] ?>" class="upcoming-event-link-ref">
                     <span class="upcoming-event-main-ref">
                         <span class="upcoming-event-title-ref"><?= htmlspecialchars($u['title']) ?></span>
                         <span class="upcoming-event-dates-ref"><?= htmlspecialchars($rangeLabel) ?></span>
+                        <span class="upcoming-due-meta-ref <?= $dueMetaClass ?>"><?= htmlspecialchars($dueMetaText) ?></span>
                     </span>
                     <span class="upcoming-pill <?= $pillClass ?>"><?= htmlspecialchars($pillText) ?></span>
                 </a>

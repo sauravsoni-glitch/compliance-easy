@@ -293,6 +293,7 @@ class CircularController extends BaseController
             'filterStatus' => $fStatus,
             'filterImpact' => $fImpact,
             'isAdmin' => Auth::isAdmin(),
+            'canUploadCircular' => Auth::isAdmin() || Auth::isMaker(),
         ]);
     }
 
@@ -331,13 +332,14 @@ class CircularController extends BaseController
             'activity' => $activity,
             'userOptions' => $users,
             'isAdmin' => Auth::isAdmin(),
+            'isMaker' => Auth::isMaker(),
             'extendedSchema' => $this->extendedSchema(),
         ]);
     }
 
     public function addForm(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'maker');
         $this->view('circular/add', [
             'currentPage' => 'circular',
             'pageTitle' => 'Add Circular',
@@ -348,7 +350,7 @@ class CircularController extends BaseController
 
     public function add(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'maker');
         $orgId = Auth::organizationId();
         $title = trim($_POST['title'] ?? '');
         $authority = trim($_POST['authority'] ?? 'RBI');
@@ -382,7 +384,7 @@ class CircularController extends BaseController
 
     public function uploadForm(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'maker');
         $this->view('circular/upload', [
             'currentPage' => 'circular',
             'pageTitle' => 'Upload Circular',
@@ -393,7 +395,7 @@ class CircularController extends BaseController
 
     public function upload(): void
     {
-        Auth::requireRole('admin');
+        Auth::requireRole('admin', 'maker');
         $orgId = Auth::organizationId();
         $authority = trim($_POST['authority'] ?? 'RBI');
         $referenceNo = trim($_POST['reference_no'] ?? '');

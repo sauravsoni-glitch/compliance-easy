@@ -339,11 +339,7 @@ $roleFocusLabel = $roleFocusLabel ?? 'Action items';
                     $pillText = 'pending';
                 }
                 $dueY = substr((string) $due, 0, 10);
-                $rangeStart = !empty($u['start_date']) ? substr((string) $u['start_date'], 0, 10) : (!empty($u['expected_date']) ? substr((string) $u['expected_date'], 0, 10) : \App\Core\MailIstTime::shiftCalendarDays($dueY, -6));
-                if ($rangeStart > $dueY) {
-                    $rangeStart = $dueY;
-                }
-                $rangeLabel = \App\Core\MailIstTime::formatDateOnly($rangeStart, null, 'M j') . ' - ' . \App\Core\MailIstTime::formatDateOnly($dueY, null, 'M j');
+                $rangeLabel = 'Due: ' . \App\Core\MailIstTime::formatDateOnly($dueY, null, 'M j, Y');
                 $todayY = \App\Core\MailIstTime::todayYmd();
                 $daysLeft = (int) floor((strtotime($dueY . ' 00:00:00') - strtotime($todayY . ' 00:00:00')) / 86400);
                 if ($daysLeft < 0) {

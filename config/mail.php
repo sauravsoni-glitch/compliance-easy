@@ -23,18 +23,33 @@
  * (copy from mail.local.example.php). Values there override the array below.
  * mail.local.php is gitignored.
  */
+$provider = strtolower((string) (getenv('MAIL_PROVIDER') ?: 'smtp'));
+$username = (string) (getenv('MAIL_USERNAME') ?: '');
+$password = (string) (getenv('MAIL_PASSWORD') ?: '');
+$fromEmail = (string) (getenv('MAIL_FROM') ?: '');
+$mailgunDomain = (string) (getenv('MAILGUN_DOMAIN') ?: '');
+$mailgunApiKey = (string) (getenv('MAILGUN_API_KEY') ?: '');
+$mailEnabledRaw = getenv('MAIL_ENABLED');
+$mailEnabledExplicit = $mailEnabledRaw !== false && $mailEnabledRaw !== '';
+
+$smtpReady = trim($username) !== '' && trim($password) !== '' && trim($fromEmail) !== '';
+$mailgunReady = trim($mailgunDomain) !== '' && trim($mailgunApiKey) !== '' && trim($fromEmail) !== '';
+$autoEnabled = ($provider === 'mailgun') ? $mailgunReady : (($provider === 'auto') ? ($smtpReady || $mailgunReady) : $smtpReady);
+
 $config = [
-    'enabled' => filter_var(getenv('MAIL_ENABLED') ?: '0', FILTER_VALIDATE_BOOLEAN),
-    'provider' => strtolower((string) (getenv('MAIL_PROVIDER') ?: 'smtp')),
+    'enabled' => $mailEnabledExplicit
+        ? filter_var((string) $mailEnabledRaw, FILTER_VALIDATE_BOOLEAN)
+        : $autoEnabled,
+    'provider' => $provider,
     'host' => getenv('MAIL_HOST') ?: 'smtp.gmail.com',
     'port' => (int) (getenv('MAIL_PORT') !== false && getenv('MAIL_PORT') !== '' ? getenv('MAIL_PORT') : '587'),
     'encryption' => strtolower((string) (getenv('MAIL_ENCRYPTION') ?: 'tls')),
-    'username' => (string) (getenv('MAIL_USERNAME') ?: ''),
-    'password' => (string) (getenv('MAIL_PASSWORD') ?: ''),
-    'from_email' => (string) (getenv('MAIL_FROM') ?: ''),
+    'username' => $username,
+    'password' => $password,
+    'from_email' => $fromEmail,
     'from_name' => (string) (getenv('MAIL_FROM_NAME') ?: 'Easy Home Compliance System'),
-    'mailgun_domain' => (string) (getenv('MAILGUN_DOMAIN') ?: ''),
-    'mailgun_api_key' => (string) (getenv('MAILGUN_API_KEY') ?: ''),
+    'mailgun_domain' => $mailgunDomain,
+    'mailgun_api_key' => $mailgunApiKey,
     'mailgun_endpoint' => rtrim((string) (getenv('MAILGUN_ENDPOINT') ?: 'https://api.mailgun.net'), '/'),
 ];
 

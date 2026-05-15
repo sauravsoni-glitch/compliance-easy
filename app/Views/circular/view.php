@@ -68,9 +68,21 @@ $approverTags = array_filter(array_map('trim', explode(',', $c['ai_approver_tags
         </div>
 
         <div class="card ci-admin-card">
-            <h3 class="card-title"><i class="fas fa-user-edit"></i> <?= $isAdmin ? 'Admin Review &amp; Override' : 'Next steps' ?></h3>
+            <h3 class="card-title"><i class="fas fa-user-edit"></i> <?php
+                if ($isAdmin) {
+                    echo 'Admin Review &amp; Override';
+                } elseif (!empty($isMaker) && !$approved && !$linkedId) {
+                    echo 'What happens next';
+                } else {
+                    echo 'Next steps';
+                }
+            ?></h3>
             <?php if (!$isAdmin && !$approved && !$linkedId): ?>
-            <p class="text-muted mb-0">An <strong>admin</strong> must review this circular and use <strong>Approve &amp; Create Compliance</strong> before a linked compliance item is created for owners, reviewers, and approvers.</p>
+            <?php if (!empty($isMaker)): ?>
+            <p class="text-muted mb-0">Your circular has been received and analyzed. When a user with the <strong>Administrator</strong> role opens this circular, they can confirm or edit the review details and select <strong>Approve &amp; Create Compliance</strong> to create the linked compliance record for owners, reviewers, and approvers.</p>
+            <?php else: ?>
+            <p class="text-muted mb-0">This circular is waiting for someone with the <strong>Administrator</strong> role to review it and select <strong>Approve &amp; Create Compliance</strong>. Until then, no linked compliance item exists for owners, reviewers, and approvers.</p>
+            <?php endif; ?>
             <?php elseif (!$isAdmin && ($approved || $linkedId)): ?>
             <p class="text-muted mb-0">This circular is finalized<?= !empty($c['linked_code']) ? '. Linked compliance: <strong>' . htmlspecialchars($c['linked_code']) . '</strong>' : '.' ?></p>
             <?php elseif ($approved || $linkedId): ?>

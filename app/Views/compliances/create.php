@@ -42,11 +42,21 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                     <label class="form-label">Applicable Department *</label>
                     <select name="department" id="dept-input" class="form-control" required>
                         <option value="">Select Department</option>
-                        <?php foreach (['Legal', 'Finance', 'Operations', 'Risk', 'IT', 'Compliance'] as $dept): ?>
+                        <?php foreach (['Legal', 'Finance', 'Operations', 'Risk', 'IT', 'Compliance', 'Human Resource'] as $dept): ?>
                         <option value="<?= htmlspecialchars($dept) ?>" <?= ($_POST['department'] ?? '') === $dept ? 'selected' : '' ?>><?= htmlspecialchars($dept) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <p class="form-help" id="matrix-dept-hint" style="display:none;color:var(--primary);margin-top:0.35rem;"></p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Compliance Area *</label>
+                    <select name="compliance_area" id="compliance-area-input" class="form-control" required>
+                        <option value="">Select Compliance Area</option>
+                        <?php foreach (($complianceAreaOptions ?? []) as $area): ?>
+                        <option value="<?= htmlspecialchars($area) ?>" <?= ($_POST['compliance_area'] ?? '') === $area ? 'selected' : '' ?>><?= htmlspecialchars($area) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p class="form-help">Options are sourced from Authority Matrix for your organization.</p>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Risk Level *</label>
@@ -72,6 +82,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                         <option value="one-time" <?= ($_POST['frequency'] ?? '') === 'one-time' ? 'selected' : '' ?>>One-time</option>
                         <option value="daily" <?= ($_POST['frequency'] ?? '') === 'daily' ? 'selected' : '' ?>>Daily</option>
                         <option value="weekly" <?= ($_POST['frequency'] ?? '') === 'weekly' ? 'selected' : '' ?>>Weekly</option>
+                        <option value="fortnightly" <?= ($_POST['frequency'] ?? '') === 'fortnightly' ? 'selected' : '' ?>>Fortnightly</option>
                         <option value="monthly" <?= ($_POST['frequency'] ?? 'monthly') === 'monthly' ? 'selected' : '' ?>>Monthly</option>
                         <option value="quarterly" <?= ($_POST['frequency'] ?? '') === 'quarterly' ? 'selected' : '' ?>>Quarterly</option>
                         <option value="half-yearly" <?= ($_POST['frequency'] ?? '') === 'half-yearly' ? 'selected' : '' ?>>Half-yearly</option>
@@ -96,6 +107,11 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                 <label class="form-label">Penalty / Impact</label>
                 <textarea name="penalty_impact" class="form-control" placeholder="Describe penalty or impact" rows="2"><?= htmlspecialchars($_POST['penalty_impact'] ?? '') ?></textarea>
                 <p class="form-help">Optional. Will be highlighted when compliance is overdue.</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Penalty Amount (&#8377;)</label>
+                <input type="number" name="penalty_amount" class="form-control" min="0" step="0.01" placeholder="e.g. 50000" value="<?= htmlspecialchars($_POST['penalty_amount'] ?? '') ?>">
+                <p class="form-help">Optional. Enter penalty in rupees.</p>
             </div>
         </div>
 
@@ -210,30 +226,11 @@ $evTypePost = $_POST['evidence_type'] ?? '';
             </div>
         </div>
 
-        <div class="card create-section-card">
-            <h3 class="card-title">Important Dates</h3>
-            <div class="create-form-grid-4">
-                <div class="form-group">
-                    <label class="form-label">Start Date *</label>
-                    <input type="date" name="start_date" class="form-control" value="<?= htmlspecialchars($_POST['start_date'] ?? '') ?>" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Expected Date *</label>
-                    <input type="date" name="expected_date" class="form-control" value="<?= htmlspecialchars($_POST['expected_date'] ?? '') ?>" required>
-                    <p class="form-help">Must be on or before Due Date.</p>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Reminder Date *</label>
-                    <input type="date" name="reminder_date" class="form-control" value="<?= htmlspecialchars($_POST['reminder_date'] ?? '') ?>" required>
-                </div>
-            </div>
-        </div>
-
         <div class="create-form-actions">
             <a href="<?= $basePath ?>/compliance" class="btn btn-secondary">Cancel</a>
             <button type="submit" class="btn btn-primary">Create Compliance</button>
         </div>
-        <p class="form-help">After creation, the compliance appears as <strong>Pending</strong>. The maker can add documents and submit from the detail page.</p>
+        <p class="form-help">After creation, the compliance appears as <strong>Pending</strong>. The maker can add documents and submit from the detail page. Internal timeline dates are auto-aligned to the due date.</p>
     </form>
 </div>
 <script>
@@ -289,6 +286,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
     var revSel   = document.getElementById('reviewer_id');
     var appSel   = document.querySelector('select[name="approver_id"]');
     var deptInp  = document.getElementById('dept-input');
+    var areaSel  = document.getElementById('compliance-area-input');
     var hint     = document.getElementById('matrix-dept-hint');
     var basePath = '<?= htmlspecialchars($basePath ?? '') ?>';
 
@@ -315,6 +313,17 @@ $evTypePost = $_POST['evidence_type'] ?? '';
             toggleWorkflow(false);
             return;
         }
+        if (areaSel && Array.isArray(data.compliance_areas) && data.compliance_areas.length) {
+            var current = areaSel.value;
+            areaSel.innerHTML = '<option value="">Select Compliance Area</option>';
+            data.compliance_areas.forEach(function(area) {
+                var opt = document.createElement('option');
+                opt.value = area;
+                opt.textContent = area;
+                if (current === area) opt.selected = true;
+                areaSel.appendChild(opt);
+            });
+        }
         // set workflow from matrix
         wf.value = data.workflow;
         toggleWorkflow(true); // lock dropdown
@@ -325,18 +334,26 @@ $evTypePost = $_POST['evidence_type'] ?? '';
         if (data.approver_id && appSel) appSel.value = String(data.approver_id);
 
         // show hint
-        var wfLabel = data.workflow === 'two-level' ? 'Two Level' : 'Three Level';
-        hint.textContent = '⚡ Authority Matrix applied: workflow and maker/reviewer/approver are auto-assigned.';
+        if (data.matched_by === 'department_area') {
+            hint.textContent = '⚡ Authority Matrix applied by Department + Compliance Area: workflow and maker/reviewer/approver are auto-assigned.';
+        } else {
+            hint.textContent = '⚡ Authority Matrix applied by Department. Select Compliance Area to refine workflow/users for that area.';
+        }
         hint.style.display = 'block';
     }
 
     var debounceTimer;
-    function fetchMatrix() {
+    function fetchMatrix(useArea) {
         var dept = deptInp ? deptInp.value.trim() : '';
         if (!dept) { applyMatrix({ found: false }); return; }
+        var area = useArea && areaSel ? areaSel.value.trim() : '';
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function() {
-            fetch(basePath + '/compliances/matrix-for-dept?dept=' + encodeURIComponent(dept))
+            var url = basePath + '/compliances/matrix-for-dept?dept=' + encodeURIComponent(dept);
+            if (area) {
+                url += '&area=' + encodeURIComponent(area);
+            }
+            fetch(url)
                 .then(function(r){ return r.json(); })
                 .then(applyMatrix)
                 .catch(function(){ applyMatrix({ found: false }); });
@@ -344,10 +361,21 @@ $evTypePost = $_POST['evidence_type'] ?? '';
     }
 
     if (deptInp) {
-        deptInp.addEventListener('input', fetchMatrix);
-        deptInp.addEventListener('change', fetchMatrix);
+        deptInp.addEventListener('input', function(){
+            if (areaSel) areaSel.value = '';
+            fetchMatrix(false);
+        });
+        deptInp.addEventListener('change', function(){
+            if (areaSel) areaSel.value = '';
+            fetchMatrix(false);
+        });
         // trigger on load if dept pre-filled (e.g. form re-submit)
-        if (deptInp.value.trim()) fetchMatrix();
+        if (deptInp.value.trim()) fetchMatrix(true);
+    }
+    if (areaSel) {
+        areaSel.addEventListener('change', function(){
+            fetchMatrix(true);
+        });
     }
 
     if (wf) wf.addEventListener('change', function(){ toggleWorkflow(false); });

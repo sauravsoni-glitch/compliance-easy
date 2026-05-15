@@ -27,6 +27,103 @@ class ComplianceController extends BaseController
         return strtotime($value . ' 00:00:00') > strtotime(date('Y-m-d') . ' 00:00:00');
     }
 
+    private function isRecurringFrequency(string $frequency): bool
+    {
+        $f = strtolower(trim($frequency));
+        return in_array($f, ['daily', 'weekly', 'fortnightly', 'monthly', 'quarterly', 'half-yearly', 'annual', 'yearly'], true);
+    }
+
+    private function addMonthsClamped(string $isoDate, int $months): ?string
+    {
+        $dt = \DateTimeImmutable::createFromFormat('Y-m-d', $isoDate);
+        if (!$dt) {
+            return null;
+        }
+        $year = (int) $dt->format('Y');
+        $month = (int) $dt->format('n');
+        $day = (int) $dt->format('j');
+        $month += $months;
+        while ($month > 12) {
+            $month -= 12;
+            $year++;
+        }
+        while ($month < 1) {
+            $month += 12;
+            $year--;
+        }
+        $lastDay = (int) date('t', strtotime(sprintf('%04d-%02d-01', $year, $month)));
+        $finalDay = min($day, $lastDay);
+        return sprintf('%04d-%02d-%02d', $year, $month, $finalDay);
+    }
+
+    private function nextDueDateByFrequency(string $dueDate, string $frequency): ?string
+    {
+        $f = strtolower(trim($frequency));
+        $ts = strtotime($dueDate . ' 00:00:00');
+        if ($ts === false) {
+            return null;
+        }
+        if ($f === 'daily') {
+            return date('Y-m-d', strtotime('+1 day', $ts));
+        }
+        if ($f === 'weekly') {
+            return date('Y-m-d', strtotime('+7 days', $ts));
+        }
+        if ($f === 'fortnightly') {
+            return date('Y-m-d', strtotime('+14 days', $ts));
+        }
+        if ($f === 'monthly') {
+            return $this->addMonthsClamped($dueDate, 1);
+        }
+        if ($f === 'quarterly') {
+            return $this->addMonthsClamped($dueDate, 3);
+        }
+        if ($f === 'half-yearly') {
+            return $this->addMonthsClamped($dueDate, 6);
+        }
+        if (in_array($f, ['annual', 'yearly'], true)) {
+            return $this->addMonthsClamped($dueDate, 12);
+        }
+        return null;
+    }
+
+    private function recurrenceCycleKey(string $frequency, string $dueDate): string
+    {
+        $f = strtolower(trim($frequency));
+        $dt = \DateTimeImmutable::createFromFormat('Y-m-d', $dueDate);
+        if (!$dt) {
+            return $f . ':' . $dueDate;
+        }
+        $year = (int) $dt->format('Y');
+        $month = (int) $dt->format('n');
+        if ($f === 'daily') {
+            return 'daily:' . $dt->format('Y-m-d');
+        }
+        if ($f === 'weekly') {
+            return 'weekly:' . $dt->format('o-\WW');
+        }
+        if ($f === 'fortnightly') {
+            $week = (int) $dt->format('W');
+            $bucket = (int) floor(($week - 1) / 2) + 1;
+            return sprintf('fortnightly:%d-%02d', $year, $bucket);
+        }
+        if ($f === 'monthly') {
+            return 'monthly:' . $dt->format('Y-m');
+        }
+        if ($f === 'quarterly') {
+            $q = (int) ceil($month / 3);
+            return sprintf('quarterly:%d-Q%d', $year, $q);
+        }
+        if ($f === 'half-yearly') {
+            $h = $month <= 6 ? 1 : 2;
+            return sprintf('half-yearly:%d-H%d', $year, $h);
+        }
+        if (in_array($f, ['annual', 'yearly'], true)) {
+            return 'yearly:' . $dt->format('Y');
+        }
+        return $f . ':' . $dt->format('Y-m-d');
+    }
+
 
     /**
      * Send compliance notifications to maker/reviewer/approver assignees.
@@ -413,6 +510,9 @@ class ComplianceController extends BaseController
             if (!$hasCol('final_debrief_at')) {
                 $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `final_debrief_at` datetime NULL AFTER `final_debrief_by`");
             }
+            if (!$hasCol('compliance_area')) {
+                $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `compliance_area` varchar(255) NULL AFTER `department`");
+            }
         } catch (\Throwable $e) {
         }
         try {
@@ -449,6 +549,46 @@ class ComplianceController extends BaseController
                   KEY `org_cmp_order` (`organization_id`,`compliance_id`,`step_order`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             ");
+        } catch (\Throwable $e) {
+        }
+        $done = true;
+    }
+
+    private function ensureRecurrenceSchema(): void
+    {
+        static $done = false;
+        if ($done) {
+            return;
+        }
+        $hasCol = function (string $col): bool {
+            try {
+                $st = $this->db->prepare('SHOW COLUMNS FROM `compliances` LIKE ?');
+                $st->execute([$col]);
+                return (bool)$st->fetch(\PDO::FETCH_ASSOC);
+            } catch (\Throwable $e) {
+                return false;
+            }
+        };
+        try {
+            if (!$hasCol('recurrence_root_id')) {
+                $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `recurrence_root_id` int unsigned NULL AFTER `id`");
+            }
+            if (!$hasCol('recurrence_parent_id')) {
+                $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `recurrence_parent_id` int unsigned NULL AFTER `recurrence_root_id`");
+            }
+            if (!$hasCol('recurrence_cycle_key')) {
+                $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `recurrence_cycle_key` varchar(80) NULL AFTER `recurrence_parent_id`");
+            }
+            if (!$hasCol('recurrence_enabled')) {
+                $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `recurrence_enabled` tinyint(1) NOT NULL DEFAULT 1 AFTER `recurrence_cycle_key`");
+            }
+            if (!$hasCol('recurrence_auto_generated')) {
+                $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `recurrence_auto_generated` tinyint(1) NOT NULL DEFAULT 0 AFTER `recurrence_enabled`");
+            }
+            try {
+                $this->db->exec("CREATE INDEX `idx_cmp_recur_root_cycle` ON `compliances` (`organization_id`, `recurrence_root_id`, `recurrence_cycle_key`)");
+            } catch (\Throwable $ignored) {
+            }
         } catch (\Throwable $e) {
         }
         $done = true;
@@ -553,6 +693,20 @@ class ComplianceController extends BaseController
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
+    /** @return list<string> */
+    private function getComplianceAreaOptions(int $orgId, string $department = ''): array
+    {
+        if ($department !== '') {
+            $stmt = $this->db->prepare("SELECT DISTINCT compliance_area FROM authority_matrix WHERE organization_id = ? AND status = 'active' AND department = ? ORDER BY compliance_area");
+            $stmt->execute([$orgId, $department]);
+        } else {
+            $stmt = $this->db->prepare("SELECT DISTINCT compliance_area FROM authority_matrix WHERE organization_id = ? AND status = 'active' ORDER BY compliance_area");
+            $stmt->execute([$orgId]);
+        }
+        $rows = $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+        return array_values(array_filter(array_map(static fn ($v) => trim((string)$v), $rows), static fn ($v) => $v !== ''));
+    }
+
     private function logHistory(int $complianceId, string $action, string $description, ?int $userId = null, ?string $comment = null): void
     {
         $userId = $userId ?? Auth::id();
@@ -643,8 +797,16 @@ class ComplianceController extends BaseController
     }
 
     /** @return array{0:int,1:int,2:int,3:string} maker_id, reviewer_id, approver_id, workflow_level */
-    private function matrixWorkflowUsers(int $orgId, string $department, string $frequency): array
+    private function matrixWorkflowUsers(int $orgId, string $department, string $frequency, string $complianceArea = ''): array
     {
+        if ($complianceArea !== '') {
+            $stmt = $this->db->prepare("SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND compliance_area = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
+            $stmt->execute([$orgId, $department, $complianceArea]);
+            $r = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if ($r && (!empty($r['maker_id']) || !empty($r['reviewer_id']) || !empty($r['approver_id']))) {
+                return [(int)($r['maker_id'] ?? 0), (int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0), (string)($r['workflow_level'] ?? '')];
+            }
+        }
         $stmt = $this->db->prepare("SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
         $stmt->execute([$orgId, $department]);
         $r = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -653,6 +815,14 @@ class ComplianceController extends BaseController
         }
         $map = ['one-time' => 'One-time', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly', 'annual' => 'Annual', 'yearly' => 'Yearly'];
         $freqLabel = $map[$frequency] ?? ucfirst($frequency);
+        if ($complianceArea !== '') {
+            $stmt = $this->db->prepare("SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND compliance_area = ? AND frequency LIKE ? AND status = 'active' LIMIT 1");
+            $stmt->execute([$orgId, $department, $complianceArea, '%' . $freqLabel . '%']);
+            $r = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if ($r) {
+                return [(int)($r['maker_id'] ?? 0), (int)($r['reviewer_id'] ?? 0), (int)($r['approver_id'] ?? 0), (string)($r['workflow_level'] ?? '')];
+            }
+        }
         $stmt = $this->db->prepare("SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND department = ? AND frequency LIKE ? AND status = 'active' LIMIT 1");
         $stmt->execute([$orgId, $department, '%' . $freqLabel . '%']);
         $r = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -669,20 +839,44 @@ class ComplianceController extends BaseController
         Auth::requireAuth();
         $orgId = Auth::organizationId();
         $dept = trim($_GET['dept'] ?? '');
+        $area = trim($_GET['area'] ?? '');
         if ($dept === '') { $this->json(['found' => false]); return; }
 
-        $stmt = $this->db->prepare("
-            SELECT am.workflow_level, am.reviewer_id, am.approver_id, am.maker_id,
-                   u1.full_name AS maker_name, u2.full_name AS reviewer_name, u3.full_name AS approver_name
-            FROM authority_matrix am
-            LEFT JOIN users u1 ON u1.id = am.maker_id
-            LEFT JOIN users u2 ON u2.id = am.reviewer_id
-            LEFT JOIN users u3 ON u3.id = am.approver_id
-            WHERE am.organization_id = ? AND am.department = ? AND am.status = 'active'
-            ORDER BY am.id DESC LIMIT 1
-        ");
-        $stmt->execute([$orgId, $dept]);
-        $r = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $r = null;
+        $matchedBy = 'department';
+        if ($area !== '') {
+            $stmt = $this->db->prepare("
+                SELECT am.workflow_level, am.reviewer_id, am.approver_id, am.maker_id,
+                       am.compliance_area,
+                       u1.full_name AS maker_name, u2.full_name AS reviewer_name, u3.full_name AS approver_name
+                FROM authority_matrix am
+                LEFT JOIN users u1 ON u1.id = am.maker_id
+                LEFT JOIN users u2 ON u2.id = am.reviewer_id
+                LEFT JOIN users u3 ON u3.id = am.approver_id
+                WHERE am.organization_id = ? AND am.department = ? AND am.compliance_area = ? AND am.status = 'active'
+                ORDER BY am.id DESC LIMIT 1
+            ");
+            $stmt->execute([$orgId, $dept, $area]);
+            $r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+            if ($r) {
+                $matchedBy = 'department_area';
+            }
+        }
+        if (!$r) {
+            $stmt = $this->db->prepare("
+                SELECT am.workflow_level, am.reviewer_id, am.approver_id, am.maker_id,
+                       am.compliance_area,
+                       u1.full_name AS maker_name, u2.full_name AS reviewer_name, u3.full_name AS approver_name
+                FROM authority_matrix am
+                LEFT JOIN users u1 ON u1.id = am.maker_id
+                LEFT JOIN users u2 ON u2.id = am.reviewer_id
+                LEFT JOIN users u3 ON u3.id = am.approver_id
+                WHERE am.organization_id = ? AND am.department = ? AND am.status = 'active'
+                ORDER BY am.id DESC LIMIT 1
+            ");
+            $stmt->execute([$orgId, $dept]);
+            $r = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+        }
 
         if (!$r) { $this->json(['found' => false]); return; }
 
@@ -692,6 +886,7 @@ class ComplianceController extends BaseController
         elseif (in_array($wl, ['Two-Level', 'Multi-Level', 'three-level'])) $wl = 'three-level';
         else $wl = !empty($r['reviewer_id']) ? 'three-level' : 'two-level';
 
+        $areas = $this->getComplianceAreaOptions($orgId, $dept);
         $this->json([
             'found'          => true,
             'workflow'       => $wl,
@@ -701,7 +896,161 @@ class ComplianceController extends BaseController
             'reviewer_name'  => $r['reviewer_name'] ?? '',
             'approver_id'    => (int)($r['approver_id'] ?? 0),
             'approver_name'  => $r['approver_name'] ?? '',
+            'compliance_areas' => $areas,
+            'matched_by'     => $matchedBy,
         ]);
+    }
+
+    private function applyRecurrenceMetadata(int $complianceId, int $orgId, string $frequency, string $dueDate, ?int $rootId = null, ?int $parentId = null, bool $autoGenerated = false): void
+    {
+        $this->ensureRecurrenceSchema();
+        $cycleKey = $this->recurrenceCycleKey($frequency, $dueDate);
+        $effectiveRootId = $rootId ?: $complianceId;
+        $enabled = $this->isRecurringFrequency($frequency) ? 1 : 0;
+        try {
+            $this->db->prepare('UPDATE compliances SET recurrence_root_id = ?, recurrence_parent_id = ?, recurrence_cycle_key = ?, recurrence_enabled = ?, recurrence_auto_generated = ? WHERE id = ? AND organization_id = ?')
+                ->execute([$effectiveRootId, $parentId, $cycleKey, $enabled, $autoGenerated ? 1 : 0, $complianceId, $orgId]);
+        } catch (\Throwable $e) {
+        }
+    }
+
+    private function autoCreateNextRecurringCycle(array $completedCompliance): ?int
+    {
+        $orgId = (int) ($completedCompliance['organization_id'] ?? 0);
+        if ($orgId < 1) {
+            return null;
+        }
+        $frequency = strtolower(trim((string) ($completedCompliance['frequency'] ?? '')));
+        if (!$this->isRecurringFrequency($frequency)) {
+            return null;
+        }
+        $enabled = isset($completedCompliance['recurrence_enabled'])
+            ? (int) $completedCompliance['recurrence_enabled'] === 1
+            : true;
+        if (!$enabled) {
+            return null;
+        }
+        $currentDue = trim((string) ($completedCompliance['due_date'] ?? ''));
+        if ($currentDue === '') {
+            return null;
+        }
+        $nextDue = $this->nextDueDateByFrequency($currentDue, $frequency);
+        if (!$nextDue) {
+            return null;
+        }
+
+        $this->ensureRecurrenceSchema();
+        $sourceId = (int) ($completedCompliance['id'] ?? 0);
+        if ($sourceId < 1) {
+            return null;
+        }
+        $rootId = (int) ($completedCompliance['recurrence_root_id'] ?? 0);
+        if ($rootId < 1) {
+            $rootId = $sourceId;
+            $this->applyRecurrenceMetadata($sourceId, $orgId, $frequency, $currentDue, $rootId, (int) ($completedCompliance['recurrence_parent_id'] ?? 0), (int) ($completedCompliance['recurrence_auto_generated'] ?? 0) === 1);
+        }
+
+        $nextCycleKey = $this->recurrenceCycleKey($frequency, $nextDue);
+        $existing = 0;
+        try {
+            $dup = $this->db->prepare('SELECT id FROM compliances WHERE organization_id = ? AND recurrence_root_id = ? AND recurrence_cycle_key = ? LIMIT 1');
+            $dup->execute([$orgId, $rootId, $nextCycleKey]);
+            $existing = (int) ($dup->fetchColumn() ?: 0);
+        } catch (\Throwable $e) {
+            $dup = $this->db->prepare('SELECT id FROM compliances WHERE organization_id = ? AND title = ? AND frequency = ? AND due_date = ? LIMIT 1');
+            $dup->execute([$orgId, (string)($completedCompliance['title'] ?? ''), $frequency, $nextDue]);
+            $existing = (int) ($dup->fetchColumn() ?: 0);
+        }
+        if ($existing > 0) {
+            return null;
+        }
+
+        $department = trim((string) ($completedCompliance['department'] ?? ''));
+        $complianceArea = trim((string) ($completedCompliance['compliance_area'] ?? ''));
+        [$mMaker, $mRev, $mApp, $mWl] = $this->matrixWorkflowUsers($orgId, $department, $frequency, $complianceArea);
+        if ($mWl === '' || $mMaker < 1 || $mApp < 1 || ($mWl !== 'two-level' && $mRev < 1)) {
+            return null;
+        }
+        $workflow = in_array($mWl, ['Single-Level', 'Two-Level', 'two-level'], true) ? 'two-level' : 'three-level';
+        $ownerId = $mMaker;
+        $reviewerId = $workflow === 'three-level' ? $mRev : 0;
+        $approverId = $mApp;
+
+        $stmt = $this->db->prepare('SELECT COALESCE(MAX(CAST(SUBSTRING(compliance_code, 5) AS UNSIGNED)), 0) + 1 FROM compliances WHERE organization_id = ?');
+        $stmt->execute([$orgId]);
+        $num = (int) $stmt->fetchColumn();
+        $code = 'CMP-' . str_pad((string)$num, 3, '0', STR_PAD_LEFT);
+
+        $this->ensurePracticalFlowSchema();
+        $hasEvidenceTypeCol = true;
+        try {
+            $this->db->query('SELECT evidence_type FROM compliances LIMIT 1');
+        } catch (\Throwable $e) {
+            $hasEvidenceTypeCol = false;
+        }
+        $hasComplianceAreaCol = true;
+        try {
+            $this->db->query('SELECT compliance_area FROM compliances LIMIT 1');
+        } catch (\Throwable $e) {
+            $hasComplianceAreaCol = false;
+        }
+
+        $title = (string) ($completedCompliance['title'] ?? '');
+        $authorityId = (int) ($completedCompliance['authority_id'] ?? 0);
+        $circularRef = (string) ($completedCompliance['circular_reference'] ?? '');
+        $risk = (string) ($completedCompliance['risk_level'] ?? 'medium');
+        $priority = (string) ($completedCompliance['priority'] ?? 'medium');
+        $description = trim((string) ($completedCompliance['description'] ?? ''));
+        $objective = trim((string) ($completedCompliance['objective_text'] ?? ''));
+        $penalty = trim((string) ($completedCompliance['penalty_impact'] ?? ''));
+        $evidenceRequired = (int) ($completedCompliance['evidence_required'] ?? 1) === 1 ? 1 : 0;
+        $evidenceType = $hasEvidenceTypeCol ? (trim((string) ($completedCompliance['evidence_type'] ?? '')) ?: null) : null;
+        $checklistJson = (string) ($completedCompliance['checklist_items'] ?? '');
+        if ($checklistJson === '') {
+            $checklistJson = json_encode([]);
+        }
+        $createdBy = (int)Auth::id();
+
+        if ($hasEvidenceTypeCol) {
+            $stmt = $this->db->prepare(
+                $hasComplianceAreaCol
+                ? 'INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, compliance_area, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                : 'INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            );
+        } else {
+            $stmt = $this->db->prepare(
+                $hasComplianceAreaCol
+                ? 'INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, compliance_area, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                : 'INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            );
+        }
+
+        if ($hasEvidenceTypeCol) {
+            $params = $hasComplianceAreaCol
+                ? [$orgId, $code, $title, $authorityId, $circularRef !== '' ? $circularRef : null, $department, $complianceArea !== '' ? $complianceArea : null, $risk, $priority, $frequency, $description !== '' ? $description : null, $objective !== '' ? $objective : null, $penalty !== '' ? $penalty : null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired, $evidenceType, $checklistJson, $nextDue, $nextDue, $nextDue, $nextDue, 'pending', $createdBy]
+                : [$orgId, $code, $title, $authorityId, $circularRef !== '' ? $circularRef : null, $department, $risk, $priority, $frequency, $description !== '' ? $description : null, $objective !== '' ? $objective : null, $penalty !== '' ? $penalty : null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired, $evidenceType, $checklistJson, $nextDue, $nextDue, $nextDue, $nextDue, 'pending', $createdBy];
+        } else {
+            $params = $hasComplianceAreaCol
+                ? [$orgId, $code, $title, $authorityId, $circularRef !== '' ? $circularRef : null, $department, $complianceArea !== '' ? $complianceArea : null, $risk, $priority, $frequency, $description !== '' ? $description : null, $objective !== '' ? $objective : null, $penalty !== '' ? $penalty : null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired, $checklistJson, $nextDue, $nextDue, $nextDue, $nextDue, 'pending', $createdBy]
+                : [$orgId, $code, $title, $authorityId, $circularRef !== '' ? $circularRef : null, $department, $risk, $priority, $frequency, $description !== '' ? $description : null, $objective !== '' ? $objective : null, $penalty !== '' ? $penalty : null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired, $checklistJson, $nextDue, $nextDue, $nextDue, $nextDue, 'pending', $createdBy];
+        }
+        $stmt->execute($params);
+        $newId = (int) $this->db->lastInsertId();
+        if ($newId < 1) {
+            return null;
+        }
+        $this->applyRecurrenceMetadata($newId, $orgId, $frequency, $nextDue, $rootId, $sourceId, true);
+        $this->logHistory($newId, 'Compliance Created', 'Auto-created next cycle from ' . (string)($completedCompliance['compliance_code'] ?? ('CMP-' . $sourceId)), Auth::id());
+        $this->logHistory($sourceId, 'Next cycle created', 'Auto-created recurring compliance ' . $code, Auth::id());
+        $notifyRow = $this->loadComplianceForNotification($newId, $orgId);
+        if ($notifyRow) {
+            $this->notifyComplianceAssignees($notifyRow, 'Recurring compliance created');
+        }
+        return $newId;
     }
 
     private function loadCompliance(int $id, int $orgId): ?array
@@ -893,6 +1242,7 @@ class ComplianceController extends BaseController
     public function createForm(): void
     {
         Auth::requireRole('admin', 'maker');
+        $orgId = Auth::organizationId();
         $this->view('compliances/create', [
             'currentPage' => 'compliances-create',
             'pageTitle' => 'Create New Compliance',
@@ -900,6 +1250,7 @@ class ComplianceController extends BaseController
             'basePath' => $this->appConfig['url'] ?? '',
             'authorities' => $this->getAuthorityOptions(),
             'userOptions' => $this->getUserOptions(),
+            'complianceAreaOptions' => $this->getComplianceAreaOptions($orgId),
         ]);
     }
 
@@ -911,6 +1262,7 @@ class ComplianceController extends BaseController
         $authorityId = (int)($_POST['authority_id'] ?? 0);
         $circularRef = trim($_POST['circular_reference'] ?? '');
         $department = trim($_POST['department'] ?? '');
+        $complianceArea = trim((string)($_POST['compliance_area'] ?? ''));
         $riskLevel = $_POST['risk_level'] ?? 'medium';
         $priority = $_POST['priority'] ?? 'medium';
         $frequency = preg_replace('/[^a-z0-9\-]/', '', strtolower($_POST['frequency'] ?? 'monthly')) ?: 'monthly';
@@ -939,23 +1291,24 @@ class ComplianceController extends BaseController
         if (!$evidenceRequired || !$hasEvidenceTypeCol) {
             $evidenceType = $hasEvidenceTypeCol && $evidenceRequired ? $evidenceType : null;
         }
-        $startDate = $this->normalizeIsoDate($_POST['start_date'] ?? null);
         $dueDate = $this->normalizeIsoDate($_POST['due_date'] ?? null);
-        $expectedDate = $this->normalizeIsoDate($_POST['expected_date'] ?? null);
-        $reminderDate = $this->normalizeIsoDate($_POST['reminder_date'] ?? null);
+        // Keep timeline fields internally for compatibility, but drive them from one user-facing due date.
+        $startDate = $dueDate;
+        $expectedDate = $dueDate;
+        $reminderDate = $dueDate;
         $checklist = $_POST['checklist'] ?? [];
         if (is_string($checklist)) {
             $checklist = array_filter(array_map('trim', explode("\n", $checklist)));
         }
 
-        if (!$title || !$department || !$startDate || !$dueDate || !$expectedDate || !$reminderDate) {
-            $_SESSION['flash_error'] = 'Title, Department, Start Date, Due Date, Expected Date, and Reminder Date are required.';
+        if (!$title || !$department || !$complianceArea || !$dueDate) {
+            $_SESSION['flash_error'] = 'Title, Department, Compliance Area, and Due Date are required.';
             $this->redirect('/compliances/create');
         }
 
-        [$mMaker, $mRev, $mApp, $mWl] = $this->matrixWorkflowUsers($orgId, $department, $frequency);
+        [$mMaker, $mRev, $mApp, $mWl] = $this->matrixWorkflowUsers($orgId, $department, $frequency, $complianceArea);
         if ($mWl === '' || $mMaker < 1 || $mApp < 1 || ($mWl !== 'two-level' && $mRev < 1)) {
-            $_SESSION['flash_error'] = 'Authority Matrix mapping is required for this department. Please configure maker/reviewer/approver in Authority Matrix first.';
+            $_SESSION['flash_error'] = 'Authority Matrix mapping is required for the selected department and compliance area. Please configure maker/reviewer/approver in Authority Matrix first.';
             $this->redirect('/compliances/create');
         }
         if (in_array($mWl, ['Single-Level', 'Two-Level', 'two-level'], true)) {
@@ -973,38 +1326,54 @@ class ComplianceController extends BaseController
         $code = 'CMP-' . str_pad($num, 3, '0', STR_PAD_LEFT);
 
         $this->ensurePracticalFlowSchema();
+        $hasComplianceAreaCol = true;
+        try {
+            $this->db->query('SELECT compliance_area FROM compliances LIMIT 1');
+        } catch (\Throwable $e) {
+            $hasComplianceAreaCol = false;
+        }
         if ($hasEvidenceTypeCol) {
-            $stmt = $this->db->prepare('
-                INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-            ');
+            $stmt = $this->db->prepare(
+                $hasComplianceAreaCol
+                ? 'INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, compliance_area, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                : 'INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            );
         } else {
-            $stmt = $this->db->prepare('
-                INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-            ');
+            $stmt = $this->db->prepare(
+                $hasComplianceAreaCol
+                ? 'INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, compliance_area, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                : 'INSERT INTO compliances (organization_id, compliance_code, title, authority_id, circular_reference, department, risk_level, priority, frequency, description, objective_text, penalty_impact, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, start_date, due_date, expected_date, reminder_date, status, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            );
         }
         if ($authorityId < 1) {
             $authOpts = $this->getAuthorityOptions();
             $authorityId = (int)($authOpts[0]['id'] ?? 1);
         }
         if ($hasEvidenceTypeCol) {
-            $stmt->execute([
-                $orgId, $code, $title, $authorityId, $circularRef ?: null, $department, $riskLevel, $priority, $frequency,
-                $description ?: null, $objectiveText ?: null, $penaltyImpact ?: null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired,
-                $evidenceType,
-                json_encode(array_values($checklist)), $startDate ?: null, $dueDate ?: null, $expectedDate ?: null, $reminderDate ?: null,
-                'pending', Auth::id(),
-            ]);
+            $params = $hasComplianceAreaCol
+                ? [$orgId, $code, $title, $authorityId, $circularRef ?: null, $department, $complianceArea, $riskLevel, $priority, $frequency, $description ?: null, $objectiveText ?: null, $penaltyImpact ?: null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired, $evidenceType, json_encode(array_values($checklist)), $startDate ?: null, $dueDate ?: null, $expectedDate ?: null, $reminderDate ?: null, 'pending', Auth::id()]
+                : [$orgId, $code, $title, $authorityId, $circularRef ?: null, $department, $riskLevel, $priority, $frequency, $description ?: null, $objectiveText ?: null, $penaltyImpact ?: null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired, $evidenceType, json_encode(array_values($checklist)), $startDate ?: null, $dueDate ?: null, $expectedDate ?: null, $reminderDate ?: null, 'pending', Auth::id()];
+            $stmt->execute($params);
         } else {
-            $stmt->execute([
-                $orgId, $code, $title, $authorityId, $circularRef ?: null, $department, $riskLevel, $priority, $frequency,
-                $description ?: null, $objectiveText ?: null, $penaltyImpact ?: null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired,
-                json_encode(array_values($checklist)), $startDate ?: null, $dueDate ?: null, $expectedDate ?: null, $reminderDate ?: null,
-                'pending', Auth::id(),
-            ]);
+            $params = $hasComplianceAreaCol
+                ? [$orgId, $code, $title, $authorityId, $circularRef ?: null, $department, $complianceArea, $riskLevel, $priority, $frequency, $description ?: null, $objectiveText ?: null, $penaltyImpact ?: null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired, json_encode(array_values($checklist)), $startDate ?: null, $dueDate ?: null, $expectedDate ?: null, $reminderDate ?: null, 'pending', Auth::id()]
+                : [$orgId, $code, $title, $authorityId, $circularRef ?: null, $department, $riskLevel, $priority, $frequency, $description ?: null, $objectiveText ?: null, $penaltyImpact ?: null, $ownerId, $reviewerId ?: null, $approverId ?: null, $workflow, $evidenceRequired, json_encode(array_values($checklist)), $startDate ?: null, $dueDate ?: null, $expectedDate ?: null, $reminderDate ?: null, 'pending', Auth::id()];
+            $stmt->execute($params);
         }
         $id = (int) $this->db->lastInsertId();
+        if ($id > 0 && $dueDate) {
+            $this->applyRecurrenceMetadata($id, $orgId, $frequency, $dueDate, $id, null, false);
+        }
+        if ($id > 0) {
+            $penaltyAmount = $_POST['penalty_amount'] ?? '';
+            $penaltyAmount = $penaltyAmount !== '' ? (float)$penaltyAmount : null;
+            $upd = $this->db->prepare('UPDATE compliances SET penalty_amount = ? WHERE id = ?');
+            $upd->execute([$penaltyAmount, $id]);
+        }
 
         $uploadNote = '';
         if ($evidenceRequired && !empty($_FILES['evidence_upload']['name']) && (int)($_FILES['evidence_upload']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
@@ -1371,7 +1740,7 @@ class ComplianceController extends BaseController
             UPDATE compliances SET due_date=?, priority=?, updated_at=NOW()
             WHERE id=? AND organization_id=?
         ')->execute([$dueDate, $priority, $id, $orgId]);
-        $this->logHistory($id, 'Admin updated', 'Due date and priority updated', Auth::id());
+        $this->logHistory($id, 'Compliance updated', 'Due date and priority updated', Auth::id());
         $_SESSION['flash_success'] = 'Due date and priority saved.';
         $this->redirect('/compliance/view/' . $id);
     }
@@ -1415,20 +1784,8 @@ class ComplianceController extends BaseController
             }
         }
         $comment = trim($_POST['maker_comment'] ?? '');
-        $completionDate = trim($_POST['completion_date'] ?? '');
-        $completionDate = $completionDate !== '' ? $completionDate : null;
-        if ($completionDate !== null) {
-            $ts = strtotime($completionDate . ' 00:00:00');
-            $todayTs = strtotime(date('Y-m-d') . ' 00:00:00');
-            if ($ts === false) {
-                $_SESSION['flash_error'] = 'Invalid completion date.';
-                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
-            }
-            if ($ts > $todayTs) {
-                $_SESSION['flash_error'] = 'Completion date cannot be in the future.';
-                $this->redirect('/compliance/view/' . $id . '?tab=checklist');
-            }
-        }
+        // Keep completion date automatic to avoid extra date input confusion.
+        $completionDate = date('Y-m-d');
         $month = date('Y-m-01', strtotime($c['due_date'] ?: 'today'));
         try {
             $this->db->prepare('
@@ -1550,6 +1907,11 @@ class ComplianceController extends BaseController
                 ->execute([Auth::id(), $remark ?: 'Approved', $sid]);
         }
         $this->logHistory($id, 'Approved', 'Compliance approved by ' . (Auth::user()['full_name'] ?? 'Approver'), Auth::id(), $remark);
+        $newRecurringId = $this->autoCreateNextRecurringCycle($c);
+        if ($newRecurringId) {
+            $_SESSION['flash_success'] = 'Compliance approved and completed. Next recurring cycle was created automatically.';
+            $this->redirect('/compliance/view/' . $id . '?tab=overview');
+        }
         $_SESSION['flash_success'] = 'Compliance approved and completed.';
         $this->redirect('/compliance/view/' . $id . '?tab=overview');
     }
@@ -1601,23 +1963,34 @@ class ComplianceController extends BaseController
         Auth::requireAuth();
         $orgId = Auth::organizationId();
         $c = $this->loadCompliance($id, $orgId);
-        if (!$c || $c['status'] !== 'submitted') {
-            $_SESSION['flash_error'] = 'Rework only from submitted status.';
+        if (!$c || !in_array((string)$c['status'], ['submitted', 'under_review'], true)) {
+            $_SESSION['flash_error'] = 'Rework can be requested only from submitted or under-review status.';
             $this->redirect('/compliance/view/' . $id);
         }
-        $remark = trim($_POST['review_comment'] ?? '');
+        $remark = trim((string)($_POST['review_comment'] ?? $_POST['final_comment'] ?? ''));
         if ($remark === '') {
             $_SESSION['flash_error'] = 'Comment is required for rework.';
             $this->redirect('/compliance/view/' . $id . '?tab=checklist');
         }
-        if (Auth::isMaker() && !Auth::isAdmin()) {
-            $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
-            $this->redirect('/compliance/view/' . $id);
+
+        $status = (string)$c['status'];
+        if ($status === 'submitted') {
+            if (Auth::isMaker() && !Auth::isAdmin()) {
+                $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
+                $this->redirect('/compliance/view/' . $id);
+            }
+            if (!Auth::isAdmin() && (!Auth::isReviewer() || Auth::id() !== (int) $c['reviewer_id'])) {
+                $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
+                $this->redirect('/compliance/view/' . $id);
+            }
+        } elseif ($status === 'under_review') {
+            $canFinal = Auth::isAdmin() || (Auth::isApprover() && (int) Auth::id() === (int) ($c['approver_id'] ?? 0));
+            if (!$canFinal) {
+                $_SESSION['flash_error'] = 'Only the assigned approver can request rework at this stage.';
+                $this->redirect('/compliance/view/' . $id);
+            }
         }
-        if (!Auth::isAdmin() && (!Auth::isReviewer() || Auth::id() !== (int) $c['reviewer_id'])) {
-            $_SESSION['flash_error'] = 'Only the assigned reviewer can request rework.';
-            $this->redirect('/compliance/view/' . $id);
-        }
+
         $this->db->prepare("UPDATE compliances SET status = 'rework' WHERE id = ?")->execute([$id]);
         $stmt = $this->db->prepare('SELECT id FROM compliance_submissions WHERE compliance_id = ? ORDER BY id DESC LIMIT 1');
         $stmt->execute([$id]);
@@ -1626,7 +1999,21 @@ class ComplianceController extends BaseController
             $this->db->prepare("UPDATE compliance_submissions SET status = 'rework', checker_id = ?, checker_remark = ?, checker_date = NOW() WHERE id = ?")
                 ->execute([Auth::id(), $remark ?: 'Rework requested', $sid]);
         }
-        $this->logHistory($id, 'Rework requested', $remark ?: 'Sent back to maker', Auth::id(), $remark ?: null);
+        $actor = $status === 'under_review' ? 'Approver' : 'Reviewer';
+        $this->logHistory($id, 'Rework requested', ($remark ?: 'Sent back to maker') . ' (' . $actor . ')', Auth::id(), $remark ?: null);
+        if ($status === 'under_review') {
+            $notifyRow = $this->loadComplianceForNotification($id, $orgId);
+            if ($notifyRow) {
+                $this->sendTemplateNotification(
+                    $notifyRow,
+                    'Rework',
+                    'Rework required: {{Compliance_Title}}',
+                    "Compliance {{Compliance_ID}} ({{Compliance_Title}}) is sent back for rework by approver.\nDepartment: {{Department}}\nDue Date: {{Due_Date}}\nRemark: {{Action_Remark}}",
+                    ['{{Action_Remark}}' => $remark, '{{Action Remark}}' => $remark],
+                    ['owner', 'reviewer']
+                );
+            }
+        }
         $_SESSION['flash_success'] = 'Rework requested. Maker can resubmit.';
         $this->redirect('/compliance/view/' . $id . '?tab=checklist');
     }

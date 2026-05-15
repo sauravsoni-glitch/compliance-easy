@@ -102,7 +102,7 @@ class CalendarController extends BaseController
         }
         [$rb, $rbP] = Auth::complianceScopeSql('');
         $stmt = $db->prepare("
-            SELECT id, compliance_code, title, due_date, start_date, expected_date, status, department
+            SELECT id, compliance_code, title, due_date, status, department
             FROM compliances
             WHERE organization_id = ? AND ($rb) AND due_date >= CURDATE() AND status NOT IN ('approved', 'completed', 'rejected')
             ORDER BY due_date ASC

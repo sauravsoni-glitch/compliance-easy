@@ -112,9 +112,7 @@ final class ComplianceCreatedMailReport
             'Reviewer: ' . $s['reviewer_name'],
             'Approver: ' . $s['approver_name'],
             '',
-            'Important dates — Start: ' . $s['start_date_fmt'] . ' | Due: ' . $s['due_date_fmt'],
-            'Expected: ' . $s['expected_date_fmt'] . ' | Reminder: ' . $s['reminder_date_fmt'],
-            'Recorded: ' . $s['creation_fmt'],
+            'Important dates — Created: ' . $s['creation_fmt'] . ' | Due: ' . $s['due_date_fmt'],
             '',
             'Evidence required: ' . ($s['evidence_required'] ? 'Yes' : 'No'),
             'Evidence type: ' . ($s['evidence_required'] ? $s['evidence_type_label'] : '—'),
@@ -295,21 +293,13 @@ final class ComplianceCreatedMailReport
       <div style="padding:0 20px 20px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#6b7280;text-transform:uppercase;">Important dates</div>
         <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+          <tr style="background:#fafafa;">
+            <td style="padding:10px 14px;font-size:13px;color:#6b7280;width:38%;">Created</td>
+            <td style="padding:10px 14px;font-size:14px;color:#111827;">' . self::h($s['creation_fmt']) . '</td>
+          </tr>
           <tr style="background:#fef2f2;">
             <td style="padding:12px 14px;font-size:12px;color:#991b1b;font-weight:700;">Due date</td>
             <td style="padding:12px 14px;font-size:15px;font-weight:700;color:#7f1d1d;">' . self::h($s['due_date_fmt']) . '</td>
-          </tr>
-          <tr>
-            <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-top:1px solid #e5e7eb;width:38%;">Start</td>
-            <td style="padding:10px 14px;font-size:14px;color:#111827;border-top:1px solid #e5e7eb;">' . self::h($s['start_date_fmt']) . '</td>
-          </tr>
-          <tr style="background:#fafafa;">
-            <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-top:1px solid #e5e7eb;">Expected</td>
-            <td style="padding:10px 14px;font-size:14px;color:#111827;border-top:1px solid #e5e7eb;">' . self::h($s['expected_date_fmt']) . '</td>
-          </tr>
-          <tr>
-            <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-top:1px solid #e5e7eb;">Reminder</td>
-            <td style="padding:10px 14px;font-size:14px;color:#111827;border-top:1px solid #e5e7eb;">' . self::h($s['reminder_date_fmt']) . '</td>
           </tr>
         </table>
       </div>

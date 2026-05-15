@@ -4,7 +4,7 @@ $flashSuccess = $_SESSION['flash_success'] ?? null;
 $flashError = $_SESSION['flash_error'] ?? null;
 unset($_SESSION['flash_success'], $_SESSION['flash_error']);
 $auth = $auth ?? ['id' => null, 'isAdmin' => false, 'isApprover' => false, 'isReviewer' => false, 'isMaker' => false, 'roleSlug' => null];
-$tab = $tab ?? 'overview';
+$tab = $tab ?? 'checklist';
 $documentVersions = $documentVersions ?? [];
 $historyRangeMonths = (int)($historyRangeMonths ?? 6);
 $doaFlowText = $doaFlowText ?? '';
@@ -40,6 +40,7 @@ function activity_jump_tab($action) {
 $isOwner = (int)($auth['id'] ?? 0) === (int)$c['owner_id'];
 $canMakerAct = !empty($auth['isAdmin']) || (!empty($auth['isMaker']) && $isOwner);
 $st = $c['status'];
+$canDueDateEdit = !empty($auth['isAdmin']) || (!empty($auth['isMaker']) && $isOwner && in_array($st, ['draft', 'pending', 'rework'], true));
 $isTwoLevel = ($c['workflow_type'] ?? 'three-level') === 'two-level';
 $isOverdue = !empty($c['due_date'])
     && $c['due_date'] < \App\Core\MailIstTime::todayYmd()
@@ -71,6 +72,7 @@ $latestMakerCompletion = !empty($latestSubmission['maker_completion_date'])
     ? \App\Core\MailIstTime::formatUiDate((string) $latestSubmission['maker_completion_date'], null, 'j M Y')
     : '—';
 $latestActionByRole = ['maker' => '', 'reviewer' => '', 'approver' => ''];
+$reworkPushedBy = '';
 foreach ($historyRows as $hrow) {
     $act = strtolower((string)($hrow['action'] ?? ''));
     $desc = trim((string)($hrow['description'] ?? ''));
@@ -88,6 +90,15 @@ foreach ($historyRows as $hrow) {
     if ($latestActionByRole['approver'] === '' && (strpos($act, 'approved') !== false || strpos($act, 'rejected') !== false || strpos($act, 'final') !== false)) {
         $latestActionByRole['approver'] = $line;
     }
+    if ($reworkPushedBy === '' && strpos($act, 'rework') !== false) {
+        if (stripos($desc, '(Approver)') !== false) {
+            $reworkPushedBy = 'Approver';
+        } elseif (stripos($desc, '(Reviewer)') !== false) {
+            $reworkPushedBy = 'Reviewer';
+        } else {
+            $reworkPushedBy = 'Reviewer';
+        }
+    }
 }
 ?>
 <div class="compliance-detail-shell">
@@ -99,8 +110,10 @@ foreach ($historyRows as $hrow) {
                 <p class="page-subtitle mb-0"><?= htmlspecialchars($c['compliance_code']) ?> · <?= htmlspecialchars($c['department']) ?> · <?= htmlspecialchars(freq_label_view($c['frequency'])) ?></p>
             </div>
             <div class="compliance-detail-top-actions">
-                <?php if (!empty($auth['isAdmin'])): ?>
+                <?php if (!empty($canDueDateEdit)): ?>
                 <button type="button" class="btn btn-secondary btn-sm" id="open-compliance-edit-modal">Edit</button>
+                <?php endif; ?>
+                <?php if (!empty($auth['isAdmin'])): ?>
                 <button type="button" class="btn btn-outline btn-sm" id="open-compliance-assign-modal">Change assignment</button>
                 <button type="button" class="btn btn-danger btn-sm" id="open-compliance-delete-modal">Delete</button>
                 <?php endif; ?>
@@ -227,8 +240,8 @@ foreach ($historyRows as $hrow) {
 <?php endif; ?>
 
 <div class="compliance-tabs">
-    <a href="?tab=overview" class="compliance-tab <?= $tab === 'overview' ? 'active' : '' ?>">Overview</a>
     <a href="?tab=checklist" class="compliance-tab <?= $tab === 'checklist' ? 'active' : '' ?>">Process checklist</a>
+    <a href="?tab=overview" class="compliance-tab <?= $tab === 'overview' ? 'active' : '' ?>">Overview</a>
     <a href="?tab=documents" class="compliance-tab <?= $tab === 'documents' ? 'active' : '' ?>">Documents</a>
     <a href="?tab=history" class="compliance-tab <?= $tab === 'history' ? 'active' : '' ?>">History</a>
     <a href="?tab=activity" class="compliance-tab <?= $tab === 'activity' ? 'active' : '' ?>">Activity</a>
@@ -316,6 +329,16 @@ foreach ($historyRows as $hrow) {
     <?php if (!empty($c['description'])): ?>
     <p class="mt-3"><span class="co-label d-block mb-1">Description</span><?= nl2br(htmlspecialchars($c['description'])) ?></p>
     <?php endif; ?>
+    <?php if (!empty($c['penalty_impact']) || isset($c['penalty_amount'])): ?>
+    <div class="card-inner-bordered">
+        <?php if (!empty($c['penalty_impact'])): ?>
+        <p class="mb-2"><span class="co-label d-block mb-1">Penalty / Impact</span><?= nl2br(htmlspecialchars((string)$c['penalty_impact'])) ?></p>
+        <?php endif; ?>
+        <?php if (isset($c['penalty_amount']) && $c['penalty_amount'] !== null && $c['penalty_amount'] !== ''): ?>
+        <p class="mb-0"><span class="co-label d-block mb-1">Penalty Amount</span>&#8377; <?= number_format((float)$c['penalty_amount'], 2) ?></p>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
     <?php if (!empty($c['objective_text']) || !empty($c['expected_outcome'])): ?>
     <div class="card-inner-bordered">
         <?php if (!empty($c['objective_text'])): ?>
@@ -386,11 +409,9 @@ foreach ($historyRows as $hrow) {
 </div>
 <?php endif; ?>
 <div class="card">
-    <h3 class="card-title">Important dates</h3>
+    <h3 class="card-title">Key dates</h3>
     <div class="important-dates-row">
-        <div class="id-item"><i class="far fa-calendar-alt text-muted"></i><div><span class="id-label">Start</span><span class="id-date"><?= \App\Core\MailIstTime::formatUiDate($c['start_date'] ?? null) ?></span></div></div>
         <div class="id-item id-item-due"><i class="far fa-clock text-danger"></i><div><span class="id-label">Due</span><span class="id-date"><?= \App\Core\MailIstTime::formatUiDate($c['due_date'] ?? null) ?></span></div></div>
-        <div class="id-item id-item-rem"><i class="fas fa-exclamation-triangle text-warning"></i><div><span class="id-label">Reminder</span><span class="id-date"><?= \App\Core\MailIstTime::formatUiDate($c['reminder_date'] ?? null) ?></span></div></div>
         <div class="id-item"><i class="far fa-calendar"></i><div><span class="id-label">Created</span><span class="id-date"><?= htmlspecialchars(\App\Core\MailIstTime::formatUiDateTime((string)($c['created_at'] ?? ''))) ?></span></div></div>
     </div>
 </div>
@@ -511,7 +532,10 @@ if ($isTwoLevel) {
 <?php if (in_array($st, ['pending', 'draft', 'rework'], true) && $canMakerAct): ?>
 <div class="card workflow-action-card">
     <h3 class="card-title">Step 1 — Maker</h3>
-    <p class="text-muted">Upload documents, set completion date, add a comment, then submit<?= $isTwoLevel ? ' directly to approver' : ' to reviewer' ?>.</p>
+    <?php if ($st === 'rework'): ?>
+    <p class="mb-2"><span class="badge badge-warning">Pushed back by <?= htmlspecialchars($reworkPushedBy !== '' ? $reworkPushedBy : 'Reviewer') ?></span></p>
+    <?php endif; ?>
+    <p class="text-muted">Upload documents, add a comment, then submit<?= $isTwoLevel ? ' directly to approver' : ' to reviewer' ?>.</p>
 
     <?php if (!empty($documents)): ?>
     <div class="form-group">
@@ -546,10 +570,6 @@ if ($isTwoLevel) {
     </form>
 
     <form method="post" action="<?= $basePath ?>/compliances/submit/<?= (int)$c['id'] ?>">
-        <div class="form-group">
-            <label class="form-label">Completion date</label>
-            <input type="date" name="completion_date" class="form-control" style="max-width:200px" value="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>" max="<?= htmlspecialchars(\App\Core\MailIstTime::todayYmd()) ?>">
-        </div>
         <div class="form-group">
             <label class="form-label">Comment</label>
             <textarea name="maker_comment" class="form-control" rows="3" placeholder="Explain what was completed for <?= $isTwoLevel ? 'the approver' : 'reviewers' ?>"></textarea>
@@ -642,6 +662,13 @@ if ($isTwoLevel) {
             <textarea name="final_comment" class="form-control" rows="3" required placeholder="Why this is rejected"></textarea>
         </div>
         <button type="submit" class="btn btn-secondary text-danger">Reject</button>
+    </form>
+    <form method="post" action="<?= $basePath ?>/compliances/rework/<?= (int)$c['id'] ?>" class="mt-3" onsubmit="return confirm('Send this back to maker for rework?');">
+        <div class="form-group">
+            <label class="form-label">Rework reason *</label>
+            <textarea name="final_comment" class="form-control" rows="3" required placeholder="What maker needs to revise before resubmission"></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary"><i class="fas fa-undo"></i> Send for rework</button>
     </form>
 </div>
 <?php endif; ?>
@@ -819,7 +846,7 @@ if ($isTwoLevel) {
 </div>
 <?php endif; ?>
 
-<?php if (!empty($auth['isAdmin'])): ?>
+<?php if (!empty($canDueDateEdit)): ?>
 <div id="modal-compliance-edit" class="modal-overlay compliance-modal" style="display: none;" aria-hidden="true">
     <div class="modal compliance-edit-modal" role="dialog" aria-labelledby="modal-edit-title">
         <div class="modal-header">
@@ -827,7 +854,7 @@ if ($isTwoLevel) {
             <button type="button" class="modal-close compliance-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
-            <p class="text-muted text-sm mb-3">Due date and priority (admin).</p>
+            <p class="text-muted text-sm mb-3">Due date and priority.</p>
             <form method="post" action="<?= $basePath ?>/compliances/edit/<?= (int)$c['id'] ?>">
                 <div class="form-group">
                     <label class="form-label">Due date</label>
@@ -849,6 +876,8 @@ if ($isTwoLevel) {
         </div>
     </div>
 </div>
+<?php endif; ?>
+<?php if (!empty($auth['isAdmin'])): ?>
 <div id="modal-compliance-assign" class="modal-overlay compliance-modal" style="display: none;" aria-hidden="true">
     <div class="modal compliance-edit-modal" role="dialog">
         <div class="modal-header">

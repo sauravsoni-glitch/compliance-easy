@@ -27,7 +27,7 @@ function ci_status_badge(string $s): array {
             <p class="page-subtitle">AI-Powered Regulatory Circular Processing &amp; Auto Compliance Creation</p>
         </div>
         <div class="ci-head-actions">
-            <?php if (!empty($isAdmin)): ?>
+            <?php if (!empty($canUploadCircular)): ?>
             <a href="<?= htmlspecialchars($basePath) ?>/circular-intelligence/add" class="btn btn-secondary"><i class="fas fa-edit"></i> Add Circular</a>
             <a href="<?= htmlspecialchars($basePath) ?>/circular-intelligence/upload" class="btn btn-primary"><i class="fas fa-plus"></i> Upload New Circular</a>
             <?php endif; ?>
