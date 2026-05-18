@@ -26,9 +26,9 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                     <input type="text" name="title" class="form-control" placeholder="Enter compliance title" value="<?= htmlspecialchars($_POST['title'] ?? '') ?>" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Framework *</label>
+                    <label class="form-label">Compliance Category *</label>
                     <select name="authority_id" class="form-control" required>
-                        <option value="">Select framework</option>
+                        <option value="">Select compliance category</option>
                         <?php foreach ($authorities as $a): ?>
                         <option value="<?= $a['id'] ?>" <?= (int)($_POST['authority_id'] ?? 0) === (int)$a['id'] ? 'selected' : '' ?>><?= htmlspecialchars($a['name']) ?></option>
                         <?php endforeach; ?>

@@ -302,16 +302,17 @@ class BulkUploadController extends BaseController
     {
         if ($module === 'compliance') {
             return [
-                'title' => ['title', 'compliancetitle', 'compliancename', 'name', 'subject', 'item', 'description', 'task', 'report', 'heading', 'compliance', 'activity'],
-                'authority' => ['authority', 'authorityname', 'regulator', 'regulatorybody'],
+                'title' => ['title', 'compliancetitle', 'compliancename', 'name', 'subject', 'task', 'report', 'heading', 'compliance', 'activity'],
+                'authority' => ['authority', 'authorityname', 'compliancecategory', 'category', 'regulator', 'regulatorybody'],
                 'department' => ['department', 'dept', 'departmentname', 'businessunit', 'busunit', 'unit', 'branch', 'division', 'vertical', 'segment', 'function', 'costcenter', 'costcentre', 'orgunit', 'entity', 'region', 'team', 'group'],
+                'compliance_area' => ['compliancearea', 'area', 'compliancename', 'compliancetopic', 'topic'],
                 'frequency' => ['frequency', 'freq'],
                 'due_date' => ['duedate', 'due', 'dueon', 'due_dt', 'due_date'],
                 'risk' => ['risk', 'risklevel'],
                 'priority' => ['priority', 'prio'],
-                'maker_email' => ['makeremail', 'owneremail', 'maker'],
-                'reviewer_email' => ['revieweremail', 'reviewer'],
-                'approver_email' => ['approveremail', 'approver'],
+                'description' => ['description', 'desc', 'details', 'notes'],
+                'penalty_impact' => ['penaltyimpact', 'penalty', 'impact', 'penaltydescription'],
+                'penalty_amount' => ['penaltyamount', 'penaltyinr', 'fineamount', 'fine'],
             ];
         }
         if ($module === 'doa') {
@@ -384,9 +385,9 @@ class BulkUploadController extends BaseController
     {
         if ($module === 'compliance') {
             $orders = [
-                'title' => 0, 'authority' => 1, 'department' => 2, 'frequency' => 3,
-                'due_date' => 4, 'risk' => 5, 'priority' => 6,
-                'maker_email' => 7, 'reviewer_email' => 8, 'approver_email' => 9,
+                'title' => 0, 'authority' => 1, 'department' => 2, 'compliance_area' => 3,
+                'frequency' => 4, 'due_date' => 5, 'risk' => 6, 'priority' => 7,
+                'description' => 8, 'penalty_impact' => 9, 'penalty_amount' => 10,
             ];
         } elseif ($module === 'doa') {
             $orders = [
@@ -466,6 +467,7 @@ class BulkUploadController extends BaseController
                 $payload['title'] = $this->cell($r, $map['title']);
                 $payload['authority'] = $this->cell($r, $map['authority']) ?: 'RBI';
                 $payload['department'] = $this->cell($r, $map['department']);
+                $payload['compliance_area'] = $this->cell($r, $map['compliance_area'] ?? null);
                 $payload['frequency'] = preg_replace('/[^a-z0-9\-]/', '', strtolower($this->cell($r, $map['frequency']) ?: 'monthly')) ?: 'monthly';
                 $payload['due_date'] = $this->cell($r, $map['due_date']);
                 $payload['risk'] = strtolower($this->cell($r, $map['risk']) ?: 'medium');
@@ -473,9 +475,10 @@ class BulkUploadController extends BaseController
                     $payload['risk'] = 'medium';
                 }
                 $payload['priority'] = strtolower($this->cell($r, $map['priority']) ?: 'medium');
-                $payload['maker_email'] = strtolower($this->cell($r, $map['maker_email']));
-                $payload['reviewer_email'] = strtolower($this->cell($r, $map['reviewer_email']));
-                $payload['approver_email'] = strtolower($this->cell($r, $map['approver_email']));
+                $payload['description'] = $this->cell($r, $map['description'] ?? null);
+                $payload['penalty_impact'] = $this->cell($r, $map['penalty_impact'] ?? null);
+                $penAmtRaw = $this->cell($r, $map['penalty_amount'] ?? null);
+                $payload['penalty_amount'] = $penAmtRaw !== '' ? (float) str_replace(',', '', $penAmtRaw) : null;
                 if ($payload['title'] === '') {
                     foreach ($r as $c) {
                         $t = trim((string) $c);
@@ -496,12 +499,14 @@ class BulkUploadController extends BaseController
                 } else {
                     $payload['due_date'] = date('Y-m-d', strtotime($payload['due_date']));
                 }
-                $payload['maker_id'] = $this->resolveBulkUserIdRequired($orgId, $payload['maker_email'], $uploaderId);
-                if (!$payload['maker_id']) {
-                    $errors[] = 'User not found for Maker';
+                [$mId, $rId, $aId, $wl] = $this->matrixLookupForBulk($orgId, $payload['department'], $payload['compliance_area']);
+                if (!$mId || !$aId) {
+                    $errors[] = 'No Authority Matrix mapping found for department "' . $payload['department'] . '"';
                 }
-                $payload['reviewer_id'] = $this->resolveBulkUserIdOptional($orgId, $payload['reviewer_email']);
-                $payload['approver_id'] = $this->resolveBulkUserIdOptional($orgId, $payload['approver_email']);
+                $payload['maker_id'] = $mId ?: $uploaderId;
+                $payload['reviewer_id'] = $rId ?: null;
+                $payload['approver_id'] = $aId ?: null;
+                $payload['workflow_type'] = (in_array($wl, ['Single-Level', 'two-level', 'Two-Level'], true)) ? 'two-level' : 'three-level';
                 $uniq = strtolower($payload['title'] . '|' . $payload['department'] . '|' . $payload['due_date']);
                 if (isset($dupeLocal[$uniq])) {
                     $errors[] = 'Duplicate row in file';
@@ -692,12 +697,17 @@ class BulkUploadController extends BaseController
                     $stmt->execute([$orgId]);
                     $num = (int) $stmt->fetchColumn();
                     $code = 'CMP-' . str_pad((string) $num, 3, '0', STR_PAD_LEFT);
+                    $wfType = $payload['workflow_type'] ?? 'three-level';
+                    $desc = $payload['description'] !== '' ? $payload['description'] : null;
+                    $penImpact = $payload['penalty_impact'] !== '' ? $payload['penalty_impact'] : null;
+                    $penAmount = $payload['penalty_amount'] ?? null;
+                    $compArea = $payload['compliance_area'] !== '' ? $payload['compliance_area'] : null;
                     if ($hasEt) {
-                        $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, due_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
-                        $ins->execute([$orgId, $code, $payload['title'], $authId, $payload['department'], $payload['risk'], $payload['priority'], $payload['frequency'], $payload['maker_id'], $payload['reviewer_id'] ?: null, $payload['approver_id'] ?: null, 'three-level', 0, null, '[]', $payload['due_date'], 'pending', Auth::id()]);
+                        $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, compliance_area, risk_level, priority, frequency, description, penalty_impact, penalty_amount, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, evidence_type, checklist_items, due_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
+                        $ins->execute([$orgId, $code, $payload['title'], $authId, $payload['department'], $compArea, $payload['risk'], $payload['priority'], $payload['frequency'], $desc, $penImpact, $penAmount, $payload['maker_id'], $payload['reviewer_id'] ?: null, $payload['approver_id'] ?: null, $wfType, 0, null, '[]', $payload['due_date'], 'pending', Auth::id()]);
                     } else {
-                        $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, risk_level, priority, frequency, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, due_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
-                        $ins->execute([$orgId, $code, $payload['title'], $authId, $payload['department'], $payload['risk'], $payload['priority'], $payload['frequency'], $payload['maker_id'], $payload['reviewer_id'] ?: null, $payload['approver_id'] ?: null, 'three-level', 0, '[]', $payload['due_date'], 'pending', Auth::id()]);
+                        $ins = $this->db->prepare('INSERT INTO compliances (organization_id, compliance_code, title, authority_id, department, compliance_area, risk_level, priority, frequency, description, penalty_impact, penalty_amount, owner_id, reviewer_id, approver_id, workflow_type, evidence_required, checklist_items, due_date, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())');
+                        $ins->execute([$orgId, $code, $payload['title'], $authId, $payload['department'], $compArea, $payload['risk'], $payload['priority'], $payload['frequency'], $desc, $penImpact, $penAmount, $payload['maker_id'], $payload['reviewer_id'] ?: null, $payload['approver_id'] ?: null, $wfType, 0, '[]', $payload['due_date'], 'pending', Auth::id()]);
                     }
                 } elseif ($module === 'doa') {
                     $code = $this->nextRuleCode($orgId);
@@ -750,9 +760,8 @@ class BulkUploadController extends BaseController
         switch ($kind) {
             case 'compliance':
                 header('Content-Disposition: attachment; filename="bulk_compliance_template.csv"');
-                fputcsv($out, ['Title', 'Authority', 'Department', 'Frequency', 'DueDate', 'RiskLevel', 'Priority', 'MakerEmail', 'ReviewerEmail', 'ApproverEmail']);
-                // Empty MakerEmail = use uploading admin; Reviewer/Approver optional
-                fputcsv($out, ['Sample Compliance', 'RBI', 'Compliance', 'monthly', '2025-12-31', 'high', 'high', '', '', '']);
+                fputcsv($out, ['Title', 'ComplianceCategory', 'Department', 'ComplianceArea', 'Frequency', 'DueDate', 'RiskLevel', 'Priority', 'Description', 'PenaltyImpact', 'PenaltyAmount']);
+                fputcsv($out, ['Sample Compliance', 'RBI', 'Compliance', 'Finance Compliance & Policy', 'monthly', '2025-12-31', 'high', 'high', 'Brief description of this compliance task', 'Late submission attracts penalty', '50000']);
                 break;
             case 'doa':
                 header('Content-Disposition: attachment; filename="bulk_doa_template.csv"');
@@ -778,6 +787,30 @@ class BulkUploadController extends BaseController
         }
         fclose($out);
         exit;
+    }
+
+    /**
+     * Look up maker/reviewer/approver from authority matrix by department + compliance area.
+     * Falls back to department-only match if no area match found.
+     * Returns [maker_id, reviewer_id, approver_id, workflow_level].
+     */
+    private function matrixLookupForBulk(int $orgId, string $department, string $complianceArea): array
+    {
+        if ($complianceArea !== '') {
+            $s = $this->db->prepare('SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND LOWER(TRIM(department)) = LOWER(TRIM(?)) AND LOWER(TRIM(compliance_area)) = LOWER(TRIM(?)) AND status = \'active\' ORDER BY id DESC LIMIT 1');
+            $s->execute([$orgId, $department, $complianceArea]);
+            $row = $s->fetch(\PDO::FETCH_ASSOC);
+            if ($row) {
+                return [(int)$row['maker_id'], (int)($row['reviewer_id'] ?? 0), (int)$row['approver_id'], (string)$row['workflow_level']];
+            }
+        }
+        $s2 = $this->db->prepare('SELECT maker_id, reviewer_id, approver_id, workflow_level FROM authority_matrix WHERE organization_id = ? AND LOWER(TRIM(department)) = LOWER(TRIM(?)) AND status = \'active\' ORDER BY id DESC LIMIT 1');
+        $s2->execute([$orgId, $department]);
+        $row2 = $s2->fetch(\PDO::FETCH_ASSOC);
+        if ($row2) {
+            return [(int)$row2['maker_id'], (int)($row2['reviewer_id'] ?? 0), (int)$row2['approver_id'], (string)$row2['workflow_level']];
+        }
+        return [0, 0, 0, ''];
     }
 
     private function userIdByEmail(int $orgId, string $email): int

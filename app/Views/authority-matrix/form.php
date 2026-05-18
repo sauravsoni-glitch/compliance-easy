@@ -22,7 +22,7 @@ $wl = in_array($wlRaw, ['Single-Level', 'two-level']) ? 'two-level' : 'three-lev
                     <label class="form-label">Department *</label>
                     <select name="department" class="form-control" required>
                         <option value="">Select department</option>
-                        <?php foreach (['Compliance', 'Finance', 'Legal', 'Operations', 'Risk', 'IT'] as $dept): ?>
+                        <?php foreach (['Compliance', 'Finance', 'Human Resource', 'Legal', 'Operations', 'Risk', 'IT'] as $dept): ?>
                         <option value="<?= $dept ?>" <?= ($r['department'] ?? '') === $dept ? 'selected' : '' ?>><?= $dept ?></option>
                         <?php endforeach; ?>
                     </select>
