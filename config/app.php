@@ -52,4 +52,14 @@ return [
     'file_upload_webhook_timeout' => 120,
     /** Set false only if UAT SSL causes curl errors (not recommended for production). */
     'file_upload_webhook_verify_ssl' => true,
+
+    /**
+     * Circular Intelligence — n8n AI analysis webhook.
+     * Sends the uploaded circular file + metadata; expects JSON analysis back.
+     * Override via .env: CIRCULAR_INTELLIGENCE_WEBHOOK_URL and CIRCULAR_INTELLIGENCE_WEBHOOK_ENABLED=1
+     */
+    'circular_intelligence_webhook_enabled' => (bool)(getenv('CIRCULAR_INTELLIGENCE_WEBHOOK_ENABLED') ?: 0),
+    'circular_intelligence_webhook_url'     => trim((string)(getenv('CIRCULAR_INTELLIGENCE_WEBHOOK_URL') ?: 'https://uat-n8n.easyhomefinance.in/webhook/f25af89d-6a95-4eb8-ad3c-3a5ef9c2529a')),
+    'circular_intelligence_webhook_timeout' => 180,
+    'circular_intelligence_webhook_verify_ssl' => true,
 ];

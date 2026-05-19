@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\BaseController;
+use App\Core\CircularIntelligenceWebhook;
 
 class CircularController extends BaseController
 {
@@ -100,63 +101,111 @@ class CircularController extends BaseController
         return 'CIR-' . str_pad((string) $stmt->fetchColumn(), 3, '0', STR_PAD_LEFT);
     }
 
-    /** Simulated AI: keyword rules + optional raw text */
-    private function runAiAnalysis(array &$row, int $orgId): void
+    /** Try real n8n webhook first; fall back to keyword simulation if unavailable. */
+    private function runAiAnalysis(array &$row, int $orgId, ?string $absoluteFilePath = null): void
     {
-        $title = strtolower($row['title'] ?? '');
-        $raw = trim($row['document_raw_text'] ?? $row['content_summary'] ?? '');
-        $auth = strtoupper($row['authority'] ?? 'RBI');
-        $ref = $row['reference_no'] ?? '';
-
-        $dept = 'Compliance';
-        $sec = 'Legal';
-        if (preg_match('/gst|tax|tds|payment|treasury|finance|reporting/i', $title . $raw)) {
-            $dept = 'Finance';
-            $sec = 'Compliance';
-        } elseif (preg_match('/it|technology|cyber|data/i', $title . $raw)) {
-            $dept = 'IT';
-            $sec = 'Operations';
-        } elseif (preg_match('/hr|human|employee/i', $title . $raw)) {
-            $dept = 'Human Resources';
-            $sec = 'Compliance';
-        } elseif (preg_match('/operation|process/i', $title . $raw)) {
-            $dept = 'Operations';
-            $sec = 'Finance';
-        }
-
-        $risk = 'high';
-        $pri = 'high';
-        if (preg_match('/low risk|routine|informational/i', $raw)) {
-            $risk = 'medium';
-            $pri = 'medium';
-        }
-
-        $freq = preg_match('/annual|yearly/i', $raw) ? 'annual' : (preg_match('/quarter/i', $raw) ? 'quarterly' : 'monthly');
-        $dueHint = $freq === 'monthly' ? '15th of every month' : ($freq === 'quarterly' ? 'End of quarter' : 'Per regulatory calendar');
-
-        $summary = "This circular from {$auth} establishes strengthened obligations around reporting, documentation, and internal controls. "
-            . "Key requirements include timely submission of prescribed returns, maintenance of audit trails, and escalation of material deviations. "
-            . "Affected units should align processes with the reference {$ref} and ensure maker-checker workflows for submissions.";
-
-        $penalty = 'Monetary penalty and supervisory action';
-        $ownerName = $this->suggestOwnerName($orgId, $dept);
-
-        $stmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND full_name = ? LIMIT 1');
-        $stmt->execute([$orgId, $ownerName]);
-        $oid = $stmt->fetchColumn();
-        if (!$oid) {
-            $stmt = $this->db->prepare('SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND r.slug = ? ORDER BY u.id LIMIT 1');
-            $stmt->execute([$orgId, 'maker']);
-            $oid = $stmt->fetchColumn() ?: null;
-        }
-        $ownerId = $oid ? (int) $oid : null;
-
-        $docSnippet = $raw !== '' ? mb_substr($raw, 0, 1200) : "Regulatory circular {$ref}. Entities must adhere to reporting timelines, maintain evidence of compliance, and notify regulators of material events as prescribed.";
-
-        $ext = $this->extendedSchema();
         $id = (int) $row['id'];
+        $context = [
+            'organization_id'    => $orgId,
+            'circular_id'        => $id,
+            'title'              => $row['title'] ?? '',
+            'authority'          => $row['authority'] ?? '',
+            'reference_no'       => $row['reference_no'] ?? '',
+            'circular_date'      => $row['circular_date'] ?? '',
+            'effective_date'     => $row['effective_date'] ?? '',
+            'document_text'      => trim($row['document_raw_text'] ?? $row['content_summary'] ?? ''),
+            'original_file_name' => $row['document_name'] ?? '',
+        ];
 
-        $okExt = false;
+        // --- Try real n8n webhook ---
+        $analysis = null;
+        if ($absoluteFilePath && is_file($absoluteFilePath)) {
+            $analysis = CircularIntelligenceWebhook::analyzeUploadedFile(
+                $absoluteFilePath,
+                $row['document_name'] ?? basename($absoluteFilePath),
+                $this->appConfig,
+                $context
+            );
+        }
+        if ($analysis === null) {
+            $analysis = CircularIntelligenceWebhook::analyzeContextOnly($this->appConfig, $context);
+        }
+
+        // --- Map n8n response if we got one ---
+        if (is_array($analysis) && !empty($analysis)) {
+            $dept      = trim((string)($analysis['department'] ?? '')) ?: 'Compliance';
+            $sec       = trim((string)($analysis['secondary_department'] ?? $analysis['secondary_dept'] ?? '')) ?: 'Legal';
+            $risk      = strtolower(trim((string)($analysis['risk_level'] ?? 'high')));
+            if (!in_array($risk, ['low', 'medium', 'high', 'critical'], true)) { $risk = 'high'; }
+            $pri       = strtolower(trim((string)($analysis['priority'] ?? $risk)));
+            if (!in_array($pri, ['low', 'medium', 'high', 'critical'], true)) { $pri = $risk; }
+            $freq      = strtolower(trim((string)($analysis['frequency'] ?? 'monthly')));
+            $dueHint   = trim((string)($analysis['due_date'] ?? ''));
+            $summary   = trim((string)($analysis['executive_summary'] ?? $analysis['content_summary'] ?? ''));
+            $docSnippet = trim((string)($analysis['content_summary'] ?? $summary));
+            $penalty   = trim((string)($analysis['penalty'] ?? 'Monetary penalty and supervisory action'));
+            $ownerName = trim((string)($analysis['owner_name'] ?? ''));
+            $workflow  = trim((string)($analysis['workflow'] ?? 'two-level'));
+            $tags      = $analysis['suggested_approver_tags'] ?? [];
+            $approverTags = is_array($tags) ? implode(', ', $tags) : (string)$tags;
+            if ($approverTags === '') { $approverTags = 'Level 1 Compliance Head, Level 2 CFO'; }
+
+            // Resolve due dates
+            $reviewDue      = (strtotime($dueHint) !== false) ? date('Y-m-d', strtotime($dueHint)) : date('Y-m-d', strtotime('+14 days'));
+            $reviewExpected = date('Y-m-d', strtotime('+30 days'));
+
+            if ($ownerName === '') {
+                $ownerName = $this->suggestOwnerName($orgId, $dept);
+            }
+            if ($docSnippet === '' && $summary !== '') { $docSnippet = $summary; }
+            if ($summary === '' && $docSnippet !== '') { $summary = $docSnippet; }
+        } else {
+            // --- Fallback: keyword-based simulation ---
+            $title = strtolower($row['title'] ?? '');
+            $raw   = trim($row['document_raw_text'] ?? $row['content_summary'] ?? '');
+            $auth  = strtoupper($row['authority'] ?? 'RBI');
+            $ref   = $row['reference_no'] ?? '';
+
+            $dept = 'Compliance'; $sec = 'Legal';
+            if (preg_match('/gst|tax|tds|payment|treasury|finance|reporting/i', $title . $raw)) { $dept = 'Finance'; $sec = 'Compliance'; }
+            elseif (preg_match('/it|technology|cyber|data/i', $title . $raw))                   { $dept = 'IT'; $sec = 'Operations'; }
+            elseif (preg_match('/hr|human|employee/i', $title . $raw))                          { $dept = 'Human Resources'; $sec = 'Compliance'; }
+            elseif (preg_match('/operation|process/i', $title . $raw))                         { $dept = 'Operations'; $sec = 'Finance'; }
+
+            $risk = 'high'; $pri = 'high';
+            if (preg_match('/low risk|routine|informational/i', $raw)) { $risk = 'medium'; $pri = 'medium'; }
+
+            $freq     = preg_match('/annual|yearly/i', $raw) ? 'annual' : (preg_match('/quarter/i', $raw) ? 'quarterly' : 'monthly');
+            $dueHint  = $freq === 'monthly' ? '15th of every month' : ($freq === 'quarterly' ? 'End of quarter' : 'Per regulatory calendar');
+            $summary  = "This circular from {$auth} establishes strengthened obligations around reporting, documentation, and internal controls. "
+                . "Key requirements include timely submission of prescribed returns, maintenance of audit trails, and escalation of material deviations. "
+                . "Affected units should align processes with the reference {$ref} and ensure maker-checker workflows for submissions.";
+            $penalty  = 'Monetary penalty and supervisory action';
+            $workflow = 'two-level';
+            $approverTags   = 'Level 1 Compliance Head, Level 2 CFO';
+            $docSnippet     = $raw !== '' ? mb_substr($raw, 0, 1200) : "Regulatory circular {$ref}. Entities must adhere to reporting timelines, maintain evidence of compliance, and notify regulators of material events as prescribed.";
+            $reviewDue      = date('Y-m-d', strtotime('+14 days'));
+            $reviewExpected = date('Y-m-d', strtotime('+30 days'));
+        }
+
+        $ownerName = $ownerName ?? $this->suggestOwnerName($orgId, $dept);
+
+        // Resolve owner user ID
+        $ownerId = null;
+        if ($ownerName !== '') {
+            $stmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND full_name = ? LIMIT 1');
+            $stmt->execute([$orgId, $ownerName]);
+            $oid = $stmt->fetchColumn();
+            if (!$oid) {
+                $stmt2 = $this->db->prepare('SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.organization_id = ? AND r.slug = ? ORDER BY u.id LIMIT 1');
+                $stmt2->execute([$orgId, 'maker']);
+                $oid = $stmt2->fetchColumn() ?: null;
+            }
+            $ownerId = $oid ? (int) $oid : null;
+        }
+
+        $ext    = $this->extendedSchema();
+        $okExt  = false;
         if ($ext) {
             try {
                 $this->db->prepare('UPDATE circulars SET
@@ -167,32 +216,13 @@ class CircularController extends BaseController
                     review_frequency = ?, review_risk = ?, review_priority = ?, review_penalty = ?,
                     review_due_date = ?, review_expected_date = ?, status = ?
                     WHERE id = ?')->execute([
-                    $docSnippet,
-                    $summary,
-                    $dept,
-                    $sec,
-                    $freq,
-                    $dueHint,
-                    $risk,
-                    $pri,
-                    $ownerName,
-                    'two-level',
-                    $penalty,
-                    'Level 1 Compliance Head, Level 2 CFO',
-                    $dept,
+                    $docSnippet, $summary, $dept, $sec,
+                    $freq, $dueHint, $risk, $pri, $ownerName,
+                    $workflow, $penalty, $approverTags, $dept,
                     $risk === 'high' ? 'high' : 'medium',
-                    $dept,
-                    $sec,
-                    $ownerId,
-                    'two-level',
-                    $freq,
-                    $risk,
-                    $pri,
-                    $penalty,
-                    date('Y-m-d', strtotime('+14 days')),
-                    date('Y-m-d', strtotime('+30 days')),
-                    'ai_analyzed',
-                    $id,
+                    $dept, $sec, $ownerId, $workflow,
+                    $freq, $risk, $pri, $penalty,
+                    $reviewDue, $reviewExpected, 'ai_analyzed', $id,
                 ]);
                 $okExt = true;
             } catch (\Throwable $e) {
@@ -200,16 +230,17 @@ class CircularController extends BaseController
         }
         if (!$okExt) {
             $this->db->prepare('UPDATE circulars SET content_summary = ?, ai_executive_summary = ?, ai_department = ?, ai_frequency = ?, ai_due_date = ?, ai_risk_level = ?, ai_priority = ?, ai_owner = ?, ai_workflow = ?, ai_penalty = ?, department = ?, impact = ?, status = ? WHERE id = ?')
-                ->execute([$docSnippet, $summary, $dept, $freq, $dueHint, $risk, $pri, $ownerName, 'two-level', $penalty, $dept, $risk === 'high' ? 'high' : 'medium', 'ai_analyzed', $id]);
+                ->execute([$docSnippet, $summary, $dept, $freq, $dueHint, $risk, $pri, $ownerName, $workflow, $penalty, $dept, $risk === 'high' ? 'high' : 'medium', 'ai_analyzed', $id]);
         }
 
         $this->logActivity($id, 'AI Analyzed', 'AI extracted compliance requirements', null);
         $row = array_merge($row, [
-            'content_summary' => $docSnippet, 'ai_executive_summary' => $summary, 'ai_department' => $dept,
-            'ai_secondary_dept' => $sec, 'ai_frequency' => $freq, 'ai_due_date' => $dueHint, 'ai_risk_level' => $risk,
-            'ai_priority' => $pri, 'ai_owner' => $ownerName, 'ai_workflow' => 'two-level', 'ai_penalty' => $penalty,
-            'ai_approver_tags' => 'Level 1 Compliance Head, Level 2 CFO', 'status' => 'ai_analyzed', 'department' => $dept,
-            'impact' => $risk === 'high' ? 'high' : 'medium',
+            'content_summary'   => $docSnippet, 'ai_executive_summary' => $summary, 'ai_department' => $dept,
+            'ai_secondary_dept' => $sec,        'ai_frequency'         => $freq,    'ai_due_date'   => $dueHint,
+            'ai_risk_level'     => $risk,        'ai_priority'          => $pri,     'ai_owner'      => $ownerName,
+            'ai_workflow'       => $workflow,    'ai_penalty'           => $penalty, 'ai_approver_tags' => $approverTags,
+            'status'            => 'ai_analyzed', 'department'          => $dept,
+            'impact'            => $risk === 'high' ? 'high' : 'medium',
         ]);
     }
 
@@ -465,7 +496,7 @@ class CircularController extends BaseController
         if ($rawText && empty($row['document_raw_text'])) {
             $row['document_raw_text'] = $rawText;
         }
-        $this->runAiAnalysis($row, $orgId);
+        $this->runAiAnalysis($row, $orgId, $full ?? null);
 
         $_SESSION['flash_success'] = 'Circular uploaded. AI analysis completed.';
         $this->redirect('/circular-intelligence/view/' . $id);
@@ -486,7 +517,15 @@ class CircularController extends BaseController
             $_SESSION['flash_error'] = 'Cannot re-analyze after compliance is linked.';
             $this->redirect('/circular-intelligence/view/' . $id);
         }
-        $this->runAiAnalysis($row, $orgId);
+        $absPath = null;
+        if (!empty($row['document_path'])) {
+            $uploadBase = rtrim((string)($this->appConfig['upload_path'] ?? ''), '/\\');
+            $candidate  = $uploadBase . DIRECTORY_SEPARATOR . ltrim((string)$row['document_path'], '/\\');
+            if (is_file($candidate)) {
+                $absPath = $candidate;
+            }
+        }
+        $this->runAiAnalysis($row, $orgId, $absPath);
         $_SESSION['flash_success'] = 'AI re-analysis completed.';
         $this->redirect('/circular-intelligence/view/' . $id);
     }
