@@ -101,33 +101,25 @@ class CircularController extends BaseController
         return 'CIR-' . str_pad((string) $stmt->fetchColumn(), 3, '0', STR_PAD_LEFT);
     }
 
-    /** Try real n8n webhook first; fall back to keyword simulation if unavailable. */
-    private function runAiAnalysis(array &$row, int $orgId, ?string $absoluteFilePath = null): void
+    /** Apply n8n analysis if provided; otherwise fall back to keyword simulation. */
+    private function runAiAnalysis(array &$row, int $orgId, ?string $absoluteFilePath = null, ?array $n8nAnalysis = null): void
     {
         $id = (int) $row['id'];
-        $context = [
-            'organization_id'    => $orgId,
-            'circular_id'        => $id,
-            'title'              => $row['title'] ?? '',
-            'authority'          => $row['authority'] ?? '',
-            'reference_no'       => $row['reference_no'] ?? '',
-            'circular_date'      => $row['circular_date'] ?? '',
-            'effective_date'     => $row['effective_date'] ?? '',
-            'document_text'      => trim($row['document_raw_text'] ?? $row['content_summary'] ?? ''),
-            'original_file_name' => $row['document_name'] ?? '',
-        ];
 
-        // --- Try real n8n webhook ---
-        $analysis = null;
-        if ($absoluteFilePath && is_file($absoluteFilePath)) {
-            $analysis = CircularIntelligenceWebhook::analyzeUploadedFile(
-                $absoluteFilePath,
-                $row['document_name'] ?? basename($absoluteFilePath),
-                $this->appConfig,
-                $context
-            );
-        }
+        // Use pre-fetched n8n result if available; otherwise try context-only; else simulate
+        $analysis = $n8nAnalysis;
         if ($analysis === null) {
+            $context = [
+                'organization_id'    => $orgId,
+                'circular_id'        => $id,
+                'title'              => $row['title'] ?? '',
+                'authority'          => $row['authority'] ?? '',
+                'reference_no'       => $row['reference_no'] ?? '',
+                'circular_date'      => $row['circular_date'] ?? '',
+                'effective_date'     => $row['effective_date'] ?? '',
+                'document_text'      => trim($row['document_raw_text'] ?? $row['content_summary'] ?? ''),
+                'original_file_name' => $row['document_name'] ?? '',
+            ];
             $analysis = CircularIntelligenceWebhook::analyzeContextOnly($this->appConfig, $context);
         }
 
@@ -433,9 +425,11 @@ class CircularController extends BaseController
         $circularDate = $_POST['circular_date'] ?? date('Y-m-d');
         $effectiveDate = $_POST['effective_date'] ?? null;
 
-        $rawText = '';
-        $docName = null;
-        $docPath = null;
+        $rawText    = '';
+        $docName    = null;
+        $docPath    = null;
+        $savedFilePath = null;
+
         if (!empty($_FILES['document']['name']) && (int) $_FILES['document']['error'] === UPLOAD_ERR_OK) {
             $ext = strtolower(pathinfo($_FILES['document']['name'], PATHINFO_EXTENSION));
             $allowed = ['pdf', 'doc', 'docx', 'txt'];
@@ -448,19 +442,15 @@ class CircularController extends BaseController
                 $this->redirect('/circular-intelligence/upload');
             }
             $uploadDir = $this->uploadHistorySubdir('circulars');
-            $fn = 'circ_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+            $fn   = 'circ_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
             $full = $uploadDir . DIRECTORY_SEPARATOR . $fn;
             if (move_uploaded_file($_FILES['document']['tmp_name'], $full)) {
                 chmod($full, 0644);
-                $this->forwardUploadedFileToWebhook($full, $_FILES['document']['name']);
-                $docName = $_FILES['document']['name'];
-                $docPath = $this->uploadHistoryDbPath('circulars', $fn);
+                $docName       = $_FILES['document']['name'];
+                $docPath       = $this->uploadHistoryDbPath('circulars', $fn);
+                $savedFilePath = $full;
                 if ($ext === 'txt') {
                     $rawText = (string) file_get_contents($full);
-                } else {
-                    $rawText = "[AI Text Extraction — Simulated for {$ext}]\n\nFile: {$docName}\n\n"
-                        . "The circular mandates enhanced reporting controls, periodic certifications, and documentation retention. "
-                        . "Institutions must designate responsible officers, adhere to submission deadlines, and maintain evidence for regulatory examination.\n";
                 }
             }
         } else {
@@ -496,7 +486,30 @@ class CircularController extends BaseController
         if ($rawText && empty($row['document_raw_text'])) {
             $row['document_raw_text'] = $rawText;
         }
-        $this->runAiAnalysis($row, $orgId, $full ?? null);
+
+        // --- Direct n8n webhook call ---
+        $n8nAnalysis = null;
+        if ($savedFilePath && is_file($savedFilePath)) {
+            $context = [
+                'organization_id'    => $orgId,
+                'circular_id'        => $id,
+                'title'              => $row['title'] ?? '',
+                'authority'          => $row['authority'] ?? '',
+                'reference_no'       => $row['reference_no'] ?? '',
+                'circular_date'      => $row['circular_date'] ?? '',
+                'effective_date'     => $row['effective_date'] ?? '',
+                'document_text'      => trim($row['document_raw_text'] ?? ''),
+                'original_file_name' => $docName ?? '',
+            ];
+            $n8nAnalysis = CircularIntelligenceWebhook::analyzeUploadedFile(
+                $savedFilePath,
+                $docName ?? basename($savedFilePath),
+                $this->appConfig,
+                $context
+            );
+        }
+
+        $this->runAiAnalysis($row, $orgId, $savedFilePath, $n8nAnalysis);
 
         $_SESSION['flash_success'] = 'Circular uploaded. AI analysis completed.';
         $this->redirect('/circular-intelligence/view/' . $id);
@@ -525,7 +538,27 @@ class CircularController extends BaseController
                 $absPath = $candidate;
             }
         }
-        $this->runAiAnalysis($row, $orgId, $absPath);
+        $n8nAnalysis = null;
+        if ($absPath) {
+            $context = [
+                'organization_id'    => $orgId,
+                'circular_id'        => $id,
+                'title'              => $row['title'] ?? '',
+                'authority'          => $row['authority'] ?? '',
+                'reference_no'       => $row['reference_no'] ?? '',
+                'circular_date'      => $row['circular_date'] ?? '',
+                'effective_date'     => $row['effective_date'] ?? '',
+                'document_text'      => trim($row['document_raw_text'] ?? $row['content_summary'] ?? ''),
+                'original_file_name' => $row['document_name'] ?? '',
+            ];
+            $n8nAnalysis = CircularIntelligenceWebhook::analyzeUploadedFile(
+                $absPath,
+                $row['document_name'] ?? basename($absPath),
+                $this->appConfig,
+                $context
+            );
+        }
+        $this->runAiAnalysis($row, $orgId, $absPath, $n8nAnalysis);
         $_SESSION['flash_success'] = 'AI re-analysis completed.';
         $this->redirect('/circular-intelligence/view/' . $id);
     }
