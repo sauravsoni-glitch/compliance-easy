@@ -28,7 +28,7 @@ final class CircularIntelligenceWebhook
         }
         $cfile = new \CURLFile($absolutePath, $mime, $name);
         $post = self::contextFormFields($context) + [
-            'data' => $cfile,
+            'file' => $cfile,
             'file_name' => $name,
         ];
 
