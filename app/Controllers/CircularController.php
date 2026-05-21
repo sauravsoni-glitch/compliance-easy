@@ -107,12 +107,14 @@ class CircularController extends BaseController
         $id = (int) $row['id'];
 
         // Use pre-fetched n8n result if available; otherwise try context-only; else simulate.
-        // IMPORTANT: only call analyzeContextOnly() when NO file was uploaded. If a file
-        // was uploaded the caller already invoked analyzeUploadedFile(); re-calling the
-        // same n8n webhook without a binary attached trips the workflow's
-        // "expects binary file 'file'" error.
+        // IMPORTANT: only call analyzeContextOnly() when NO file was EVER uploaded for
+        // this circular. If the row has a document_path (file uploaded originally), the
+        // caller either already invoked analyzeUploadedFile() with it, or the file is
+        // missing on disk — either way, re-hitting the same n8n webhook without a
+        // binary attached trips the workflow's "expects binary file 'file'" error.
         $analysis = $n8nAnalysis;
-        if ($analysis === null && empty($absoluteFilePath)) {
+        $hadFileEver = !empty($absoluteFilePath) || !empty($row['document_path']);
+        if ($analysis === null && !$hadFileEver) {
             $context = [
                 'organization_id'    => $orgId,
                 'circular_id'        => $id,
@@ -534,14 +536,18 @@ class CircularController extends BaseController
             $_SESSION['flash_error'] = 'Cannot re-analyze after compliance is linked.';
             $this->redirect('/circular-intelligence/view/' . $id);
         }
+        // Robust path resolution (handles legacy rows and missing files).
         $absPath = null;
         if (!empty($row['document_path'])) {
-            $uploadBase = rtrim((string)($this->appConfig['upload_path'] ?? ''), '/\\');
-            $candidate  = $uploadBase . DIRECTORY_SEPARATOR . ltrim((string)$row['document_path'], '/\\');
-            if (is_file($candidate)) {
-                $absPath = $candidate;
-            }
+            $absPath = $this->resolveUploadFilesystemPath((string) $row['document_path']);
         }
+
+        // If the circular was originally uploaded as a file, we MUST send it as a
+        // binary to n8n on re-analyze too — n8n's workflow requires the 'file'
+        // binary and will error if we only POST text fields. So when document_path
+        // is set but the file is missing on disk, skip n8n entirely and fall through
+        // to keyword simulation rather than risk a no-binary call.
+        $hadFile = !empty($row['document_path']);
         $n8nAnalysis = null;
         if ($absPath) {
             $context = [
@@ -562,6 +568,7 @@ class CircularController extends BaseController
                 $context
             );
         }
+
         $this->runAiAnalysis($row, $orgId, $absPath, $n8nAnalysis);
         $_SESSION['flash_success'] = 'AI re-analysis completed.';
         $this->redirect('/circular-intelligence/view/' . $id);
