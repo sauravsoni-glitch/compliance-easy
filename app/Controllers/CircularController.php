@@ -106,9 +106,13 @@ class CircularController extends BaseController
     {
         $id = (int) $row['id'];
 
-        // Use pre-fetched n8n result if available; otherwise try context-only; else simulate
+        // Use pre-fetched n8n result if available; otherwise try context-only; else simulate.
+        // IMPORTANT: only call analyzeContextOnly() when NO file was uploaded. If a file
+        // was uploaded the caller already invoked analyzeUploadedFile(); re-calling the
+        // same n8n webhook without a binary attached trips the workflow's
+        // "expects binary file 'file'" error.
         $analysis = $n8nAnalysis;
-        if ($analysis === null) {
+        if ($analysis === null && empty($absoluteFilePath)) {
             $context = [
                 'organization_id'    => $orgId,
                 'circular_id'        => $id,
