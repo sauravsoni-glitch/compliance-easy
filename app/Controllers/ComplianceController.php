@@ -513,6 +513,9 @@ class ComplianceController extends BaseController
             if (!$hasCol('compliance_area')) {
                 $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `compliance_area` varchar(255) NULL AFTER `department`");
             }
+            if (!$hasCol('penalty_amount')) {
+                $this->db->exec("ALTER TABLE `compliances` ADD COLUMN `penalty_amount` decimal(15,2) NULL DEFAULT NULL AFTER `penalty_impact`");
+            }
         } catch (\Throwable $e) {
         }
         try {
@@ -1371,8 +1374,17 @@ class ComplianceController extends BaseController
         if ($id > 0) {
             $penaltyAmount = $_POST['penalty_amount'] ?? '';
             $penaltyAmount = $penaltyAmount !== '' ? (float)$penaltyAmount : null;
-            $upd = $this->db->prepare('UPDATE compliances SET penalty_amount = ? WHERE id = ?');
-            $upd->execute([$penaltyAmount, $id]);
+            try {
+                $upd = $this->db->prepare('UPDATE compliances SET penalty_amount = ? WHERE id = ?');
+                $upd->execute([$penaltyAmount, $id]);
+            } catch (\Throwable $e) {
+                // Column may not exist yet — auto-add it and retry once
+                try {
+                    $this->db->exec("ALTER TABLE `compliances` ADD COLUMN IF NOT EXISTS `penalty_amount` decimal(15,2) NULL DEFAULT NULL");
+                    $upd = $this->db->prepare('UPDATE compliances SET penalty_amount = ? WHERE id = ?');
+                    $upd->execute([$penaltyAmount, $id]);
+                } catch (\Throwable $ignored) {}
+            }
         }
 
         $uploadNote = '';
