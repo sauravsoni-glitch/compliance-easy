@@ -1468,7 +1468,7 @@ class ComplianceController extends BaseController
             Auth::markHeaderNotificationRead($id);
         }
 
-        $tab = preg_replace('/[^a-z]/', '', $_GET['tab'] ?? 'overview') ?: 'overview';
+        $tab = preg_replace('/[^a-z]/', '', $_GET['tab'] ?? 'checklist') ?: 'checklist';
 
         $stmt = $this->db->prepare('
             SELECT d.*, u.full_name AS uploader_name FROM compliance_documents d
