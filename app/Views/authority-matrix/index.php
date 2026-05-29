@@ -142,7 +142,6 @@ $riskLabel = function ($r) {
                     <div class="am-flow-role">Approver</div>
                 </div>
             </div>
-            <p class="am-escalate"><i class="far fa-clock"></i> Escalate <strong><?= (int)($row['escalation_days_before'] ?? 2) ?> days</strong> before due if pending</p>
             <div class="am-wf-actions">
                 <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix/view/<?= (int)$row['id'] ?>" class="btn btn-sm btn-outline">View</a>
                 <a href="<?= htmlspecialchars($basePath) ?>/authority-matrix/edit/<?= (int)$row['id'] ?>" class="btn btn-sm btn-outline">Edit</a>

@@ -41,13 +41,5 @@ $basePath = $basePath ?? '';
             </div>
         </div>
         <div class="am-tree-line"></div>
-        <div class="am-tree-node am-tree-escalation">
-            <div class="am-tree-ico"><i class="fas fa-level-up-alt"></i></div>
-            <div class="am-tree-body">
-                <span class="am-tree-tag">Escalation</span>
-                <strong>If pending — <?= (int)($r['escalation_days_before'] ?? 2) ?> days before due</strong>
-                <span class="text-muted text-sm">Route to next authority per matrix & DOA limits</span>
-            </div>
-        </div>
     </div>
 </div>

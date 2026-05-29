@@ -116,6 +116,7 @@ return [
         '/organization/skip-invite' => ['OrganizationController', 'skipInvite'],
         '/organization/resend-invite' => ['OrganizationController', 'resendInvite'],
         '/roles-permissions/change-role' => ['RolesController', 'changeRole'],
+        '/roles-permissions/change-department' => ['RolesController', 'changeDepartment'],
         '/roles-permissions/toggle-status/{id}' => ['RolesController', 'toggleStatus'],
         '/settings/save' => ['SettingsController', 'save'],
         '/settings/profile' => ['SettingsController', 'saveProfile'],

@@ -147,6 +147,71 @@ class RolesController extends BaseController
         $this->redirect('/roles-permissions');
     }
 
+    /**
+     * Change a user's department from the Roles & Permissions page.
+     * Only admins can change other users' departments.
+     */
+    public function changeDepartment(): void
+    {
+        Auth::requireRole('admin');
+        $userId  = (int) ($_POST['user_id'] ?? 0);
+        $newDept = trim((string) ($_POST['department'] ?? ''));
+        $orgId   = Auth::organizationId();
+        $actorId = Auth::id();
+
+        if (!$userId) {
+            $_SESSION['flash_error'] = 'Invalid request.';
+            $this->redirect('/roles-permissions');
+        }
+
+        // Whitelist of allowed departments — matches the rest of the app
+        $allowed = [
+            '', // empty = unset
+            'Admin', 'Compliance', 'Finance', 'Legal', 'Operations', 'IT',
+            'Risk', 'Risk Management', 'HR', 'Human Resource', 'Human Resources',
+            'Treasury', 'Credit', 'Collections', 'Management',
+        ];
+        if (!in_array($newDept, $allowed, true)) {
+            $_SESSION['flash_error'] = 'Invalid department.';
+            $this->redirect('/roles-permissions');
+        }
+
+        $userStmt = $this->db->prepare(
+            'SELECT id, full_name, email, department FROM users WHERE id = ? AND organization_id = ?'
+        );
+        $userStmt->execute([$userId, $orgId]);
+        $target = $userStmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$target) {
+            $_SESSION['flash_error'] = 'User not found.';
+            $this->redirect('/roles-permissions');
+        }
+
+        $oldDept = (string) ($target['department'] ?? '');
+        if ($oldDept === $newDept) {
+            $_SESSION['flash_success'] = 'Department unchanged.';
+            $this->redirect('/roles-permissions');
+        }
+
+        $this->db->prepare('UPDATE users SET department = ? WHERE id = ? AND organization_id = ?')
+            ->execute([$newDept !== '' ? $newDept : null, $userId, $orgId]);
+
+        $desc = sprintf(
+            'Department changed for %s (%s): %s → %s',
+            $target['full_name'],
+            $target['email'],
+            $oldDept !== '' ? $oldDept : '(none)',
+            $newDept !== '' ? $newDept : '(none)'
+        );
+        try {
+            $this->logActivity($orgId, $actorId, 'department_changed', $desc, $userId);
+        } catch (\Throwable $e) {
+            // ignore log failures — primary write already succeeded
+        }
+
+        $_SESSION['flash_success'] = 'Department updated for ' . $target['full_name'] . '.';
+        $this->redirect('/roles-permissions');
+    }
+
     public function toggleStatus(int $id): void
     {
         Auth::requireRole('admin');

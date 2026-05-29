@@ -1012,7 +1012,8 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     <span class="st-active-dot"></span>
                     <span><?= htmlspecialchars($d['name'] ?? $slug) ?></span>
                     <span class="st-esc-area-chip">
-                        <span class="st-area-count" data-dept-slug="<?= htmlspecialchars($slug) ?>"><?= count($areas) ?></span> team<?= count($areas) === 1 ? '' : 's' ?>
+                        <?php $visibleCount = max(0, count($areas) - (isset($areas['default']) ? 1 : 0)); ?>
+                        <span class="st-area-count" data-dept-slug="<?= htmlspecialchars($slug) ?>"><?= $visibleCount ?></span> team<?= $visibleCount === 1 ? '' : 's' ?>
                     </span>
                 </div>
                 <button type="button" class="st-esc-add-btn st-add-area-btn" data-dept-slug="<?= htmlspecialchars($slug) ?>" data-dept-name="<?= htmlspecialchars($d['name'] ?? $slug) ?>">
@@ -1023,9 +1024,12 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
             <div class="st-esc-areas st-areas-list" data-dept-slug="<?= htmlspecialchars($slug) ?>">
                 <?php foreach ($areas as $areaSlug => $area):
                     $isDefault = ($areaSlug === 'default');
+                    // Hide default visually — teams come from Sync / "+ Add Team".
+                    // Kept in DOM so the JS clone function ("Copy from default") still works.
+                    $hideStyle = $isDefault ? ' style="display:none;"' : '';
                     $areaCls = $isDefault ? 'st-esc-area st-esc-area--default' : 'st-esc-area st-esc-area--custom';
                 ?>
-                <div class="<?= $areaCls ?> st-area-block" data-area-slug="<?= htmlspecialchars($areaSlug) ?>">
+                <div class="<?= $areaCls ?> st-area-block" data-area-slug="<?= htmlspecialchars($areaSlug) ?>"<?= $hideStyle ?>>
                     <div class="st-esc-area-head">
                         <div class="st-esc-area-name">
                             <?php if ($isDefault): ?>
@@ -1107,17 +1111,17 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     const areas = deptCard.querySelectorAll('.st-area-block');
                     areas.forEach(function(b){
                         const aSlug = b.getAttribute('data-area-slug');
-                        // Read the area display name from the first span inside .st-esc-area-name
+                        // Don't offer the hidden "default" row as a copy source
+                        if (aSlug === 'default') return;
                         const nameNode = b.querySelector('.st-esc-area-name > span:first-child');
                         let aName = aSlug;
                         if (nameNode) {
                             aName = nameNode.textContent.replace(/^📋\s*/, '').trim();
                         }
-                        if (!aName) aName = (aSlug === 'default') ? 'Default' : aSlug;
+                        if (!aName) aName = aSlug;
                         const opt = document.createElement('option');
                         opt.value = aSlug;
-                        opt.textContent = aName + (aSlug === 'default' ? ' (recommended)' : '');
-                        if (aSlug === 'default') opt.selected = true;
+                        opt.textContent = aName;
                         selCopy.appendChild(opt);
                     });
                 }
@@ -1201,7 +1205,8 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                 // Update area count with pulse
                 const counter = document.querySelector('.st-area-count[data-dept-slug="' + deptSlug + '"]');
                 if (counter) {
-                    counter.textContent = String(areasList.querySelectorAll('.st-area-block').length);
+                    // Don't count the hidden "default" row in the visible team count
+                    counter.textContent = String(areasList.querySelectorAll('.st-area-block:not([data-area-slug="default"])').length);
                     const chip = counter.closest('.st-esc-area-chip, .st-area-chip');
                     if (chip) {
                         chip.classList.add('st-chip-pulse');
@@ -1269,7 +1274,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     const blk = document.querySelector('.st-dept-card[data-dept-slug="' + deptSlug + '"] .st-area-block[data-area-slug="' + areaSlug + '"]');
                     if (blk) blk.remove();
                     const counter = document.querySelector('.st-area-count[data-dept-slug="' + deptSlug + '"]');
-                    const remaining = document.querySelectorAll('.st-dept-card[data-dept-slug="' + deptSlug + '"] .st-area-block').length;
+                    const remaining = document.querySelectorAll('.st-dept-card[data-dept-slug="' + deptSlug + '"] .st-area-block:not([data-area-slug="default"])').length;
                     if (counter) counter.textContent = String(remaining);
                     markEscDirty();
                     return;
@@ -2116,7 +2121,8 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     <span class="st-active-dot"></span>
                     <span><?= htmlspecialchars($pd['name']) ?></span>
                     <span class="st-area-chip">
-                        <span class="st-pre-area-count" data-dept-idx="<?= $i ?>"><?= count($areas) ?></span> team<?= count($areas) === 1 ? '' : 's' ?>
+                        <?php $visibleCount = max(0, count($areas) - (isset($areas['default']) ? 1 : 0)); ?>
+                        <span class="st-pre-area-count" data-dept-idx="<?= $i ?>"><?= $visibleCount ?></span> team<?= $visibleCount === 1 ? '' : 's' ?>
                     </span>
                 </div>
                 <button type="button" class="st-cad-add-btn st-pre-add-area-btn" data-dept-idx="<?= $i ?>" data-dept-name="<?= htmlspecialchars($pd['name']) ?>">
@@ -2125,7 +2131,18 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
             </div>
             <div class="st-cad-areas st-pre-areas-list" data-dept-idx="<?= $i ?>">
                 <?php foreach ($areas as $areaSlug => $area): ?>
-                    <?php $renderPreDueAreaRow($i, (string) $areaSlug, $area, $activeUsers); ?>
+                    <?php
+                        // Hide the "default" row visually — teams populate via Sync
+                        // or "+ Add Team". Default row stays in DOM so JS clone works.
+                        $isDefault = ($areaSlug === 'default');
+                        if ($isDefault) {
+                            echo '<div style="display:none;">';
+                            $renderPreDueAreaRow($i, (string) $areaSlug, $area, $activeUsers);
+                            echo '</div>';
+                        } else {
+                            $renderPreDueAreaRow($i, (string) $areaSlug, $area, $activeUsers);
+                        }
+                    ?>
                 <?php endforeach; ?>
             </div>
         </div>
@@ -2187,16 +2204,17 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     const rows = deptCard.querySelectorAll('.st-pre-area-row');
                     rows.forEach(function(r){
                         const aSlug = r.getAttribute('data-area-slug');
+                        // Don't offer the hidden "default" row as a copy source
+                        if (aSlug === 'default') return;
                         const nameNode = r.querySelector('.st-cad-area-name > span:first-child');
                         let aName = aSlug;
                         if (nameNode) {
                             aName = nameNode.textContent.replace(/^📋\s*/, '').trim();
                         }
-                        if (!aName) aName = (aSlug === 'default') ? 'Default' : aSlug;
+                        if (!aName) aName = aSlug;
                         const opt = document.createElement('option');
                         opt.value = aSlug;
-                        opt.textContent = aName + (aSlug === 'default' ? ' (recommended)' : '');
-                        if (aSlug === 'default') opt.selected = true;
+                        opt.textContent = aName;
                         selCopy.appendChild(opt);
                     });
                 }
@@ -2283,7 +2301,8 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                 // Update counter with pulse animation
                 const counter = document.querySelector('.st-pre-area-count[data-dept-idx="' + deptIdx + '"]');
                 if (counter) {
-                    counter.textContent = String(areasList.querySelectorAll('.st-pre-area-row').length);
+                    // Exclude hidden "default" row from visible team count
+                    counter.textContent = String(areasList.querySelectorAll('.st-pre-area-row:not([data-area-slug="default"])').length);
                     const chip = counter.closest('.st-area-chip, .st-esc-area-chip');
                     if (chip) {
                         chip.classList.add('st-chip-pulse');
@@ -2342,7 +2361,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                     const row = document.querySelector('.st-dept-card[data-dept-idx="' + deptIdx + '"] .st-pre-area-row[data-area-slug="' + areaSlug + '"]');
                     if (row) row.remove();
                     const counter = document.querySelector('.st-pre-area-count[data-dept-idx="' + deptIdx + '"]');
-                    const remaining = document.querySelectorAll('.st-dept-card[data-dept-idx="' + deptIdx + '"] .st-pre-area-row').length;
+                    const remaining = document.querySelectorAll('.st-dept-card[data-dept-idx="' + deptIdx + '"] .st-pre-area-row:not([data-area-slug="default"])').length;
                     if (counter) counter.textContent = String(remaining);
                     markPreDirty();
                     return;

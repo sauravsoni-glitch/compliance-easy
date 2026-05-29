@@ -134,7 +134,33 @@ function rp_status_label(string $status): string {
                             </div>
                         </td>
                         <td class="rp-email"><?= htmlspecialchars($u['email']) ?></td>
-                        <td><?= htmlspecialchars($u['department'] ?? '—') ?></td>
+                        <td>
+                            <?php if ($isAdmin):
+                                $currentDept = trim((string) ($u['department'] ?? ''));
+                                $deptOptions = [
+                                    'Admin', 'Compliance', 'Finance', 'Legal', 'Operations',
+                                    'IT', 'Risk Management', 'HR', 'Human Resource',
+                                    'Treasury', 'Credit', 'Collections', 'Management',
+                                ];
+                                // If the user's current dept isn't in the standard list, add it so it stays selected
+                                if ($currentDept !== '' && !in_array($currentDept, $deptOptions, true)) {
+                                    $deptOptions[] = $currentDept;
+                                }
+                                sort($deptOptions);
+                            ?>
+                            <form method="post" action="<?= htmlspecialchars($basePath) ?>/roles-permissions/change-department" class="rp-role-form">
+                                <input type="hidden" name="user_id" value="<?= (int)$u['id'] ?>">
+                                <select name="department" class="form-control rp-role-select rp-dept-select" onchange="this.form.submit()" title="Change department">
+                                    <option value="">— Unset —</option>
+                                    <?php foreach ($deptOptions as $deptOpt): ?>
+                                    <option value="<?= htmlspecialchars($deptOpt) ?>" <?= $currentDept === $deptOpt ? 'selected' : '' ?>><?= htmlspecialchars($deptOpt) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </form>
+                            <?php else: ?>
+                            <?= htmlspecialchars($u['department'] ?? '—') ?>
+                            <?php endif; ?>
+                        </td>
                         <td>
                             <?php if ($isAdmin): ?>
                             <form method="post" action="<?= htmlspecialchars($basePath) ?>/roles-permissions/change-role" class="rp-role-form">

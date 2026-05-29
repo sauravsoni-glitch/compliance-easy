@@ -13,7 +13,6 @@ $basePath = $basePath ?? '';
             <div><span class="text-muted text-sm">Department</span><div class="font-weight-600"><?= htmlspecialchars($r['department']) ?></div></div>
             <div><span class="text-muted text-sm">Frequency</span><div class="font-weight-600"><?= htmlspecialchars($r['frequency']) ?></div></div>
             <div><span class="text-muted text-sm">Status</span><div><span class="am-badge am-badge-<?= ($r['status'] ?? '') === 'active' ? 'ok' : 'off' ?>"><?= htmlspecialchars(ucfirst($r['status'] ?? '')) ?></span></div></div>
-            <div><span class="text-muted text-sm">Escalation</span><div class="font-weight-600"><?= (int)($r['escalation_days_before'] ?? 2) ?> days before due</div></div>
         </div>
     </div>
 

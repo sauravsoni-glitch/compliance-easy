@@ -35,6 +35,9 @@ final class Mailer
         [$htmlBody, $altBody] = self::inviteBody($toEmail, $toName, $inviteLink, $roleLabel, $department);
         $provider = strtolower((string) ($cfg['provider'] ?? 'smtp'));
 
+        if ($provider === 'log') {
+            return self::sendViaLog($toEmail, $toName, $subject, $htmlBody, $altBody, []);
+        }
         if ($provider === 'mailgun') {
             return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody);
         }
@@ -70,6 +73,9 @@ final class Mailer
             return [false, null];
         }
         $provider = strtolower((string) ($cfg['provider'] ?? 'smtp'));
+        if ($provider === 'log') {
+            return self::sendViaLog($toEmail, $toName, $subject, $htmlBody, $altBody, $ccEmails);
+        }
         if ($provider === 'mailgun') {
             return self::sendViaMailgun($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, $ccEmails);
         }
@@ -83,6 +89,41 @@ final class Mailer
         }
 
         return self::sendViaSmtp($cfg, $appConfig, $toEmail, $toName, $subject, $htmlBody, $altBody, null, $ccEmails);
+    }
+
+    /**
+     * "log" provider — writes emails to storage/logs/mailer.log instead of sending.
+     * Perfect for local dev where SMTP / Mailgun aren't reachable.
+     *
+     * @return array{0:bool,1:?string}
+     */
+    private static function sendViaLog(string $toEmail, string $toName, string $subject, string $htmlBody, string $altBody, array $ccEmails = []): array
+    {
+        try {
+            $root = defined('ROOT_PATH') ? constant('ROOT_PATH') : dirname(__DIR__, 2);
+            $logDir = rtrim((string) $root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'logs';
+            if (!is_dir($logDir)) {
+                @mkdir($logDir, 0775, true);
+            }
+            $logFile = $logDir . DIRECTORY_SEPARATOR . 'mailer.log';
+            $ts = date('Y-m-d H:i:s');
+            $ccLine = empty($ccEmails) ? '' : 'CC:        ' . implode(', ', $ccEmails) . "\n";
+            $entry = "═══════════════════════════════════════════════════════════════════\n"
+                . "[{$ts}]  📧 EMAIL CAPTURED (provider=log, not sent)\n"
+                . "═══════════════════════════════════════════════════════════════════\n"
+                . "TO:        {$toEmail}" . ($toName !== '' ? " ({$toName})" : '') . "\n"
+                . $ccLine
+                . "SUBJECT:   {$subject}\n"
+                . "───────────────────────────────────────────────────────────────────\n"
+                . "PLAIN BODY:\n{$altBody}\n"
+                . "───────────────────────────────────────────────────────────────────\n"
+                . "HTML BODY:\n{$htmlBody}\n"
+                . "═══════════════════════════════════════════════════════════════════\n\n";
+            @file_put_contents($logFile, $entry, FILE_APPEND);
+            return [true, null];
+        } catch (\Throwable $e) {
+            return [false, 'Log mailer failed: ' . $e->getMessage()];
+        }
     }
 
     /**
@@ -195,6 +236,21 @@ final class Mailer
             }
             $mail->Port = (int) ($cfg['port'] ?? 587);
             $mail->CharSet = 'UTF-8';
+
+            // ── Aggressive timeouts so the request fails fast instead of
+            //    burning through the PHP max_execution_time (default 60s).
+            //    Without these PHPMailer can hang forever on a dead SMTP host.
+            $mail->Timeout       = 10; // socket I/O timeout (read)
+            $mail->SMTPKeepAlive = false;
+            $mail->SMTPOptions   = [
+                'ssl' => [
+                    'verify_peer'       => false,
+                    'verify_peer_name'  => false,
+                    'allow_self_signed' => true,
+                ],
+            ];
+            // Force a hard 10s connect timeout via stream context
+            ini_set('default_socket_timeout', '10');
             $mail->setFrom($from, (string) ($cfg['from_name'] ?? 'Easy Home Finance'));
             $mail->addAddress($toEmail, $toName !== '' ? $toName : $toEmail);
             foreach ($ccEmails as $cc) {
