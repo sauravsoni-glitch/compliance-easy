@@ -80,3 +80,20 @@ if (!method_exists($controller, $action)) {
     $params = [];
 }
 $controller->{$action}(...array_values($params));
+
+// ─── Auto-trigger Pre-Due + Escalation mail engines ──────────────────────
+// Runs ONCE per organization per day. Uses a lock file so even if 100 users
+// load the page at the same time, only the first request actually fires the
+// mail engines. Subsequent requests skip instantly. Wrapped in try/catch so
+// failures never affect the user-facing page.
+try {
+    // If FastCGI is available, flush the response to the user FIRST so they
+    // don't wait while emails are being sent in the background.
+    if (function_exists('fastcgi_finish_request')) {
+        @fastcgi_finish_request();
+    }
+    $appConfig = require ROOT_PATH . '/config/app.php';
+    \App\Core\AutoMailTrigger::tickIfDue(Database::getConnection(), $appConfig);
+} catch (\Throwable $e) {
+    @error_log('[AutoMailTrigger boot] ' . $e->getMessage());
+}

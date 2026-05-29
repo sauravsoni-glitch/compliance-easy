@@ -77,7 +77,7 @@ final class SmartComplianceAutomationEngine
         }
         $sentKeys = $this->buildSentKeys((array) $logs['entries']);
 
-        $sql = "SELECT id, compliance_code, title, department, due_date, expected_date, reminder_date, status, risk_level, owner_id, reviewer_id, approver_id
+        $sql = "SELECT id, compliance_code, title, department, compliance_area, due_date, expected_date, reminder_date, status, risk_level, owner_id, reviewer_id, approver_id
                 FROM compliances
                 WHERE organization_id = ?
                   AND due_date IS NOT NULL
@@ -123,7 +123,7 @@ final class SmartComplianceAutomationEngine
                     $summary['skipped']++;
                     continue;
                 }
-                $recipients = $this->recipientLadder($orgId, $item, (int) $slot['level']);
+                $recipients = $this->recipientLadder($orgId, $item, (int) $slot['level'], 'pre');
                 if ($recipients === []) {
                     $summary['skipped']++;
                     continue;
@@ -151,7 +151,7 @@ final class SmartComplianceAutomationEngine
                 if (!$forceRun && isset($sentKeys[$eventKey])) {
                     continue;
                 }
-                $recipients = $this->recipientLadder($orgId, $item, (int) $slot['level']);
+                $recipients = $this->recipientLadder($orgId, $item, (int) $slot['level'], 'esc');
                 if ($recipients === []) {
                     continue;
                 }
@@ -323,9 +323,26 @@ final class SmartComplianceAutomationEngine
         return $slots;
     }
 
-    private function recipientLadder(int $orgId, array $item, int $slotLevel): array
+    /**
+     * Resolve recipients for a given compliance + slot level.
+     *
+     * Priority order:
+     *   1. Team users configured in Escalation/Pre-Due Settings UI for the
+     *      compliance's (department, compliance_area) combination.
+     *   2. Default team users (department-level fallback) configured in UI.
+     *   3. Compliance's own owner_id / reviewer_id / approver_id (safety net so
+     *      existing compliances still receive emails if no team is configured).
+     */
+    private function recipientLadder(int $orgId, array $item, int $slotLevel, string $mode = 'pre'): array
     {
-        $owner = $this->activeUserById($orgId, (int) ($item['owner_id'] ?? 0));
+        // --- Step 1: try team-based resolution from settings ---
+        $teamUsers = $this->resolveTeamRecipients($orgId, $item, $slotLevel, $mode);
+        if ($teamUsers !== []) {
+            return $teamUsers;
+        }
+
+        // --- Step 2: fall back to compliance's own assigned users ---
+        $owner    = $this->activeUserById($orgId, (int) ($item['owner_id'] ?? 0));
         $reviewer = $this->activeUserById($orgId, (int) ($item['reviewer_id'] ?? 0));
         $approver = $this->activeUserById($orgId, (int) ($item['approver_id'] ?? 0));
         $out = [];
@@ -340,18 +357,141 @@ final class SmartComplianceAutomationEngine
             $out[] = $approver;
         }
 
+        return $this->dedupeUsers($out);
+    }
+
+    /** Slugify an area name to match the storage format used in settings JSON. */
+    private function areaSlug(string $name): string
+    {
+        $s = strtolower(trim($name));
+        $s = preg_replace('/[^a-z0-9_\-\s]/', '', $s);
+        $s = preg_replace('/\s+/', '-', (string) $s);
+        return preg_replace('/-+/', '-', (string) $s) ?: '';
+    }
+
+    /** Convert a department display name to its escalation-config slug. */
+    private function deptSlug(string $name): string
+    {
+        $s = strtolower(trim($name));
+        // Map a few known names to their config slugs
+        $aliases = [
+            'human resource'  => 'hr',
+            'human resources' => 'hr',
+            'risk'            => 'risk',
+            'risk management' => 'risk',
+        ];
+        if (isset($aliases[$s])) {
+            return $aliases[$s];
+        }
+        $s = preg_replace('/[^a-z0-9_\-\s]/', '', $s);
+        $s = preg_replace('/\s+/', '-', (string) $s);
+        return preg_replace('/-+/', '-', (string) $s) ?: '';
+    }
+
+    private function dedupeUsers(array $users): array
+    {
         $seen = [];
         $uniq = [];
-        foreach ($out as $u) {
+        foreach ($users as $u) {
+            if (!is_array($u)) continue;
             $email = strtolower(trim((string) ($u['email'] ?? '')));
-            if ($email === '' || isset($seen[$email])) {
-                continue;
-            }
+            if ($email === '' || isset($seen[$email])) continue;
             $seen[$email] = true;
             $uniq[] = $u;
         }
-
         return $uniq;
+    }
+
+    /**
+     * Look up team users from settings JSON.
+     *   - mode 'pre': uses pre_due settings: depts[].areas[areaSlug].(owner_id, mgr_id, head_id)
+     *   - mode 'esc': uses escalation settings: depts[slug].areas[areaSlug].levels[level-1].to
+     * Returns [] if no team data could be resolved (caller should fall back).
+     */
+    private function resolveTeamRecipients(int $orgId, array $item, int $slotLevel, string $mode): array
+    {
+        $dept = trim((string) ($item['department'] ?? ''));
+        $area = trim((string) ($item['compliance_area'] ?? ''));
+        if ($dept === '') {
+            return [];
+        }
+        $areaSlug = $this->areaSlug($area);
+        if ($areaSlug === '') {
+            $areaSlug = 'default';
+        }
+
+        if ($mode === 'pre') {
+            $pre = $this->getJson($orgId, self::SETTINGS_PRE_DUE, []);
+            $depts = $pre['depts'] ?? [];
+            if (!is_array($depts)) return [];
+            $deptMatch = null;
+            foreach ($depts as $d) {
+                if (!is_array($d)) continue;
+                if (strcasecmp(trim((string) ($d['name'] ?? '')), $dept) === 0) {
+                    $deptMatch = $d;
+                    break;
+                }
+            }
+            if (!$deptMatch) return [];
+
+            $areas = is_array($deptMatch['areas'] ?? null) ? $deptMatch['areas'] : [];
+            $areaCfg = $areas[$areaSlug] ?? ($areas['default'] ?? null);
+
+            // Final fallback to top-level pd fields (legacy data without "areas")
+            if (!is_array($areaCfg)) {
+                $areaCfg = [
+                    'owner_id' => $deptMatch['owner_id'] ?? 0,
+                    'mgr_id'   => $deptMatch['mgr_id']   ?? 0,
+                    'head_id'  => $deptMatch['head_id']  ?? 0,
+                ];
+            }
+
+            $ownerU = $this->activeUserById($orgId, (int) ($areaCfg['owner_id'] ?? 0));
+            $mgrU   = $this->activeUserById($orgId, (int) ($areaCfg['mgr_id']   ?? 0));
+            $headU  = $this->activeUserById($orgId, (int) ($areaCfg['head_id']  ?? 0));
+
+            $out = [];
+            if ($ownerU && !empty($ownerU['email']))                   $out[] = $ownerU;   // Level 1+
+            if ($slotLevel >= 2 && $mgrU  && !empty($mgrU['email']))    $out[] = $mgrU;    // Level 2+
+            if ($slotLevel >= 3 && $headU && !empty($headU['email']))   $out[] = $headU;   // Level 3+
+            return $this->dedupeUsers($out);
+        }
+
+        // mode === 'esc'
+        $esc = $this->getJson($orgId, self::SETTINGS_ESCALATION, []);
+        $depts = $esc['depts'] ?? [];
+        if (!is_array($depts)) return [];
+
+        $deptSlug = $this->deptSlug($dept);
+        $deptCfg  = $depts[$deptSlug] ?? null;
+        if (!is_array($deptCfg)) {
+            // Try matching by display name as fallback
+            foreach ($depts as $sl => $d) {
+                if (!is_array($d)) continue;
+                if (strcasecmp(trim((string) ($d['name'] ?? '')), $dept) === 0) {
+                    $deptCfg = $d;
+                    break;
+                }
+            }
+        }
+        if (!is_array($deptCfg)) return [];
+
+        $areas    = is_array($deptCfg['areas'] ?? null) ? $deptCfg['areas'] : [];
+        $areaCfg  = $areas[$areaSlug] ?? ($areas['default'] ?? null);
+        $levels   = is_array($areaCfg['levels'] ?? null) ? $areaCfg['levels'] : ($deptCfg['levels'] ?? []);
+
+        // For escalation, accumulate recipients up to the current level
+        $out = [];
+        $maxIdx = max(0, min(count($levels) - 1, $slotLevel - 1));
+        for ($i = 0; $i <= $maxIdx; $i++) {
+            $L = $levels[$i] ?? null;
+            if (!is_array($L)) continue;
+            $u = $this->activeUserById($orgId, (int) ($L['to'] ?? 0));
+            if ($u && !empty($u['email'])) {
+                $out[] = $u;
+            }
+        }
+        return $this->dedupeUsers($out);
     }
 
     private function pickTemplateForGroup(array $templates, array $group): ?array

@@ -102,7 +102,17 @@ class SettingsController extends BaseController
                 'name' => $name,
                 'use_global' => false,
                 'active' => true,
+                // Keep top-level "levels" for backward compatibility with existing
+                // escalation runner code. Mirrors the "default" compliance area.
                 'levels' => $standardLevels,
+                // NEW: compliance areas. Every department starts with a "default"
+                // area; admins can add specific areas like GST, TDS, PF, etc.
+                'areas' => [
+                    'default' => [
+                        'name' => 'Default',
+                        'levels' => $standardLevels,
+                    ],
+                ],
             ];
         }
         return [
@@ -124,11 +134,46 @@ class SettingsController extends BaseController
 
         foreach (($defaults['depts'] ?? []) as $slug => $defDept) {
             $curDept = is_array($out['depts'][$slug] ?? null) ? $out['depts'][$slug] : [];
+            $deptLevels = (is_array($curDept['levels'] ?? null) && !empty($curDept['levels'])) ? $curDept['levels'] : ($defDept['levels'] ?? []);
+
+            // Backward compatibility: if the existing config does not yet have
+            // an "areas" map, seed it with a single "default" area mirroring the
+            // top-level "levels" so the UI keeps working without data loss.
+            $existingAreas = is_array($curDept['areas'] ?? null) ? $curDept['areas'] : [];
+            if (empty($existingAreas)) {
+                $existingAreas = [
+                    'default' => [
+                        'name' => 'Default',
+                        'levels' => $deptLevels,
+                    ],
+                ];
+            } else {
+                // Make sure "default" always exists & has levels
+                if (!isset($existingAreas['default']) || !is_array($existingAreas['default'])) {
+                    $existingAreas = ['default' => ['name' => 'Default', 'levels' => $deptLevels]] + $existingAreas;
+                }
+                foreach ($existingAreas as $aSlug => $area) {
+                    if (!is_array($area)) {
+                        unset($existingAreas[$aSlug]);
+                        continue;
+                    }
+                    $existingAreas[$aSlug] = [
+                        'name' => trim((string) ($area['name'] ?? ucfirst($aSlug))) ?: ucfirst($aSlug),
+                        'levels' => (is_array($area['levels'] ?? null) && !empty($area['levels'])) ? $area['levels'] : $deptLevels,
+                    ];
+                }
+            }
+
+            // Keep top-level "levels" mirrored from the "default" area so any
+            // existing escalation runner that reads $dept['levels'] stays intact.
+            $topLevels = $existingAreas['default']['levels'] ?? $deptLevels;
+
             $out['depts'][$slug] = [
                 'name' => $curDept['name'] ?? $defDept['name'],
                 'use_global' => false,
                 'active' => array_key_exists('active', $curDept) ? !empty($curDept['active']) : !empty($defDept['active']),
-                'levels' => (is_array($curDept['levels'] ?? null) && !empty($curDept['levels'])) ? $curDept['levels'] : ($defDept['levels'] ?? []),
+                'levels' => $topLevels,
+                'areas' => $existingAreas,
             ];
         }
 
@@ -329,6 +374,14 @@ class SettingsController extends BaseController
             'notifications' => $notifications,
             'escalation' => $escalation,
             'preDue' => $preDue,
+            'hasSyncBackup' => (function () use ($orgId): bool {
+                $bk = $this->getJson($orgId, 'ui_escalation_sync_backup', []);
+                return !empty($bk['data']);
+            })(),
+            'lastSyncBackupAt' => (function () use ($orgId): string {
+                $bk = $this->getJson($orgId, 'ui_escalation_sync_backup', []);
+                return (string) ($bk['snapshot_at'] ?? '');
+            })(),
             'templates' => $templates,
             'selectedTemplateId' => $selTpl,
             'automationLogs' => $logs,
@@ -481,36 +534,77 @@ class SettingsController extends BaseController
         $userIdStmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND status = ' . "'active'");
         $userIdStmt->execute([$orgId]);
         $validUserIds = array_map('intval', $userIdStmt->fetchAll(\PDO::FETCH_COLUMN));
+        $parseLevels = function (array $rawLevels) use ($fixedThresholds, $validUserIds): array {
+            $out = [];
+            foreach ($rawLevels as $idx => $L) {
+                if (!is_array($L)) {
+                    continue;
+                }
+                $toUid = (int) ($L['to'] ?? 0);
+                if ($toUid > 0 && !in_array($toUid, $validUserIds, true)) {
+                    $toUid = 0;
+                }
+                $out[] = [
+                    'd' => $fixedThresholds[$idx] ?? max(0, (int) ($L['d'] ?? 0)),
+                    'to' => $toUid,
+                    'tpl' => trim((string) ($L['tpl'] ?? '')),
+                ];
+            }
+            return $out;
+        };
+
         foreach ($base['depts'] as $slug => $def) {
             $row = $esc[$slug] ?? [];
-            $useGlobal = false;
-            $levels = [];
-            if (!empty($row['levels']) && is_array($row['levels'])) {
-                foreach ($row['levels'] as $idx => $L) {
-                    if (!is_array($L)) {
+
+            // ---- Parse compliance "areas" (new structure) ----
+            $areas = [];
+            $rawAreas = $row['areas'] ?? null;
+            if (is_array($rawAreas) && !empty($rawAreas)) {
+                foreach ($rawAreas as $aSlug => $area) {
+                    if (!is_array($area)) {
                         continue;
                     }
-                    // "to" is now the user_id of the person to escalate to (0 = unset).
-                    $toUid = (int) ($L['to'] ?? 0);
-                    if ($toUid > 0 && !in_array($toUid, $validUserIds, true)) {
-                        $toUid = 0; // foreign / inactive id — reject silently
+                    $areaSlug = preg_replace('/[^a-z0-9_\-]/', '', strtolower((string) $aSlug));
+                    if ($areaSlug === '') {
+                        continue;
                     }
-                    $levels[] = [
-                        // Keep escalation dates fixed to T+0, T+3, T+7, T+14.
-                        'd' => $fixedThresholds[$idx] ?? max(0, (int) ($L['d'] ?? 0)),
-                        'to' => $toUid,
-                        'tpl' => trim($L['tpl'] ?? ''),
+                    $areaName = trim((string) ($area['name'] ?? ''));
+                    if ($areaName === '') {
+                        $areaName = ($areaSlug === 'default') ? 'Default' : ucfirst($areaSlug);
+                    }
+                    $areaLevels = is_array($area['levels'] ?? null) ? $parseLevels($area['levels']) : [];
+                    if (empty($areaLevels)) {
+                        $areaLevels = $def['levels'] ?? [];
+                    }
+                    $areas[$areaSlug] = [
+                        'name' => $areaName,
+                        'levels' => $areaLevels,
                     ];
                 }
             }
-            if (empty($levels)) {
-                $levels = $def['levels'] ?? [];
+
+            // Fallback: parse old single-row "levels" structure if no areas posted
+            if (empty($areas) && !empty($row['levels']) && is_array($row['levels'])) {
+                $areas['default'] = [
+                    'name' => 'Default',
+                    'levels' => $parseLevels($row['levels']),
+                ];
             }
+
+            // Always ensure a "default" area exists
+            if (!isset($areas['default'])) {
+                $areas = ['default' => ['name' => 'Default', 'levels' => $def['levels'] ?? []]] + $areas;
+            }
+
+            // Top-level "levels" mirrors "default" area for backward compatibility
+            $topLevels = $areas['default']['levels'] ?? ($def['levels'] ?? []);
+
             $out['depts'][$slug] = [
                 'name' => $def['name'],
                 'use_global' => false,
                 'active' => true,
-                'levels' => $levels,
+                'levels' => $topLevels,
+                'areas' => $areas,
             ];
         }
         $this->setJson($orgId, self::KEYS['escalation'], $out);
@@ -567,31 +661,76 @@ class SettingsController extends BaseController
         $pre['body'] = trim($_POST['pre_body'] ?? $pre['body']);
         $depts = [];
         $postDepts = $_POST['pre_dept'] ?? [];
+        $validUid = function ($uid) use ($activeUserMap) {
+            $uid = (int) $uid;
+            return isset($activeUserMap[$uid]) ? $uid : 0;
+        };
         if (is_array($postDepts)) {
             foreach ($base['depts'] as $i => $d) {
                 $pd = $postDepts[$i] ?? [];
-                $ownerId = (int) ($pd['owner_id'] ?? 0);
-                $mgrId = (int) ($pd['mgr_id'] ?? 0);
-                $headId = (int) ($pd['head_id'] ?? 0);
-                if (!isset($activeUserMap[$ownerId])) {
-                    $ownerId = 0;
+
+                // ---- Parse compliance "areas" (new structure) ----
+                $areas = [];
+                $rawAreas = $pd['areas'] ?? null;
+                if (is_array($rawAreas)) {
+                    foreach ($rawAreas as $aSlug => $area) {
+                        if (!is_array($area)) {
+                            continue;
+                        }
+                        $areaSlug = preg_replace('/[^a-z0-9_\-]/', '', strtolower((string) $aSlug));
+                        if ($areaSlug === '') {
+                            continue;
+                        }
+                        $areaName = trim((string) ($area['name'] ?? ''));
+                        if ($areaName === '') {
+                            $areaName = ($areaSlug === 'default') ? 'Default' : ucfirst($areaSlug);
+                        }
+                        $aOwn = $validUid($area['owner_id'] ?? 0);
+                        $aMgr = $validUid($area['mgr_id'] ?? 0);
+                        $aHd  = $validUid($area['head_id'] ?? 0);
+                        $areas[$areaSlug] = [
+                            'name' => $areaName,
+                            'owner_id' => $aOwn,
+                            'mgr_id'   => $aMgr,
+                            'head_id'  => $aHd,
+                            'owner'    => $aOwn > 0 ? ($activeUserMap[$aOwn] ?? '') : '',
+                            'mgr'      => $aMgr > 0 ? ($activeUserMap[$aMgr] ?? '') : '',
+                            'head'     => $aHd  > 0 ? ($activeUserMap[$aHd]  ?? '') : '',
+                        ];
+                    }
                 }
-                if (!isset($activeUserMap[$mgrId])) {
-                    $mgrId = 0;
+
+                // ---- Determine top-level (Default area) user IDs ----
+                $defaultArea = $areas['default'] ?? null;
+                if ($defaultArea) {
+                    $ownerId = (int) $defaultArea['owner_id'];
+                    $mgrId   = (int) $defaultArea['mgr_id'];
+                    $headId  = (int) $defaultArea['head_id'];
+                } else {
+                    $ownerId = $validUid($pd['owner_id'] ?? 0);
+                    $mgrId   = $validUid($pd['mgr_id']   ?? 0);
+                    $headId  = $validUid($pd['head_id']  ?? 0);
+                    $areas['default'] = [
+                        'name' => 'Default',
+                        'owner_id' => $ownerId,
+                        'mgr_id'   => $mgrId,
+                        'head_id'  => $headId,
+                        'owner'    => $ownerId > 0 ? ($activeUserMap[$ownerId] ?? '') : '',
+                        'mgr'      => $mgrId   > 0 ? ($activeUserMap[$mgrId]   ?? '') : '',
+                        'head'     => $headId  > 0 ? ($activeUserMap[$headId]  ?? '') : '',
+                    ];
                 }
-                if (!isset($activeUserMap[$headId])) {
-                    $headId = 0;
-                }
+
                 $depts[] = [
                     'name' => $d['name'],
                     'owner_id' => $ownerId,
                     'mgr_id' => $mgrId,
                     'head_id' => $headId,
-                    // Keep labels for backward compatibility with existing UI/log usages.
                     'owner' => $ownerId > 0 ? ($activeUserMap[$ownerId] ?? '') : '',
-                    'mgr' => $mgrId > 0 ? ($activeUserMap[$mgrId] ?? '') : '',
-                    'head' => $headId > 0 ? ($activeUserMap[$headId] ?? '') : '',
+                    'mgr'   => $mgrId   > 0 ? ($activeUserMap[$mgrId]   ?? '') : '',
+                    'head'  => $headId  > 0 ? ($activeUserMap[$headId]  ?? '') : '',
                     'esc' => !empty($pd['esc']),
+                    'areas' => $areas,
                 ];
             }
         } else {
@@ -656,5 +795,215 @@ class SettingsController extends BaseController
         }
         $_SESSION['flash_success'] = 'Settings saved.';
         $this->redirect('/settings');
+    }
+
+    /**
+     * Sync teams from Authority Matrix into Escalation Matrix + Pre-Due Reminder.
+     *
+     * For every active (department, compliance_area) row in authority_matrix:
+     *   - Creates a team entry in escalation settings with the maker/reviewer/approver
+     *     wired as Level 1/2/3/4 escalate-to users
+     *   - Creates a team entry in pre-due settings with owner/manager/head set
+     *     from maker/reviewer/approver
+     *
+     * Modes (POST param "sync_mode"):
+     *   - "skip_existing" (default): only creates teams that don't already exist
+     *   - "overwrite":              replaces existing teams' user mappings
+     */
+    public function syncTeamsFromAuthorityMatrix(): void
+    {
+        Auth::requireRole('admin');
+        $orgId = Auth::organizationId();
+        $mode  = ($_POST['sync_mode'] ?? 'skip_existing') === 'overwrite' ? 'overwrite' : 'skip_existing';
+        $returnTo = (string) ($_POST['return_to'] ?? '/settings?tab=automation&sub=escalation');
+
+        // Validate user IDs (active users in this org)
+        $uStmt = $this->db->prepare('SELECT id FROM users WHERE organization_id = ? AND status = ?');
+        $uStmt->execute([$orgId, 'active']);
+        $validUids = array_map('intval', $uStmt->fetchAll(\PDO::FETCH_COLUMN));
+        $validUidSet = array_fill_keys($validUids, true);
+        $validUid = static function ($uid) use ($validUidSet): int {
+            $uid = (int) $uid;
+            return isset($validUidSet[$uid]) ? $uid : 0;
+        };
+
+        // Pull all active (dept, area, maker, reviewer, approver) combos
+        $stmt = $this->db->prepare("
+            SELECT department, compliance_area,
+                   MIN(maker_id)    AS maker_id,
+                   MIN(reviewer_id) AS reviewer_id,
+                   MIN(approver_id) AS approver_id
+              FROM authority_matrix
+             WHERE organization_id = ? AND status = 'active'
+               AND compliance_area IS NOT NULL AND compliance_area <> ''
+          GROUP BY department, compliance_area
+          ORDER BY department, compliance_area
+        ");
+        $stmt->execute([$orgId]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        if (empty($rows)) {
+            $_SESSION['flash_error'] = 'No active rows with a Compliance Area found in Authority Matrix. Add rows there first, then sync again.';
+            $this->redirect($returnTo);
+        }
+
+        $deptSlug = static function (string $name): string {
+            $s = strtolower(trim($name));
+            $aliases = [
+                'human resource'  => 'hr',
+                'human resources' => 'hr',
+                'risk'            => 'risk',
+                'risk management' => 'risk',
+            ];
+            if (isset($aliases[$s])) return $aliases[$s];
+            $s = preg_replace('/[^a-z0-9_\-\s]/', '', $s);
+            $s = preg_replace('/\s+/', '-', (string) $s);
+            return preg_replace('/-+/', '-', (string) $s) ?: '';
+        };
+        $areaSlug = static function (string $name): string {
+            $s = strtolower(trim($name));
+            $s = preg_replace('/[^a-z0-9_\-\s]/', '', $s);
+            $s = preg_replace('/\s+/', '-', (string) $s);
+            return preg_replace('/-+/', '-', (string) $s) ?: '';
+        };
+
+        // Load current settings
+        $esc = $this->getJson($orgId, self::KEYS['escalation'], $this->defaultEscalation());
+        $esc = $this->normalizeEscalation($esc, $this->defaultEscalation());
+        $pre = $this->getJson($orgId, self::KEYS['pre_due'], $this->defaultPreDue());
+
+        // ── SAFETY NET: Snapshot current state so user can Undo this sync ──
+        $this->setJson($orgId, 'ui_escalation_sync_backup', [
+            'snapshot_at' => date('Y-m-d H:i:s'),
+            'data'        => $esc,
+        ]);
+        $this->setJson($orgId, 'ui_pre_due_sync_backup', [
+            'snapshot_at' => date('Y-m-d H:i:s'),
+            'data'        => $pre,
+        ]);
+
+        $created = 0; $skipped = 0; $updated = 0;
+        $skippedUnknownDept = [];
+
+        // Map pre-due dept names → index in $pre['depts']
+        $preIdxByName = [];
+        foreach (($pre['depts'] ?? []) as $i => $d) {
+            $nm = trim((string) ($d['name'] ?? ''));
+            if ($nm !== '') $preIdxByName[strtolower($nm)] = $i;
+        }
+
+        foreach ($rows as $row) {
+            $deptName = trim((string) ($row['department'] ?? ''));
+            $areaName = trim((string) ($row['compliance_area'] ?? ''));
+            if ($deptName === '' || $areaName === '') { continue; }
+
+            $dSlug = $deptSlug($deptName);
+            $aSlug = $areaSlug($areaName);
+            if ($dSlug === '' || $aSlug === '' || $aSlug === 'default') { continue; }
+
+            $makerId    = $validUid($row['maker_id']    ?? 0);
+            $reviewerId = $validUid($row['reviewer_id'] ?? 0);
+            $approverId = $validUid($row['approver_id'] ?? 0);
+
+            // ─── ESCALATION ──────────────────────────────────────────────
+            if (!isset($esc['depts'][$dSlug])) {
+                // Department slug not in default list → skip (unknown dept)
+                $skipped++;
+                $skippedUnknownDept[$deptName] = true;
+                continue;
+            }
+            $escAreas = $esc['depts'][$dSlug]['areas'] ?? [];
+            $exists = isset($escAreas[$aSlug]);
+            if ($exists && $mode === 'skip_existing') {
+                $skipped++;
+            } else {
+                $fixedThresholds = [0, 3, 7, 14];
+                $tpls = ['Escalation Level 1', 'Escalation Level 2', 'Escalation Level 2', 'High Risk Escalation'];
+                // Level 1 = Maker, Level 2 = Reviewer, Level 3 & 4 = Approver
+                $levelUsers = [$makerId, $reviewerId ?: $makerId, $approverId ?: $reviewerId ?: $makerId, $approverId ?: $reviewerId ?: $makerId];
+                $levels = [];
+                for ($i = 0; $i < 4; $i++) {
+                    $levels[] = [
+                        'd'   => $fixedThresholds[$i],
+                        'to'  => (int) $levelUsers[$i],
+                        'tpl' => $tpls[$i],
+                    ];
+                }
+                $escAreas[$aSlug] = [
+                    'name'   => $areaName,
+                    'levels' => $levels,
+                ];
+                $esc['depts'][$dSlug]['areas'] = $escAreas;
+                if ($exists) { $updated++; } else { $created++; }
+            }
+
+            // ─── PRE-DUE ─────────────────────────────────────────────────
+            $preIdx = $preIdxByName[strtolower($deptName)] ?? null;
+            if ($preIdx === null) {
+                // Try common aliases
+                foreach (['Human Resources' => 'human resource', 'HR' => 'human resource'] as $a => $b) {
+                    if (isset($preIdxByName[strtolower($a)]) && strtolower($deptName) === $b) {
+                        $preIdx = $preIdxByName[strtolower($a)];
+                        break;
+                    }
+                }
+            }
+            if ($preIdx !== null) {
+                $pdAreas = is_array($pre['depts'][$preIdx]['areas'] ?? null) ? $pre['depts'][$preIdx]['areas'] : [];
+                $pdExists = isset($pdAreas[$aSlug]);
+                if (!($pdExists && $mode === 'skip_existing')) {
+                    $pdAreas[$aSlug] = [
+                        'name'     => $areaName,
+                        'owner_id' => $makerId,
+                        'mgr_id'   => $reviewerId,
+                        'head_id'  => $approverId,
+                    ];
+                    $pre['depts'][$preIdx]['areas'] = $pdAreas;
+                }
+            }
+        }
+
+        // Persist
+        $this->setJson($orgId, self::KEYS['escalation'], $esc);
+        $this->setJson($orgId, self::KEYS['pre_due'], $pre);
+
+        $msg = "Sync complete. Created {$created} new team(s), updated {$updated}, skipped {$skipped}.";
+        if (!empty($skippedUnknownDept)) {
+            $msg .= ' ⚠ These Authority Matrix departments are not in the standard list and were skipped: ' . implode(', ', array_keys($skippedUnknownDept)) . '. (You can add their teams manually if needed.)';
+        }
+        $msg .= ' 💾 A backup was created — use "Undo Last Sync" to revert if needed.';
+        $_SESSION['flash_success'] = $msg;
+        $this->redirect($returnTo);
+    }
+
+    /**
+     * Undo the last sync — restores the JSON snapshot taken before the most
+     * recent syncTeamsFromAuthorityMatrix() call. Safe: nothing else in the
+     * compliance system is touched. If no backup exists, errors out gracefully.
+     */
+    public function undoSyncTeamsFromMatrix(): void
+    {
+        Auth::requireRole('admin');
+        $orgId = Auth::organizationId();
+        $returnTo = (string) ($_POST['return_to'] ?? '/settings?tab=automation&sub=escalation');
+
+        $escBackup = $this->getJson($orgId, 'ui_escalation_sync_backup', []);
+        $preBackup = $this->getJson($orgId, 'ui_pre_due_sync_backup', []);
+
+        if (empty($escBackup['data']) || empty($preBackup['data'])) {
+            $_SESSION['flash_error'] = 'No sync backup available to undo. (Backups are only created when you click "Sync Now".)';
+            $this->redirect($returnTo);
+        }
+
+        $this->setJson($orgId, self::KEYS['escalation'], $escBackup['data']);
+        $this->setJson($orgId, self::KEYS['pre_due'],    $preBackup['data']);
+
+        // Clear the backup so undo can't be repeated by mistake
+        $this->setJson($orgId, 'ui_escalation_sync_backup', []);
+        $this->setJson($orgId, 'ui_pre_due_sync_backup', []);
+
+        $when = (string) ($escBackup['snapshot_at'] ?? '');
+        $_SESSION['flash_success'] = '✓ Sync undone. Restored escalation & pre-due settings to the snapshot from ' . $when . '.';
+        $this->redirect($returnTo);
     }
 }

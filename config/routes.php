@@ -123,6 +123,8 @@ return [
         '/settings/security' => ['SettingsController', 'saveSecurity'],
         '/settings/escalation' => ['SettingsController', 'saveEscalation'],
         '/settings/pre-due' => ['SettingsController', 'savePreDue'],
+        '/settings/sync-teams-from-matrix' => ['SettingsController', 'syncTeamsFromAuthorityMatrix'],
+        '/settings/undo-sync-teams' => ['SettingsController', 'undoSyncTeamsFromMatrix'],
         '/settings/email-template' => ['SettingsController', 'saveEmailTemplate'],
         '/financial-ratios/upload' => ['FinancialRatiosController', 'upload'],
         '/financial-ratios/upload-single/{id}' => ['FinancialRatiosController', 'uploadSingleRatio'],

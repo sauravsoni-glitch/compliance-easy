@@ -267,11 +267,47 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
     ?>
     <h3 class="card-title mt-3">Escalation Matrix</h3>
     <p class="text-muted text-sm">Smart engine active. Department digest uses fixed escalation slots: <strong>T+0, T+3, T+7, T+14</strong> (days <strong>after</strong> the due date — overdue only).</p>
+
+    <!-- Sync from Authority Matrix card -->
+    <div class="st-sync-card" style="background:linear-gradient(135deg,#fef9f9 0%,#fff5f5 100%);border:1.5px solid #fecaca;border-radius:12px;padding:16px 20px;margin:14px 0 18px 0;display:flex;align-items:center;gap:16px;box-shadow:0 2px 8px rgba(220,38,38,0.06);flex-wrap:wrap;">
+        <div style="width:44px;height:44px;border-radius:11px;background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 4px 10px rgba(220,38,38,0.25);">🔄</div>
+        <div style="flex:1;min-width:240px;">
+            <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:3px;">Auto-create teams from Authority Matrix</div>
+            <div style="font-size:12px;color:#64748b;line-height:1.5;">Pulls every active <strong>(Department + Compliance Area)</strong> combo and creates matching teams here with Maker/Reviewer/Approver wired in. Existing departments without matching entries are <strong>preserved</strong>. All user picks remain editable. A backup is taken before each sync so you can undo.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/sync-teams-from-matrix" style="display:flex;gap:8px;align-items:center;" onsubmit="return confirm('This will read Authority Matrix and create teams in both Escalation Matrix and Pre-Due Reminder. A backup will be taken so you can undo. Continue?');">
+                <input type="hidden" name="return_to" value="/settings?tab=automation&sub=escalation">
+                <select name="sync_mode" style="padding:7px 10px;font-size:12px;border:1.5px solid #fecaca;border-radius:7px;background:#fff;color:#0f172a;font-weight:500;cursor:pointer;">
+                    <option value="skip_existing" selected>Skip existing teams</option>
+                    <option value="overwrite">Overwrite (refresh users)</option>
+                </select>
+                <button type="submit" style="background:#dc2626;border:1.5px solid #dc2626;color:#fff;padding:8px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(220,38,38,0.25);transition:all 0.15s;" onmouseover="this.style.background='#b91c1c';this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(220,38,38,0.35)';" onmouseout="this.style.background='#dc2626';this.style.transform='translateY(0)';this.style.boxShadow='0 2px 6px rgba(220,38,38,0.25)';">🔄 Sync Now</button>
+            </form>
+            <?php if (!empty($hasSyncBackup)): ?>
+            <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/undo-sync-teams" onsubmit="return confirm('Restore escalation & pre-due settings to the state BEFORE the last sync? This will discard any changes you saved since then.');">
+                <input type="hidden" name="return_to" value="/settings?tab=automation&sub=escalation">
+                <button type="submit" title="Restore the snapshot taken before the last sync (<?= htmlspecialchars($lastSyncBackupAt ?? '') ?>)" style="background:#fff;border:1.5px solid #9ca3af;color:#374151;padding:8px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='#dc2626';this.style.color='#dc2626';" onmouseout="this.style.borderColor='#9ca3af';this.style.color='#374151';">↺ Undo Last Sync</button>
+            </form>
+            <?php endif; ?>
+        </div>
+    </div>
     <div class="alert alert-info text-sm mb-3" style="border-radius:8px;">
         <strong>Why “Skipped” or no mail?</strong> Escalation runs on <strong>past due</strong> dates (calendar “today” uses your app timezone, typically IST). Items due <strong>today or later</strong> are skipped for escalation. You also need <strong>enabled</strong> templates of type <strong>Escalation</strong> under Notification Templates, the maker’s email, and working mail settings (<code>config/mail.php</code> / env).
     </div>
-    <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/escalation">
+    <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/escalation" id="st-esc-form">
         <input type="hidden" name="esc_action" id="esc_action_field" value="save">
+        <div class="st-unsaved-banner" id="st-esc-unsaved-banner">
+            <div class="st-unsaved-banner-icon">!</div>
+            <div class="st-unsaved-banner-text">
+                <div class="st-unsaved-banner-title">
+                    <span class="st-unsaved-banner-title-dot"></span>
+                    You have unsaved changes
+                </div>
+                <div>You've added, removed, or modified a team. Click <strong>Save Now</strong> to keep your changes — otherwise they will be lost when you leave this page.</div>
+            </div>
+            <button type="submit" class="st-unsaved-banner-btn" onclick="document.getElementById('esc_action_field').value='save';">Save Now</button>
+        </div>
         <div class="st-toggle-row st-toggle-inline">
             <div>
                 <strong>Enable Department-wise Escalation</strong>
@@ -336,39 +372,609 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
             </div>
         </div>
         <h4 class="st-subhead mt-3">Department Escalation Configuration</h4>
+        <p class="text-muted text-sm mb-2">Each department can have multiple <strong>compliance areas</strong> (e.g. GST, TDS, PF). Every area has its own escalation schedule. When a compliance is created without a specific area, the <strong>Default</strong> schedule is used.</p>
+
+        <style>
+            /* ───── Shared Modal Styles (used by both Add Team modals) ───── */
+            .st-modal-backdrop {
+                position:fixed;
+                inset:0;
+                background:rgba(15,23,42,0.6);
+                backdrop-filter:blur(2px);
+                -webkit-backdrop-filter:blur(2px);
+                z-index:10000;
+                overflow-y:auto;
+                animation:stFadeIn 0.15s ease-out;
+            }
+            @keyframes stFadeIn {
+                from { opacity:0; }
+                to   { opacity:1; }
+            }
+            .st-modal-wrap {
+                min-height:100%;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                padding:24px 16px;
+                box-sizing:border-box;
+            }
+            .st-modal-card {
+                background:#fff;
+                border-radius:14px;
+                width:480px;
+                max-width:100%;
+                box-shadow:0 25px 80px rgba(0,0,0,0.35),0 0 0 1px rgba(0,0,0,0.05);
+                animation:stSlideUp 0.2s cubic-bezier(0.16,1,0.3,1);
+                overflow:hidden;
+            }
+            @keyframes stSlideUp {
+                from { opacity:0; transform:translateY(20px) scale(0.97); }
+                to   { opacity:1; transform:translateY(0) scale(1); }
+            }
+            .st-modal-header {
+                display:flex;
+                align-items:flex-start;
+                gap:14px;
+                padding:22px 24px 14px 24px;
+                border-bottom:1px solid #f1f5f9;
+                position:relative;
+            }
+            .st-modal-icon {
+                width:44px;
+                height:44px;
+                border-radius:11px;
+                background:linear-gradient(135deg,#fee2e2 0%,#fecaca 100%);
+                color:#dc2626;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                font-size:22px;
+                flex-shrink:0;
+            }
+            .st-modal-title {
+                margin:0;
+                font-size:17px;
+                font-weight:700;
+                color:#0f172a;
+                line-height:1.3;
+            }
+            .st-modal-subtitle {
+                margin:3px 0 0 0;
+                font-size:13px;
+                color:#64748b;
+            }
+            .st-modal-subtitle strong {
+                color:#0f172a;
+                font-weight:600;
+            }
+            .st-modal-close {
+                position:absolute;
+                top:14px;
+                right:14px;
+                background:transparent;
+                border:none;
+                width:30px;
+                height:30px;
+                border-radius:8px;
+                font-size:22px;
+                color:#94a3b8;
+                cursor:pointer;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                line-height:1;
+                padding:0;
+                transition:all 0.15s;
+            }
+            .st-modal-close:hover {
+                background:#f1f5f9;
+                color:#0f172a;
+            }
+            .st-modal-body {
+                padding:18px 24px 8px 24px;
+            }
+            .st-modal-field {
+                margin-bottom:16px;
+            }
+            .st-modal-label {
+                display:block;
+                font-size:13px;
+                font-weight:600;
+                color:#1e293b;
+                margin-bottom:7px;
+            }
+            .st-modal-req {
+                color:#dc2626;
+            }
+            .st-modal-input {
+                width:100%;
+                padding:10px 12px;
+                font-size:14px;
+                border:1px solid #cbd5e1;
+                border-radius:8px;
+                background:#fff;
+                color:#0f172a;
+                box-sizing:border-box;
+                transition:border-color 0.15s,box-shadow 0.15s;
+            }
+            .st-modal-input:focus {
+                outline:none;
+                border-color:#dc2626;
+                box-shadow:0 0 0 3px rgba(220,38,38,0.12);
+            }
+            .st-modal-help {
+                margin:6px 0 0 0;
+                font-size:12px;
+                color:#64748b;
+            }
+            .st-modal-footer {
+                display:flex;
+                justify-content:flex-end;
+                gap:10px;
+                padding:14px 24px 22px 24px;
+                background:#fafafa;
+                border-top:1px solid #f1f5f9;
+            }
+            .st-modal-btn {
+                padding:9px 18px;
+                font-size:13px;
+                font-weight:600;
+                border-radius:8px;
+                cursor:pointer;
+                border:1px solid transparent;
+                transition:all 0.15s;
+            }
+            .st-modal-btn-secondary {
+                background:#fff;
+                border-color:#cbd5e1;
+                color:#475569;
+            }
+            .st-modal-btn-secondary:hover {
+                background:#f8fafc;
+                border-color:#94a3b8;
+                color:#0f172a;
+            }
+            .st-modal-btn-primary {
+                background:#dc2626;
+                border-color:#dc2626;
+                color:#fff;
+                box-shadow:0 1px 2px rgba(220,38,38,0.2);
+            }
+            .st-modal-btn-primary:hover {
+                background:#b91c1c;
+                border-color:#b91c1c;
+                box-shadow:0 4px 10px rgba(220,38,38,0.3);
+            }
+            /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+            /* Escalation Matrix Cards — Beautified Red Theme            */
+            /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+            .st-esc-dept {
+                background:#fff !important;
+                border:1px solid #e5e7eb !important;
+                border-radius:14px !important;
+                margin-top:20px !important;
+                box-shadow:0 1px 3px rgba(0,0,0,0.03), 0 1px 2px rgba(0,0,0,0.02);
+                overflow:hidden;
+                transition:box-shadow 0.2s, border-color 0.2s;
+            }
+            .st-esc-dept:hover {
+                box-shadow:0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.03);
+                border-color:#e0e0e0 !important;
+            }
+            .st-esc-dept-head {
+                display:flex !important;
+                justify-content:space-between !important;
+                align-items:center !important;
+                padding:16px 22px !important;
+                background:linear-gradient(180deg,#ffffff 0%,#fafafa 100%) !important;
+                border-bottom:1px solid #f1f5f9 !important;
+            }
+            .st-esc-dept-title {
+                display:flex;
+                align-items:center;
+                gap:12px;
+                font-size:15px;
+                font-weight:700;
+                color:#0f172a;
+                letter-spacing:-0.01em;
+            }
+            .st-esc-dept-title .st-active-dot {
+                width:8px !important;
+                height:8px !important;
+                border-radius:50% !important;
+                background:#dc2626 !important;
+                display:inline-block !important;
+                box-shadow:0 0 0 3px rgba(220,38,38,0.15) !important;
+            }
+            .st-esc-area-chip {
+                background:linear-gradient(180deg,rgba(220,38,38,0.08) 0%,rgba(220,38,38,0.12) 100%) !important;
+                color:#b91c1c !important;
+                font-size:11px;
+                font-weight:700;
+                padding:3px 10px;
+                border-radius:20px;
+                letter-spacing:0.2px;
+                border:1px solid rgba(220,38,38,0.15);
+            }
+            .st-esc-add-btn {
+                background:#fff;
+                border:1.5px solid #dc2626 !important;
+                color:#dc2626 !important;
+                padding:7px 14px;
+                border-radius:8px;
+                font-size:12px;
+                font-weight:600;
+                cursor:pointer;
+                transition:all 0.18s;
+                display:inline-flex;
+                align-items:center;
+                gap:5px;
+                box-shadow:0 1px 2px rgba(220,38,38,0.06);
+            }
+            .st-esc-add-btn:hover {
+                background:#dc2626 !important;
+                color:#fff !important;
+                transform:translateY(-1px);
+                box-shadow:0 4px 10px rgba(220,38,38,0.25);
+            }
+            .st-esc-areas {
+                padding:18px 22px 20px 22px;
+                display:flex;
+                flex-direction:column;
+                gap:14px;
+            }
+            .st-esc-area {
+                border:1px solid #f1f5f9;
+                border-radius:10px;
+                padding:16px 18px;
+                background:#fff;
+                transition:border-color 0.18s, box-shadow 0.18s;
+                position:relative;
+            }
+            .st-esc-area:hover {
+                border-color:#e2e8f0;
+                box-shadow:0 2px 6px rgba(0,0,0,0.04);
+            }
+            .st-esc-area--default {
+                background:linear-gradient(180deg,#fef9f9 0%,#fffafa 100%) !important;
+                border:1px solid #fecaca !important;
+                position:relative;
+            }
+            .st-esc-area--default::before {
+                content:"";
+                position:absolute;
+                left:0; top:0; bottom:0;
+                width:3px;
+                background:linear-gradient(180deg,#dc2626 0%,#b91c1c 100%);
+                border-radius:10px 0 0 10px;
+            }
+            .st-esc-area--custom {
+                background:#ffffff !important;
+                border:1px solid #e5e7eb !important;
+                position:relative;
+            }
+            .st-esc-area--custom::before {
+                content:"";
+                position:absolute;
+                left:0; top:0; bottom:0;
+                width:3px;
+                background:linear-gradient(180deg,#94a3b8 0%,#64748b 100%);
+                border-radius:10px 0 0 10px;
+            }
+            .st-esc-area-head {
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:10px;
+                margin-bottom:14px;
+                padding-bottom:10px;
+                border-bottom:1px dashed #f1f5f9;
+            }
+            .st-esc-area-name {
+                display:flex;
+                align-items:center;
+                gap:10px;
+                font-size:14px;
+                font-weight:700;
+                color:#0f172a;
+                letter-spacing:-0.01em;
+            }
+            .st-esc-area-name .st-tag {
+                font-size:9px;
+                font-weight:700;
+                padding:3px 8px;
+                border-radius:12px;
+                text-transform:uppercase;
+                letter-spacing:0.5px;
+                display:inline-flex;
+                align-items:center;
+                gap:3px;
+            }
+            .st-esc-area-name .st-tag-default {
+                background:linear-gradient(180deg,#fee2e2 0%,#fecaca 100%) !important;
+                color:#991b1b !important;
+                border:1px solid #fca5a5;
+            }
+            .st-esc-area-name .st-tag-custom {
+                background:linear-gradient(180deg,#f1f5f9 0%,#e2e8f0 100%) !important;
+                color:#475569 !important;
+                border:1px solid #cbd5e1;
+            }
+            .st-esc-area-hint {
+                font-size:12px;
+                color:#64748b;
+                margin-left:4px;
+                font-weight:400;
+                font-style:italic;
+            }
+            .st-esc-rm-btn {
+                background:#fff;
+                border:1.5px solid #fecaca;
+                color:#dc2626;
+                font-size:11px;
+                font-weight:600;
+                padding:5px 11px;
+                border-radius:6px;
+                cursor:pointer;
+                transition:all 0.18s;
+            }
+            .st-esc-rm-btn:hover {
+                background:#dc2626;
+                border-color:#dc2626;
+                color:#fff;
+                box-shadow:0 2px 6px rgba(220,38,38,0.2);
+            }
+
+            /* T-slot pills (T+0, T+3, T+7, T+14) — elegant red gradient */
+            .st-esc-area .st-levels-table .badge,
+            .st-esc-area .st-levels-table .badge-info {
+                background:linear-gradient(180deg,#fee2e2 0%,#fecaca 100%) !important;
+                color:#b91c1c !important;
+                border:1px solid #fca5a5 !important;
+                font-weight:700 !important;
+                padding:4px 11px !important;
+                border-radius:14px !important;
+                font-size:11px !important;
+                display:inline-block;
+                letter-spacing:0.3px;
+                box-shadow:0 1px 2px rgba(220,38,38,0.08);
+            }
+
+            /* Levels table — clean modern design */
+            .st-esc-area .st-levels-table {
+                width:100%;
+                background:#fff;
+                border-radius:10px;
+                overflow:hidden;
+                border:1px solid #f1f5f9;
+                margin-top:6px;
+                box-shadow:0 1px 2px rgba(0,0,0,0.02);
+            }
+            .st-esc-area .st-levels-table thead th {
+                background:linear-gradient(180deg,#fafafa 0%,#f8fafc 100%) !important;
+                color:#64748b !important;
+                font-size:10px !important;
+                font-weight:700 !important;
+                text-transform:uppercase !important;
+                letter-spacing:0.6px !important;
+                padding:11px 14px !important;
+                border-bottom:1px solid #f1f5f9 !important;
+                text-align:left;
+            }
+            .st-esc-area .st-levels-table tbody td {
+                padding:12px 14px !important;
+                border-bottom:1px solid #f8fafc !important;
+                font-size:13px !important;
+                color:#1f2937 !important;
+                vertical-align:middle;
+                font-weight:500;
+            }
+            .st-esc-area .st-levels-table tbody tr:last-child td {
+                border-bottom:none !important;
+            }
+            .st-esc-area .st-levels-table tbody tr:hover td {
+                background:linear-gradient(180deg,#fefefe 0%,#fafafa 100%) !important;
+            }
+            .st-esc-area .st-levels-table td:first-child {
+                font-weight:700 !important;
+                color:#dc2626 !important;
+                width:50px;
+                text-align:center;
+            }
+            .st-esc-area .st-levels-table select {
+                padding:8px 12px !important;
+                font-size:13px !important;
+                border:1.5px solid #e2e8f0 !important;
+                border-radius:8px !important;
+                background:#fff !important;
+                width:100%;
+                color:#0f172a;
+                font-weight:500;
+                cursor:pointer;
+                transition:border-color 0.15s, box-shadow 0.15s;
+            }
+            .st-esc-area .st-levels-table select:hover {
+                border-color:#cbd5e1 !important;
+            }
+            .st-esc-area .st-levels-table select:focus {
+                outline:none !important;
+                border-color:#dc2626 !important;
+                box-shadow:0 0 0 3px rgba(220,38,38,0.12) !important;
+            }
+
+            /* ━━━ Unsaved changes banner — premium look (Escalation tab) ━━━ */
+            .st-unsaved-banner {
+                position:sticky;
+                top:12px;
+                z-index:50;
+                background:linear-gradient(135deg,#ffffff 0%,#fef9f9 50%,#fef2f2 100%);
+                border:2px solid #fca5a5;
+                border-radius:16px;
+                padding:18px 22px;
+                margin:18px 0 12px 0;
+                display:none;
+                align-items:center;
+                gap:18px;
+                box-shadow:0 10px 30px rgba(220,38,38,0.15), 0 4px 8px rgba(220,38,38,0.08), 0 0 0 4px rgba(254,202,202,0.4);
+                animation:stSlideDown 0.4s cubic-bezier(0.16,1,0.3,1), stBannerBreathe 3.5s ease-in-out 0.5s infinite;
+                overflow:hidden;
+            }
+            .st-unsaved-banner::before {
+                content:"";
+                position:absolute;
+                left:0; top:0; bottom:0;
+                width:5px;
+                background:linear-gradient(180deg,#dc2626 0%,#b91c1c 100%);
+                box-shadow:0 0 18px rgba(220,38,38,0.4);
+            }
+            .st-unsaved-banner.show { display:flex; }
+            @keyframes stSlideDown {
+                from { opacity:0; transform:translateY(-20px) scale(0.96); }
+                to   { opacity:1; transform:translateY(0) scale(1); }
+            }
+            @keyframes stBannerBreathe {
+                0%, 100% { box-shadow:0 10px 30px rgba(220,38,38,0.15), 0 4px 8px rgba(220,38,38,0.08), 0 0 0 4px rgba(254,202,202,0.4); }
+                50%      { box-shadow:0 14px 36px rgba(220,38,38,0.22), 0 6px 12px rgba(220,38,38,0.12), 0 0 0 6px rgba(254,202,202,0.5); }
+            }
+            .st-unsaved-banner-icon {
+                width:48px; height:48px;
+                border-radius:14px;
+                background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);
+                color:#fff;
+                display:flex; align-items:center; justify-content:center;
+                font-size:24px;
+                font-weight:700;
+                flex-shrink:0;
+                box-shadow:0 6px 16px rgba(220,38,38,0.4), inset 0 1px 2px rgba(255,255,255,0.2);
+                animation:stIconShake 2s ease-in-out infinite;
+                position:relative;
+            }
+            @keyframes stIconShake {
+                0%, 100%   { transform:rotate(0deg) scale(1); }
+                10%, 30%   { transform:rotate(-6deg) scale(1.02); }
+                20%, 40%   { transform:rotate(6deg) scale(1.02); }
+                50%, 100%  { transform:rotate(0deg) scale(1); }
+            }
+            .st-unsaved-banner-icon::after {
+                content:"";
+                position:absolute;
+                inset:-3px;
+                border-radius:16px;
+                border:2px solid rgba(220,38,38,0.4);
+                animation:stRingPulse 2s ease-out infinite;
+            }
+            @keyframes stRingPulse {
+                0%   { opacity:1; transform:scale(1); }
+                100% { opacity:0; transform:scale(1.3); }
+            }
+            .st-unsaved-banner-text {
+                flex:1;
+                color:#7f1d1d;
+                font-size:13px;
+                font-weight:500;
+                line-height:1.55;
+                display:flex;
+                flex-direction:column;
+                gap:3px;
+            }
+            .st-unsaved-banner-title {
+                font-size:15px;
+                font-weight:800;
+                color:#991b1b;
+                letter-spacing:-0.01em;
+                display:flex;
+                align-items:center;
+                gap:8px;
+            }
+            .st-unsaved-banner-title-dot {
+                width:8px; height:8px; border-radius:50%;
+                background:#dc2626;
+                box-shadow:0 0 0 4px rgba(220,38,38,0.2);
+                animation:stDotBlink 1s ease-in-out infinite;
+            }
+            @keyframes stDotBlink {
+                0%, 100% { opacity:1; }
+                50%      { opacity:0.4; }
+            }
+            .st-unsaved-banner-text strong {
+                color:#991b1b;
+                font-weight:700;
+            }
+            .st-unsaved-banner-btn {
+                background:linear-gradient(180deg,#dc2626 0%,#b91c1c 100%);
+                color:#fff;
+                border:none;
+                padding:11px 22px;
+                border-radius:10px;
+                font-size:13px;
+                font-weight:700;
+                cursor:pointer;
+                box-shadow:0 6px 14px rgba(220,38,38,0.35), inset 0 1px 0 rgba(255,255,255,0.2);
+                transition:all 0.18s;
+                white-space:nowrap;
+                display:inline-flex;
+                align-items:center;
+                gap:6px;
+                position:relative;
+            }
+            .st-unsaved-banner-btn::before {
+                content:"💾";
+                font-size:14px;
+            }
+            .st-unsaved-banner-btn:hover {
+                background:linear-gradient(180deg,#b91c1c 0%,#991b1b 100%);
+                transform:translateY(-2px);
+                box-shadow:0 10px 22px rgba(220,38,38,0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+            }
+            .st-unsaved-banner-btn:active {
+                transform:translateY(0);
+            }
+
+            /* Pulse the Save button when there are unsaved changes */
+            @keyframes stSaveBtnPulse {
+                0%, 100% { box-shadow:0 0 0 0 rgba(220,38,38,0.4); transform:scale(1); }
+                50%      { box-shadow:0 0 0 12px rgba(220,38,38,0); transform:scale(1.04); }
+            }
+            .st-save-pulse {
+                animation:stSaveBtnPulse 1.6s ease-in-out infinite;
+                position:relative;
+            }
+            .st-save-pulse::after {
+                content:"";
+                position:absolute;
+                top:-5px;
+                right:-5px;
+                width:14px; height:14px;
+                background:#dc2626;
+                border-radius:50%;
+                border:2px solid #fff;
+                box-shadow:0 0 0 2px rgba(220,38,38,0.3);
+                animation:stDotBlink 1s ease-in-out infinite;
+            }
+        </style>
         <?php
-        // Show every department's level editor — the "Escalate To" dropdown of real users
-        // should be picker-able for all departments, not just Finance + Compliance.
-        foreach ($depts as $slug => $d):
-            $isExp = true;
-        ?>
-        <div class="st-dept-card <?= $isExp ? 'st-dept-expanded' : '' ?>">
-            <div class="st-dept-head">
-                <div>
-                    <strong><?= htmlspecialchars($d['name'] ?? $slug) ?></strong>
-                    <span class="st-pill st-pill-admin" style="font-size:11px;margin-left:0.5rem;">Active</span>
-                </div>
-            </div>
-            <?php if ($isExp): ?>
-            <div class="st-levels-table-wrap">
+        $fixedEscSlots = ['T+0', 'T+3', 'T+7', 'T+14'];
+        $fixedEscTpls  = ['Escalation Level 1', 'Escalation Level 2', 'Escalation Level 2', 'High Risk Escalation'];
+        $renderAreaTable = function (string $deptSlug, string $areaSlug, array $area, array $orgUsers) use ($fixedEscSlots, $fixedEscTpls): void {
+            $lvls = $area['levels'] ?? [];
+            ?>
+            <div class="st-levels-table-wrap" data-area-slug="<?= htmlspecialchars($areaSlug) ?>">
+                <input type="hidden" name="esc[<?= htmlspecialchars($deptSlug) ?>][areas][<?= htmlspecialchars($areaSlug) ?>][name]" value="<?= htmlspecialchars($area['name'] ?? '') ?>">
                 <table class="data-table st-levels-table">
-                    <thead><tr><th>Level</th><th>T-Slot</th><th>Escalate To</th><th>Email Template</th></tr></thead>
+                    <thead><tr><th style="width:60px;">Level</th><th style="width:90px;">T-Slot</th><th>Escalate To</th><th>Email Template</th></tr></thead>
                     <tbody>
-                        <?php
-                        $lvls = $d['levels'] ?? [];
-                        $fixedEscSlots = ['T+0', 'T+3', 'T+7', 'T+14'];
-                        for ($i = 0; $i < 4; $i++):
-                            $L = $lvls[$i] ?? ['d' => '', 'to' => '', 'tpl' => ''];
+                        <?php for ($i = 0; $i < 4; $i++):
+                            $L = $lvls[$i] ?? ['d' => '', 'to' => 0, 'tpl' => $fixedEscTpls[$i]];
+                            $selectedTo = (int) ($L['to'] ?? 0);
                         ?>
                         <tr>
                             <td><?= $i + 1 ?></td>
                             <td>
-                                <span class="badge badge-info"><?= htmlspecialchars($fixedEscSlots[$i] ?? '') ?></span>
-                                <input type="hidden" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][d]" value="<?= [0,3,7,14][$i] ?>">
+                                <span class="badge badge-info"><?= htmlspecialchars($fixedEscSlots[$i]) ?></span>
+                                <input type="hidden" name="esc[<?= htmlspecialchars($deptSlug) ?>][areas][<?= htmlspecialchars($areaSlug) ?>][levels][<?= $i ?>][d]" value="<?= [0,3,7,14][$i] ?>">
                             </td>
                             <td>
-                                <?php $selectedTo = (int) ($L['to'] ?? 0); ?>
-                                <select class="form-control form-control-sm" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][to]">
+                                <select class="form-control form-control-sm" name="esc[<?= htmlspecialchars($deptSlug) ?>][areas][<?= htmlspecialchars($areaSlug) ?>][levels][<?= $i ?>][to]">
                                     <option value="0">— pick a user —</option>
                                     <?php foreach ($orgUsers as $u):
                                         if (($u['status'] ?? '') !== 'active') continue;
@@ -379,32 +985,368 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
                                 </select>
                             </td>
                             <td>
-                                <span class="text-sm"><?= htmlspecialchars($L['tpl'] ?? '') ?></span>
-                                <input type="hidden" name="esc[<?= htmlspecialchars($slug) ?>][levels][<?= $i ?>][tpl]" value="<?= htmlspecialchars($L['tpl'] ?? '') ?>">
+                                <?php $tplVal = trim((string) ($L['tpl'] ?? '')); if ($tplVal === '') $tplVal = $fixedEscTpls[$i]; ?>
+                                <span class="text-sm"><?= htmlspecialchars($tplVal) ?></span>
+                                <input type="hidden" name="esc[<?= htmlspecialchars($deptSlug) ?>][areas][<?= htmlspecialchars($areaSlug) ?>][levels][<?= $i ?>][tpl]" value="<?= htmlspecialchars($tplVal) ?>">
                             </td>
                         </tr>
                         <?php endfor; ?>
                     </tbody>
                 </table>
             </div>
-            <?php endif; ?>
+            <?php
+        };
+
+        foreach ($depts as $slug => $d):
+            $areas = $d['areas'] ?? ['default' => ['name' => 'Default', 'levels' => $d['levels'] ?? []]];
+            // Move "default" first
+            if (isset($areas['default'])) {
+                $defaultArea = $areas['default'];
+                unset($areas['default']);
+                $areas = ['default' => $defaultArea] + $areas;
+            }
+        ?>
+        <div class="st-esc-dept st-dept-card st-dept-expanded" data-dept-slug="<?= htmlspecialchars($slug) ?>">
+            <div class="st-esc-dept-head">
+                <div class="st-esc-dept-title">
+                    <span class="st-active-dot"></span>
+                    <span><?= htmlspecialchars($d['name'] ?? $slug) ?></span>
+                    <span class="st-esc-area-chip">
+                        <span class="st-area-count" data-dept-slug="<?= htmlspecialchars($slug) ?>"><?= count($areas) ?></span> team<?= count($areas) === 1 ? '' : 's' ?>
+                    </span>
+                </div>
+                <button type="button" class="st-esc-add-btn st-add-area-btn" data-dept-slug="<?= htmlspecialchars($slug) ?>" data-dept-name="<?= htmlspecialchars($d['name'] ?? $slug) ?>">
+                    + Add Team
+                </button>
+            </div>
+
+            <div class="st-esc-areas st-areas-list" data-dept-slug="<?= htmlspecialchars($slug) ?>">
+                <?php foreach ($areas as $areaSlug => $area):
+                    $isDefault = ($areaSlug === 'default');
+                    $areaCls = $isDefault ? 'st-esc-area st-esc-area--default' : 'st-esc-area st-esc-area--custom';
+                ?>
+                <div class="<?= $areaCls ?> st-area-block" data-area-slug="<?= htmlspecialchars($areaSlug) ?>">
+                    <div class="st-esc-area-head">
+                        <div class="st-esc-area-name">
+                            <?php if ($isDefault): ?>
+                                <span><?= htmlspecialchars($area['name'] ?? 'Default') ?></span>
+                                <span class="st-tag st-tag-default">🔒 Fallback</span>
+                                <span class="st-esc-area-hint">applies when no compliance area is selected</span>
+                            <?php else: ?>
+                                <span>📋 <?= htmlspecialchars($area['name'] ?? $areaSlug) ?></span>
+                                <span class="st-tag st-tag-custom">Team</span>
+                            <?php endif; ?>
+                        </div>
+                        <?php if (!$isDefault): ?>
+                            <button type="button" class="st-esc-rm-btn st-remove-area-btn" data-dept-slug="<?= htmlspecialchars($slug) ?>" data-area-slug="<?= htmlspecialchars($areaSlug) ?>">🗑️ Remove</button>
+                        <?php endif; ?>
+                    </div>
+                    <?php $renderAreaTable($slug, $areaSlug, $area, $orgUsers); ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
         </div>
         <?php endforeach; ?>
-        <p class="text-muted text-sm st-fallback-note"><strong>Note:</strong> Department-wise escalation is active for all departments. High-risk items follow accelerated rules when enabled.</p>
+        <p class="text-muted text-sm st-fallback-note"><strong>Note:</strong> Department-wise escalation is active for all departments. High-risk items follow accelerated rules when enabled. Compliance areas (e.g. GST, TDS) inherit users from the area config; the "Default" area runs when no specific area is set on a compliance.</p>
+
+        <!-- Add Team Modal -->
+        <div id="st-add-area-modal" class="st-modal-backdrop" style="display:none;">
+            <div class="st-modal-wrap">
+                <div class="st-modal-card">
+                    <div class="st-modal-header">
+                        <div class="st-modal-icon"><span>👥</span></div>
+                        <div>
+                            <h4 class="st-modal-title">Add Team</h4>
+                            <p class="st-modal-subtitle">Department: <strong id="st-add-area-dept-name">—</strong></p>
+                        </div>
+                        <button type="button" class="st-modal-close" id="st-add-area-cancel" aria-label="Close">&times;</button>
+                    </div>
+                    <div class="st-modal-body">
+                        <div class="st-modal-field">
+                            <label class="st-modal-label">Team Name <span class="st-modal-req">*</span></label>
+                            <input type="text" id="st-add-area-name" class="st-modal-input" placeholder="e.g. GST, TDS, PF, ESIC, PT" maxlength="60">
+                            <p class="st-modal-help">Use a clear short name. Allowed: letters, numbers, spaces, dashes.</p>
+                        </div>
+                        <div class="st-modal-field">
+                            <label class="st-modal-label">Copy escalation schedule from</label>
+                            <select id="st-add-area-copy-from" class="st-modal-input"></select>
+                            <p class="st-modal-help">You can change the schedule for this new team later.</p>
+                        </div>
+                    </div>
+                    <div class="st-modal-footer">
+                        <button type="button" class="st-modal-btn st-modal-btn-secondary" id="st-add-area-cancel-2">Cancel</button>
+                        <button type="button" class="st-modal-btn st-modal-btn-primary" id="st-add-area-confirm">Create Team</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        (function(){
+            // ---- Add / Remove Compliance Area logic ----
+            const modal      = document.getElementById('st-add-area-modal');
+            const inpName    = document.getElementById('st-add-area-name');
+            const selCopy    = document.getElementById('st-add-area-copy-from');
+            const lblDept    = document.getElementById('st-add-area-dept-name');
+            let currentDept  = null;
+
+            function openModal(deptSlug, deptName) {
+                currentDept = deptSlug;
+                lblDept.textContent = deptName;
+                inpName.value = '';
+
+                // Populate "copy from" dropdown with existing areas of this dept
+                selCopy.innerHTML = '';
+                const optEmpty = document.createElement('option');
+                optEmpty.value = '';
+                optEmpty.textContent = '— Empty (no users assigned) —';
+                selCopy.appendChild(optEmpty);
+
+                const deptCard = document.querySelector('.st-dept-card[data-dept-slug="' + deptSlug + '"]');
+                if (deptCard) {
+                    const areas = deptCard.querySelectorAll('.st-area-block');
+                    areas.forEach(function(b){
+                        const aSlug = b.getAttribute('data-area-slug');
+                        // Read the area display name from the first span inside .st-esc-area-name
+                        const nameNode = b.querySelector('.st-esc-area-name > span:first-child');
+                        let aName = aSlug;
+                        if (nameNode) {
+                            aName = nameNode.textContent.replace(/^📋\s*/, '').trim();
+                        }
+                        if (!aName) aName = (aSlug === 'default') ? 'Default' : aSlug;
+                        const opt = document.createElement('option');
+                        opt.value = aSlug;
+                        opt.textContent = aName + (aSlug === 'default' ? ' (recommended)' : '');
+                        if (aSlug === 'default') opt.selected = true;
+                        selCopy.appendChild(opt);
+                    });
+                }
+                modal.style.display = 'block';
+                modal.scrollTop = 0;
+                document.body.style.overflow = 'hidden';
+                setTimeout(function(){ inpName.focus(); }, 100);
+            }
+
+            function closeModal() {
+                modal.style.display = 'none';
+                document.body.style.overflow = '';
+                currentDept = null;
+            }
+
+            function slugify(s) {
+                return String(s || '')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_\-\s]/g, '')
+                    .trim()
+                    .replace(/\s+/g, '-')
+                    .replace(/-+/g, '-');
+            }
+
+            function cloneAreaBlock(deptSlug, newSlug, newName, copyFromSlug) {
+                const deptCard = document.querySelector('.st-dept-card[data-dept-slug="' + deptSlug + '"]');
+                if (!deptCard) return;
+                const areasList = deptCard.querySelector('.st-areas-list');
+                let sourceBlock = null;
+                if (copyFromSlug) {
+                    sourceBlock = deptCard.querySelector('.st-area-block[data-area-slug="' + copyFromSlug + '"]');
+                }
+                if (!sourceBlock) {
+                    sourceBlock = deptCard.querySelector('.st-area-block[data-area-slug="default"]');
+                }
+                if (!sourceBlock) return;
+
+                const clone = sourceBlock.cloneNode(true);
+                clone.setAttribute('data-area-slug', newSlug);
+
+                // Switch from default styling to custom styling
+                clone.classList.remove('st-esc-area--default');
+                clone.classList.add('st-esc-area--custom');
+
+                // Rebuild the header row (.st-esc-area-head)
+                const headerRow = clone.querySelector('.st-esc-area-head');
+                if (headerRow) {
+                    headerRow.innerHTML =
+                        '<div class="st-esc-area-name">' +
+                            '<span>📋 ' + escapeHtml(newName) + '</span>' +
+                            '<span class="st-tag st-tag-custom">Team</span>' +
+                        '</div>' +
+                        '<button type="button" class="st-esc-rm-btn st-remove-area-btn" data-dept-slug="' + deptSlug + '" data-area-slug="' + newSlug + '">🗑️ Remove</button>';
+                }
+
+                // Update all form input names from old slug -> new slug
+                const oldSlug = copyFromSlug || 'default';
+                const inputs = clone.querySelectorAll('input[name], select[name]');
+                inputs.forEach(function(el){
+                    const oldName = el.getAttribute('name');
+                    if (!oldName) return;
+                    const newNameAttr = oldName.replace(
+                        '[areas][' + oldSlug + ']',
+                        '[areas][' + newSlug + ']'
+                    );
+                    el.setAttribute('name', newNameAttr);
+                });
+
+                // Update wrap attr
+                const wrap = clone.querySelector('.st-levels-table-wrap');
+                if (wrap) wrap.setAttribute('data-area-slug', newSlug);
+
+                // Update the hidden area name input
+                const nameInp = clone.querySelector('input[name$="[name]"]');
+                if (nameInp) nameInp.value = newName;
+
+                // Add entry animation class BEFORE appending
+                clone.classList.add('st-team-just-added');
+                areasList.appendChild(clone);
+
+                // Update area count with pulse
+                const counter = document.querySelector('.st-area-count[data-dept-slug="' + deptSlug + '"]');
+                if (counter) {
+                    counter.textContent = String(areasList.querySelectorAll('.st-area-block').length);
+                    const chip = counter.closest('.st-esc-area-chip, .st-area-chip');
+                    if (chip) {
+                        chip.classList.add('st-chip-pulse');
+                        setTimeout(function(){ chip.classList.remove('st-chip-pulse'); }, 700);
+                    }
+                }
+
+                // Smooth scroll to the new team
+                setTimeout(function(){
+                    clone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 200);
+
+                // Cleanup the animation class after it finishes
+                setTimeout(function(){
+                    clone.classList.remove('st-team-just-added');
+                }, 2800);
+
+                // Mark form as dirty
+                markEscDirty();
+            }
+
+            // ---- Unsaved-changes tracking (Escalation) ----
+            let escDirty = false;
+            function markEscDirty() {
+                escDirty = true;
+                const banner = document.getElementById('st-esc-unsaved-banner');
+                if (banner) banner.classList.add('show');
+                const btn = document.getElementById('st-esc-save-btn');
+                if (btn) btn.classList.add('st-save-pulse');
+            }
+            // Mark dirty also when any select/input changes inside the form
+            const escForm = document.getElementById('st-esc-form');
+            if (escForm) {
+                escForm.addEventListener('change', function(){ markEscDirty(); });
+                escForm.addEventListener('submit', function(){ escDirty = false; });
+            }
+            // Warn if leaving with unsaved changes
+            window.addEventListener('beforeunload', function(e){
+                if (escDirty) {
+                    e.preventDefault();
+                    e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+                    return e.returnValue;
+                }
+            });
+
+            function escapeHtml(s) {
+                return String(s).replace(/[&<>"']/g, function(c){
+                    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+                });
+            }
+
+            // Wire up buttons
+            document.addEventListener('click', function(e){
+                const addBtn = e.target.closest('.st-add-area-btn');
+                if (addBtn) {
+                    openModal(addBtn.getAttribute('data-dept-slug'), addBtn.getAttribute('data-dept-name'));
+                    return;
+                }
+                const rmBtn = e.target.closest('.st-remove-area-btn');
+                if (rmBtn) {
+                    const deptSlug = rmBtn.getAttribute('data-dept-slug');
+                    const areaSlug = rmBtn.getAttribute('data-area-slug');
+                    if (areaSlug === 'default') return;
+                    if (!confirm('Remove this team? Saved escalation settings for this team will be deleted on Save.')) return;
+                    const blk = document.querySelector('.st-dept-card[data-dept-slug="' + deptSlug + '"] .st-area-block[data-area-slug="' + areaSlug + '"]');
+                    if (blk) blk.remove();
+                    const counter = document.querySelector('.st-area-count[data-dept-slug="' + deptSlug + '"]');
+                    const remaining = document.querySelectorAll('.st-dept-card[data-dept-slug="' + deptSlug + '"] .st-area-block').length;
+                    if (counter) counter.textContent = String(remaining);
+                    markEscDirty();
+                    return;
+                }
+                if (e.target.id === 'st-add-area-cancel' || e.target.id === 'st-add-area-cancel-2' || e.target === modal) { closeModal(); return; }
+                if (e.target.id === 'st-add-area-confirm') {
+                    const name = inpName.value.trim();
+                    if (name === '') { alert('Please enter an area name.'); inpName.focus(); return; }
+                    const slug = slugify(name);
+                    if (slug === '' || slug === 'default') { alert('Please use a valid area name (e.g. "GST", "TDS").'); return; }
+
+                    // Check duplicate
+                    const existing = document.querySelector('.st-dept-card[data-dept-slug="' + currentDept + '"] .st-area-block[data-area-slug="' + slug + '"]');
+                    if (existing) { alert('An area with this name already exists in this department.'); return; }
+
+                    const copyFrom = selCopy.value || '';
+                    cloneAreaBlock(currentDept, slug, name, copyFrom);
+                    closeModal();
+                }
+            });
+
+            // ESC to close modal
+            document.addEventListener('keydown', function(e){
+                if (e.key === 'Escape' && modal.style.display === 'block') closeModal();
+            });
+        })();
+        </script>
         <div class="st-actions-right">
             <button type="submit" class="btn btn-secondary" onclick="document.getElementById('esc_action_field').value='trigger';">Manual Trigger</button>
-            <button type="submit" class="btn btn-primary" onclick="document.getElementById('esc_action_field').value='save';">Save Escalation Settings</button>
+            <button type="submit" class="btn btn-primary st-esc-save-btn" id="st-esc-save-btn" onclick="document.getElementById('esc_action_field').value='save';">Save Escalation Settings</button>
         </div>
     </form>
 
     <?php elseif ($automationSub === 'pre-due'): ?>
     <h3 class="card-title mt-3">Pre-Due Date Reminder &amp; Escalation</h3>
     <p class="text-muted text-sm">Smart engine active. Pre-due reminder slots are fixed to <strong>T-7, T-3, T-1</strong> with automatic short-timeline catch-up.</p>
+
+    <!-- Sync from Authority Matrix card -->
+    <div class="st-sync-card" style="background:linear-gradient(135deg,#fef9f9 0%,#fff5f5 100%);border:1.5px solid #fecaca;border-radius:12px;padding:16px 20px;margin:14px 0 18px 0;display:flex;align-items:center;gap:16px;box-shadow:0 2px 8px rgba(220,38,38,0.06);flex-wrap:wrap;">
+        <div style="width:44px;height:44px;border-radius:11px;background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 4px 10px rgba(220,38,38,0.25);">🔄</div>
+        <div style="flex:1;min-width:240px;">
+            <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:3px;">Auto-create teams from Authority Matrix</div>
+            <div style="font-size:12px;color:#64748b;line-height:1.5;">Pulls every active <strong>(Department + Compliance Area)</strong> combo and creates matching teams here with Maker/Reviewer/Approver wired in. Existing departments without matching entries are <strong>preserved</strong>. All user picks remain editable. A backup is taken before each sync so you can undo.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/sync-teams-from-matrix" style="display:flex;gap:8px;align-items:center;" onsubmit="return confirm('This will read Authority Matrix and create teams in both Escalation Matrix and Pre-Due Reminder. A backup will be taken so you can undo. Continue?');">
+                <input type="hidden" name="return_to" value="/settings?tab=automation&sub=pre-due">
+                <select name="sync_mode" style="padding:7px 10px;font-size:12px;border:1.5px solid #fecaca;border-radius:7px;background:#fff;color:#0f172a;font-weight:500;cursor:pointer;">
+                    <option value="skip_existing" selected>Skip existing teams</option>
+                    <option value="overwrite">Overwrite (refresh users)</option>
+                </select>
+                <button type="submit" style="background:#dc2626;border:1.5px solid #dc2626;color:#fff;padding:8px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(220,38,38,0.25);transition:all 0.15s;" onmouseover="this.style.background='#b91c1c';this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(220,38,38,0.35)';" onmouseout="this.style.background='#dc2626';this.style.transform='translateY(0)';this.style.boxShadow='0 2px 6px rgba(220,38,38,0.25)';">🔄 Sync Now</button>
+            </form>
+            <?php if (!empty($hasSyncBackup)): ?>
+            <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/undo-sync-teams" onsubmit="return confirm('Restore escalation & pre-due settings to the state BEFORE the last sync? This will discard any changes you saved since then.');">
+                <input type="hidden" name="return_to" value="/settings?tab=automation&sub=pre-due">
+                <button type="submit" title="Restore the snapshot taken before the last sync (<?= htmlspecialchars($lastSyncBackupAt ?? '') ?>)" style="background:#fff;border:1.5px solid #9ca3af;color:#374151;padding:8px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='#dc2626';this.style.color='#dc2626';" onmouseout="this.style.borderColor='#9ca3af';this.style.color='#374151';">↺ Undo Last Sync</button>
+            </form>
+            <?php endif; ?>
+        </div>
+    </div>
     <div class="alert alert-info text-sm mb-3" style="border-radius:8px;">
         <strong>Why “Skipped” on manual trigger?</strong> Pre-due reminders only run for compliances that are still <strong>Pending</strong> (maker has not submitted yet). Items in <strong>Submitted</strong> or <strong>Under review</strong> are skipped — the maker already progressed the workflow. Past-due dates (already overdue for pre-due), missing notification templates, or users without email can also increase skips.
     </div>
-    <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/pre-due">
+    <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/pre-due" id="st-pre-form">
         <input type="hidden" name="pre_action" id="pre_action_field" value="save">
+        <div class="st-unsaved-banner" id="st-pre-unsaved-banner">
+            <div class="st-unsaved-banner-icon">!</div>
+            <div class="st-unsaved-banner-text">
+                <div class="st-unsaved-banner-title">
+                    <span class="st-unsaved-banner-title-dot"></span>
+                    You have unsaved changes
+                </div>
+                <div>You've added, removed, or modified a team. Click <strong>Save Now</strong> to keep your changes — otherwise they will be lost when you leave this page.</div>
+            </div>
+            <button type="submit" class="st-unsaved-banner-btn" onclick="document.getElementById('pre_action_field').value='save';">Save Now</button>
+        </div>
         <div class="st-toggle-row st-toggle-inline">
             <div>
                 <strong>Enable Pre-Due Date Reminders</strong>
@@ -472,65 +1414,964 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
             </ul>
         </div>
         <h4 class="st-subhead">Department Wise Escalation Mapping</h4>
-        <div class="table-wrap">
-            <table class="data-table st-pre-dept-table">
-                <thead>
-                    <tr><th>Department</th><th>Compliance Owner</th><th>Reporting Manager</th><th>Department Head</th></tr>
-                </thead>
-                <tbody>
-                    <?php
-                    $activeUsers = array_values(array_filter($orgUsers, static function ($u) {
-                        return (($u['status'] ?? '') === 'active');
-                    }));
-                    $userIdByName = [];
-                    foreach ($activeUsers as $u) {
-                        $nm = trim((string) ($u['full_name'] ?? ''));
-                        if ($nm !== '') {
-                            $userIdByName[strtolower($nm)] = (int) ($u['id'] ?? 0);
-                        }
-                    }
-                    ?>
-                    <?php foreach (($preDue['depts'] ?? []) as $i => $pd): ?>
-                    <tr>
-                        <td><strong><?= htmlspecialchars($pd['name']) ?></strong></td>
-                        <?php
-                        $selectedOwnerId = (int) ($pd['owner_id'] ?? ($userIdByName[strtolower(trim((string) ($pd['owner'] ?? '')))] ?? 0));
-                        $selectedMgrId = (int) ($pd['mgr_id'] ?? ($userIdByName[strtolower(trim((string) ($pd['mgr'] ?? '')))] ?? 0));
-                        $selectedHeadId = (int) ($pd['head_id'] ?? ($userIdByName[strtolower(trim((string) ($pd['head'] ?? '')))] ?? 0));
-                        ?>
-                        <td>
-                            <select class="form-control form-control-sm" name="pre_dept[<?= $i ?>][owner_id]">
-                                <option value="0">— Select user —</option>
-                                <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
-                                <option value="<?= $uid ?>" <?= $selectedOwnerId === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </td>
-                        <td>
-                            <select class="form-control form-control-sm" name="pre_dept[<?= $i ?>][mgr_id]">
-                                <option value="0">— Select user —</option>
-                                <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
-                                <option value="<?= $uid ?>" <?= $selectedMgrId === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </td>
-                        <td>
-                            <select class="form-control form-control-sm" name="pre_dept[<?= $i ?>][head_id]">
-                                <option value="0">— Select user —</option>
-                                <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
-                                <option value="<?= $uid ?>" <?= $selectedHeadId === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        <p class="text-muted text-sm mb-2">Each department can have multiple <strong>compliance areas</strong> (e.g. GST, TDS, PF). Different areas can have different owners/managers. The <strong>Default</strong> mapping applies when a compliance has no specific area set.</p>
+
+        <style>
+            /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+            /* Pre-Due Compliance Area Cards — Beautified Red Theme       */
+            /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+            .st-cad-dept {
+                background:#fff;
+                border:1px solid #e5e7eb;
+                border-radius:14px;
+                margin-top:20px;
+                box-shadow:0 1px 3px rgba(0,0,0,0.03), 0 1px 2px rgba(0,0,0,0.02);
+                overflow:hidden;
+                transition:box-shadow 0.2s, border-color 0.2s;
+            }
+            .st-cad-dept:hover {
+                box-shadow:0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.03);
+                border-color:#e0e0e0;
+            }
+            .st-cad-dept-head {
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                padding:16px 22px;
+                background:linear-gradient(180deg,#ffffff 0%,#fafafa 100%);
+                border-bottom:1px solid #f1f5f9;
+            }
+            .st-cad-dept-title {
+                display:flex;
+                align-items:center;
+                gap:12px;
+                font-size:15px;
+                font-weight:700;
+                color:#0f172a;
+                letter-spacing:-0.01em;
+            }
+            .st-cad-dept-title .st-area-chip {
+                background:linear-gradient(180deg,rgba(220,38,38,0.08) 0%,rgba(220,38,38,0.12) 100%);
+                color:#b91c1c;
+                font-size:11px;
+                font-weight:700;
+                padding:3px 10px;
+                border-radius:20px;
+                letter-spacing:0.2px;
+                border:1px solid rgba(220,38,38,0.15);
+            }
+            .st-cad-dept-title .st-active-dot {
+                width:8px;height:8px;border-radius:50%;
+                background:#dc2626;
+                display:inline-block;
+                box-shadow:0 0 0 3px rgba(220,38,38,0.15);
+            }
+            .st-cad-add-btn {
+                background:#fff;
+                border:1.5px solid #dc2626;
+                color:#dc2626;
+                padding:7px 14px;
+                border-radius:8px;
+                font-size:12px;
+                font-weight:600;
+                cursor:pointer;
+                transition:all 0.18s;
+                display:inline-flex;
+                align-items:center;
+                gap:5px;
+                box-shadow:0 1px 2px rgba(220,38,38,0.06);
+            }
+            .st-cad-add-btn:hover {
+                background:#dc2626;
+                color:#fff;
+                transform:translateY(-1px);
+                box-shadow:0 4px 10px rgba(220,38,38,0.25);
+            }
+            .st-cad-areas {
+                padding:18px 22px 20px 22px;
+                display:flex;
+                flex-direction:column;
+                gap:14px;
+            }
+            .st-cad-area {
+                border:1px solid #f1f5f9;
+                border-radius:10px;
+                padding:16px 18px;
+                background:#fff;
+                transition:border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+                position:relative;
+            }
+            .st-cad-area:hover {
+                border-color:#e2e8f0;
+                box-shadow:0 2px 6px rgba(0,0,0,0.04);
+            }
+            .st-cad-area--default {
+                background:linear-gradient(180deg,#fef9f9 0%,#fffafa 100%);
+                border:1px solid #fecaca;
+                position:relative;
+            }
+            .st-cad-area--default::before {
+                content:"";
+                position:absolute;
+                left:0; top:0; bottom:0;
+                width:3px;
+                background:linear-gradient(180deg,#dc2626 0%,#b91c1c 100%);
+                border-radius:10px 0 0 10px;
+            }
+            .st-cad-area--custom {
+                background:#ffffff;
+                border:1px solid #e5e7eb;
+                position:relative;
+            }
+            .st-cad-area--custom::before {
+                content:"";
+                position:absolute;
+                left:0; top:0; bottom:0;
+                width:3px;
+                background:linear-gradient(180deg,#94a3b8 0%,#64748b 100%);
+                border-radius:10px 0 0 10px;
+            }
+            .st-cad-area-head {
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:10px;
+                margin-bottom:14px;
+                padding-bottom:10px;
+                border-bottom:1px dashed #f1f5f9;
+            }
+            .st-cad-area-name {
+                display:flex;
+                align-items:center;
+                gap:10px;
+                font-size:14px;
+                font-weight:700;
+                color:#0f172a;
+                letter-spacing:-0.01em;
+            }
+            .st-cad-area-name .st-tag {
+                font-size:9px;
+                font-weight:700;
+                padding:3px 8px;
+                border-radius:12px;
+                text-transform:uppercase;
+                letter-spacing:0.5px;
+                display:inline-flex;
+                align-items:center;
+                gap:3px;
+            }
+            .st-cad-area-name .st-tag-default {
+                background:linear-gradient(180deg,#fee2e2 0%,#fecaca 100%);
+                color:#991b1b;
+                border:1px solid #fca5a5;
+            }
+            .st-cad-area-name .st-tag-custom {
+                background:linear-gradient(180deg,#f1f5f9 0%,#e2e8f0 100%);
+                color:#475569;
+                border:1px solid #cbd5e1;
+            }
+            .st-cad-area-hint {
+                font-size:12px;
+                color:#64748b;
+                margin-left:4px;
+                font-weight:400;
+                font-style:italic;
+            }
+            .st-cad-rm-btn {
+                background:#fff;
+                border:1.5px solid #fecaca;
+                color:#dc2626;
+                font-size:11px;
+                font-weight:600;
+                padding:5px 11px;
+                border-radius:6px;
+                cursor:pointer;
+                transition:all 0.18s;
+            }
+            .st-cad-rm-btn:hover {
+                background:#dc2626;
+                border-color:#dc2626;
+                color:#fff;
+                box-shadow:0 2px 6px rgba(220,38,38,0.2);
+            }
+            .st-cad-grid {
+                display:grid;
+                grid-template-columns:repeat(3,1fr);
+                gap:14px;
+            }
+            .st-cad-field label {
+                display:block;
+                font-size:11px;
+                font-weight:700;
+                color:#475569;
+                margin-bottom:6px;
+                text-transform:uppercase;
+                letter-spacing:0.5px;
+            }
+            .st-cad-field label .st-role-tag {
+                display:inline-flex;
+                align-items:center;
+                background:linear-gradient(180deg,rgba(220,38,38,0.08) 0%,rgba(220,38,38,0.12) 100%);
+                color:#b91c1c;
+                font-size:9px;
+                font-weight:700;
+                padding:2px 6px;
+                border-radius:4px;
+                margin-left:5px;
+                letter-spacing:0.6px;
+                border:1px solid rgba(220,38,38,0.15);
+            }
+            .st-cad-field select {
+                width:100%;
+                padding:9px 12px;
+                font-size:13px;
+                border:1.5px solid #e2e8f0;
+                border-radius:8px;
+                background:#fff;
+                color:#0f172a;
+                font-weight:500;
+                transition:border-color 0.15s, box-shadow 0.15s;
+                cursor:pointer;
+            }
+            .st-cad-field select:hover {
+                border-color:#cbd5e1;
+            }
+            .st-cad-field select:focus {
+                outline:none;
+                border-color:#dc2626;
+                box-shadow:0 0 0 3px rgba(220,38,38,0.12);
+            }
+            @media (max-width:768px){
+                .st-cad-grid { grid-template-columns:1fr; }
+            }
+
+            /* ━━━ "New team added" entry animations ━━━ */
+            @keyframes stTeamSlideIn {
+                0% {
+                    opacity:0;
+                    transform:translateY(-12px) scale(0.96);
+                    max-height:0;
+                    padding-top:0;
+                    padding-bottom:0;
+                    margin-top:0;
+                    overflow:hidden;
+                }
+                40% {
+                    opacity:1;
+                    max-height:600px;
+                    overflow:visible;
+                }
+                100% {
+                    opacity:1;
+                    transform:translateY(0) scale(1);
+                    max-height:600px;
+                }
+            }
+            @keyframes stTeamHighlight {
+                0%   { box-shadow:0 0 0 0 rgba(220,38,38,0.4), 0 2px 6px rgba(0,0,0,0.04); border-color:#dc2626; }
+                50%  { box-shadow:0 0 0 8px rgba(220,38,38,0.15), 0 4px 14px rgba(220,38,38,0.18); border-color:#dc2626; }
+                100% { box-shadow:0 0 0 0 rgba(220,38,38,0), 0 2px 6px rgba(0,0,0,0.04); border-color:#e5e7eb; }
+            }
+            @keyframes stTeamNamePop {
+                0%   { transform:scale(1); }
+                50%  { transform:scale(1.08); color:#dc2626; }
+                100% { transform:scale(1); }
+            }
+            @keyframes stChipPulse {
+                0%, 100% { transform:scale(1); }
+                50%      { transform:scale(1.18); background:#dc2626; color:#fff; }
+            }
+            .st-team-just-added {
+                animation:stTeamSlideIn 0.45s cubic-bezier(0.16,1,0.3,1) forwards,
+                          stTeamHighlight 2.2s ease-out 0.4s;
+            }
+            .st-team-just-added .st-cad-area-name span:first-child,
+            .st-team-just-added .st-esc-area-name span:first-child {
+                animation:stTeamNamePop 0.6s ease-out 0.5s;
+                display:inline-block;
+            }
+            .st-chip-pulse {
+                animation:stChipPulse 0.6s ease-out;
+                display:inline-block;
+            }
+
+            /* ━━━ Unsaved changes banner — premium look ━━━ */
+            .st-unsaved-banner {
+                position:sticky;
+                top:12px;
+                z-index:50;
+                background:linear-gradient(135deg,#ffffff 0%,#fef9f9 50%,#fef2f2 100%);
+                border:2px solid #fca5a5;
+                border-radius:16px;
+                padding:18px 22px;
+                margin:18px 0 12px 0;
+                display:none;
+                align-items:center;
+                gap:18px;
+                box-shadow:0 10px 30px rgba(220,38,38,0.15), 0 4px 8px rgba(220,38,38,0.08), 0 0 0 4px rgba(254,202,202,0.4);
+                animation:stSlideDown 0.4s cubic-bezier(0.16,1,0.3,1), stBannerBreathe 3.5s ease-in-out 0.5s infinite;
+                position:sticky;
+                overflow:hidden;
+            }
+            .st-unsaved-banner::before {
+                content:"";
+                position:absolute;
+                left:0; top:0; bottom:0;
+                width:5px;
+                background:linear-gradient(180deg,#dc2626 0%,#b91c1c 100%);
+                box-shadow:0 0 18px rgba(220,38,38,0.4);
+            }
+            .st-unsaved-banner.show { display:flex; }
+            @keyframes stSlideDown {
+                from { opacity:0; transform:translateY(-20px) scale(0.96); }
+                to   { opacity:1; transform:translateY(0) scale(1); }
+            }
+            @keyframes stBannerBreathe {
+                0%, 100% { box-shadow:0 10px 30px rgba(220,38,38,0.15), 0 4px 8px rgba(220,38,38,0.08), 0 0 0 4px rgba(254,202,202,0.4); }
+                50%      { box-shadow:0 14px 36px rgba(220,38,38,0.22), 0 6px 12px rgba(220,38,38,0.12), 0 0 0 6px rgba(254,202,202,0.5); }
+            }
+            .st-unsaved-banner-icon {
+                width:48px; height:48px;
+                border-radius:14px;
+                background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);
+                color:#fff;
+                display:flex; align-items:center; justify-content:center;
+                font-size:24px;
+                font-weight:700;
+                flex-shrink:0;
+                box-shadow:0 6px 16px rgba(220,38,38,0.4), inset 0 1px 2px rgba(255,255,255,0.2);
+                animation:stIconShake 2s ease-in-out infinite;
+                position:relative;
+            }
+            @keyframes stIconShake {
+                0%, 100%   { transform:rotate(0deg) scale(1); }
+                10%, 30%   { transform:rotate(-6deg) scale(1.02); }
+                20%, 40%   { transform:rotate(6deg) scale(1.02); }
+                50%, 100%  { transform:rotate(0deg) scale(1); }
+            }
+            .st-unsaved-banner-icon::after {
+                content:"";
+                position:absolute;
+                inset:-3px;
+                border-radius:16px;
+                border:2px solid rgba(220,38,38,0.4);
+                animation:stRingPulse 2s ease-out infinite;
+            }
+            @keyframes stRingPulse {
+                0%   { opacity:1; transform:scale(1); }
+                100% { opacity:0; transform:scale(1.3); }
+            }
+            .st-unsaved-banner-text {
+                flex:1;
+                color:#7f1d1d;
+                font-size:13px;
+                font-weight:500;
+                line-height:1.55;
+                display:flex;
+                flex-direction:column;
+                gap:3px;
+            }
+            .st-unsaved-banner-title {
+                font-size:15px;
+                font-weight:800;
+                color:#991b1b;
+                letter-spacing:-0.01em;
+                display:flex;
+                align-items:center;
+                gap:8px;
+            }
+            .st-unsaved-banner-title-dot {
+                width:8px; height:8px; border-radius:50%;
+                background:#dc2626;
+                box-shadow:0 0 0 4px rgba(220,38,38,0.2);
+                animation:stDotBlink 1s ease-in-out infinite;
+            }
+            @keyframes stDotBlink {
+                0%, 100% { opacity:1; }
+                50%      { opacity:0.4; }
+            }
+            .st-unsaved-banner-text strong {
+                color:#991b1b;
+                font-weight:700;
+            }
+            .st-unsaved-banner-btn {
+                background:linear-gradient(180deg,#dc2626 0%,#b91c1c 100%);
+                color:#fff;
+                border:none;
+                padding:11px 22px;
+                border-radius:10px;
+                font-size:13px;
+                font-weight:700;
+                cursor:pointer;
+                box-shadow:0 6px 14px rgba(220,38,38,0.35), inset 0 1px 0 rgba(255,255,255,0.2);
+                transition:all 0.18s;
+                white-space:nowrap;
+                display:inline-flex;
+                align-items:center;
+                gap:6px;
+                position:relative;
+            }
+            .st-unsaved-banner-btn::before {
+                content:"💾";
+                font-size:14px;
+            }
+            .st-unsaved-banner-btn:hover {
+                background:linear-gradient(180deg,#b91c1c 0%,#991b1b 100%);
+                transform:translateY(-2px);
+                box-shadow:0 10px 22px rgba(220,38,38,0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+            }
+            .st-unsaved-banner-btn:active {
+                transform:translateY(0);
+            }
+
+            /* Pulse the Save button when there are unsaved changes */
+            @keyframes stSaveBtnPulse {
+                0%, 100% { box-shadow:0 0 0 0 rgba(220,38,38,0.4); transform:scale(1); }
+                50%      { box-shadow:0 0 0 12px rgba(220,38,38,0); transform:scale(1.04); }
+            }
+            .st-save-pulse {
+                animation:stSaveBtnPulse 1.6s ease-in-out infinite;
+                position:relative;
+            }
+            .st-save-pulse::after {
+                content:"";
+                position:absolute;
+                top:-5px;
+                right:-5px;
+                width:14px; height:14px;
+                background:#dc2626;
+                border-radius:50%;
+                border:2px solid #fff;
+                box-shadow:0 0 0 2px rgba(220,38,38,0.3);
+                animation:stDotBlink 1s ease-in-out infinite;
+            }
+
+            /* ───── Shared Modal Styles (Add Team dialog) ───── */
+            .st-modal-backdrop {
+                position:fixed;
+                inset:0;
+                background:rgba(15,23,42,0.6);
+                backdrop-filter:blur(2px);
+                -webkit-backdrop-filter:blur(2px);
+                z-index:10000;
+                overflow-y:auto;
+                animation:stFadeIn 0.15s ease-out;
+            }
+            @keyframes stFadeIn {
+                from { opacity:0; }
+                to   { opacity:1; }
+            }
+            .st-modal-wrap {
+                min-height:100%;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                padding:24px 16px;
+                box-sizing:border-box;
+            }
+            .st-modal-card {
+                background:#fff;
+                border-radius:14px;
+                width:480px;
+                max-width:100%;
+                box-shadow:0 25px 80px rgba(0,0,0,0.35),0 0 0 1px rgba(0,0,0,0.05);
+                animation:stSlideUp 0.2s cubic-bezier(0.16,1,0.3,1);
+                overflow:hidden;
+            }
+            @keyframes stSlideUp {
+                from { opacity:0; transform:translateY(20px) scale(0.97); }
+                to   { opacity:1; transform:translateY(0) scale(1); }
+            }
+            .st-modal-header {
+                display:flex;
+                align-items:flex-start;
+                gap:14px;
+                padding:22px 24px 14px 24px;
+                border-bottom:1px solid #f1f5f9;
+                position:relative;
+            }
+            .st-modal-icon {
+                width:44px;
+                height:44px;
+                border-radius:11px;
+                background:linear-gradient(135deg,#fee2e2 0%,#fecaca 100%);
+                color:#dc2626;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                font-size:22px;
+                flex-shrink:0;
+            }
+            .st-modal-title {
+                margin:0;
+                font-size:17px;
+                font-weight:700;
+                color:#0f172a;
+                line-height:1.3;
+            }
+            .st-modal-subtitle {
+                margin:3px 0 0 0;
+                font-size:13px;
+                color:#64748b;
+            }
+            .st-modal-subtitle strong {
+                color:#0f172a;
+                font-weight:600;
+            }
+            .st-modal-close {
+                position:absolute;
+                top:14px;
+                right:14px;
+                background:transparent;
+                border:none;
+                width:30px;
+                height:30px;
+                border-radius:8px;
+                font-size:22px;
+                color:#94a3b8;
+                cursor:pointer;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                line-height:1;
+                padding:0;
+                transition:all 0.15s;
+            }
+            .st-modal-close:hover {
+                background:#f1f5f9;
+                color:#0f172a;
+            }
+            .st-modal-body {
+                padding:18px 24px 8px 24px;
+            }
+            .st-modal-field {
+                margin-bottom:16px;
+            }
+            .st-modal-label {
+                display:block;
+                font-size:13px;
+                font-weight:600;
+                color:#1e293b;
+                margin-bottom:7px;
+            }
+            .st-modal-req {
+                color:#dc2626;
+            }
+            .st-modal-input {
+                width:100%;
+                padding:10px 12px;
+                font-size:14px;
+                border:1px solid #cbd5e1;
+                border-radius:8px;
+                background:#fff;
+                color:#0f172a;
+                box-sizing:border-box;
+                transition:border-color 0.15s,box-shadow 0.15s;
+            }
+            .st-modal-input:focus {
+                outline:none;
+                border-color:#dc2626;
+                box-shadow:0 0 0 3px rgba(220,38,38,0.12);
+            }
+            .st-modal-help {
+                margin:6px 0 0 0;
+                font-size:12px;
+                color:#64748b;
+            }
+            .st-modal-footer {
+                display:flex;
+                justify-content:flex-end;
+                gap:10px;
+                padding:14px 24px 22px 24px;
+                background:#fafafa;
+                border-top:1px solid #f1f5f9;
+            }
+            .st-modal-btn {
+                padding:9px 18px;
+                font-size:13px;
+                font-weight:600;
+                border-radius:8px;
+                cursor:pointer;
+                border:1px solid transparent;
+                transition:all 0.15s;
+            }
+            .st-modal-btn-secondary {
+                background:#fff;
+                border-color:#cbd5e1;
+                color:#475569;
+            }
+            .st-modal-btn-secondary:hover {
+                background:#f8fafc;
+                border-color:#94a3b8;
+                color:#0f172a;
+            }
+            .st-modal-btn-primary {
+                background:#dc2626;
+                border-color:#dc2626;
+                color:#fff;
+                box-shadow:0 1px 2px rgba(220,38,38,0.2);
+            }
+            .st-modal-btn-primary:hover {
+                background:#b91c1c;
+                border-color:#b91c1c;
+                box-shadow:0 4px 10px rgba(220,38,38,0.3);
+            }
+        </style>
+
+        <?php
+        $activeUsers = array_values(array_filter($orgUsers, static function ($u) {
+            return (($u['status'] ?? '') === 'active');
+        }));
+        $userIdByName = [];
+        foreach ($activeUsers as $u) {
+            $nm = trim((string) ($u['full_name'] ?? ''));
+            if ($nm !== '') {
+                $userIdByName[strtolower($nm)] = (int) ($u['id'] ?? 0);
+            }
+        }
+
+        // Render one area row inside a department block
+        $renderPreDueAreaRow = function (int $deptIdx, string $areaSlug, array $area, array $activeUsers): void {
+            $isDefault = ($areaSlug === 'default');
+            $aOwn = (int) ($area['owner_id'] ?? 0);
+            $aMgr = (int) ($area['mgr_id'] ?? 0);
+            $aHd  = (int) ($area['head_id'] ?? 0);
+            $areaCls = $isDefault ? 'st-cad-area st-cad-area--default' : 'st-cad-area st-cad-area--custom';
+            ?>
+            <div class="<?= $areaCls ?> st-pre-area-row" data-area-slug="<?= htmlspecialchars($areaSlug) ?>">
+                <input type="hidden" name="pre_dept[<?= $deptIdx ?>][areas][<?= htmlspecialchars($areaSlug) ?>][name]" value="<?= htmlspecialchars($area['name'] ?? ($isDefault ? 'Default' : ucfirst($areaSlug))) ?>">
+                <div class="st-cad-area-head">
+                    <div class="st-cad-area-name">
+                        <?php if ($isDefault): ?>
+                            <span>Default</span>
+                            <span class="st-tag st-tag-default">🔒 Fallback</span>
+                            <span class="st-cad-area-hint">applies when no compliance area is selected</span>
+                        <?php else: ?>
+                            <span>📋 <?= htmlspecialchars($area['name'] ?? $areaSlug) ?></span>
+                            <span class="st-tag st-tag-custom">Team</span>
+                        <?php endif; ?>
+                    </div>
+                    <?php if (!$isDefault): ?>
+                        <button type="button" class="st-cad-rm-btn st-pre-remove-area-btn" data-dept-idx="<?= $deptIdx ?>" data-area-slug="<?= htmlspecialchars($areaSlug) ?>">🗑️ Remove</button>
+                    <?php endif; ?>
+                </div>
+                <div class="st-cad-grid">
+                    <div class="st-cad-field">
+                        <label>Compliance Owner <span class="st-role-tag">TO</span></label>
+                        <select name="pre_dept[<?= $deptIdx ?>][areas][<?= htmlspecialchars($areaSlug) ?>][owner_id]">
+                            <option value="0">— Select user —</option>
+                            <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
+                            <option value="<?= $uid ?>" <?= $aOwn === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="st-cad-field">
+                        <label>Reporting Manager <span class="st-role-tag">CC</span></label>
+                        <select name="pre_dept[<?= $deptIdx ?>][areas][<?= htmlspecialchars($areaSlug) ?>][mgr_id]">
+                            <option value="0">— Select user —</option>
+                            <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
+                            <option value="<?= $uid ?>" <?= $aMgr === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="st-cad-field">
+                        <label>Department Head <span class="st-role-tag">CC</span></label>
+                        <select name="pre_dept[<?= $deptIdx ?>][areas][<?= htmlspecialchars($areaSlug) ?>][head_id]">
+                            <option value="0">— Select user —</option>
+                            <?php foreach ($activeUsers as $u): $uid = (int) ($u['id'] ?? 0); ?>
+                            <option value="<?= $uid ?>" <?= $aHd === $uid ? 'selected' : '' ?>><?= htmlspecialchars((string) ($u['full_name'] ?? '')) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <?php
+        };
+        ?>
+        <?php foreach (($preDue['depts'] ?? []) as $i => $pd):
+            // Auto-build areas: if missing, create a "default" area from existing owner/mgr/head IDs
+            $defaultOwnerId = (int) ($pd['owner_id'] ?? ($userIdByName[strtolower(trim((string) ($pd['owner'] ?? '')))] ?? 0));
+            $defaultMgrId   = (int) ($pd['mgr_id']   ?? ($userIdByName[strtolower(trim((string) ($pd['mgr']   ?? '')))] ?? 0));
+            $defaultHeadId  = (int) ($pd['head_id']  ?? ($userIdByName[strtolower(trim((string) ($pd['head']  ?? '')))] ?? 0));
+
+            $areas = is_array($pd['areas'] ?? null) ? $pd['areas'] : [];
+            if (!isset($areas['default']) || !is_array($areas['default'])) {
+                $areas = ['default' => [
+                    'name' => 'Default',
+                    'owner_id' => $defaultOwnerId,
+                    'mgr_id'   => $defaultMgrId,
+                    'head_id'  => $defaultHeadId,
+                ]] + $areas;
+            }
+            if (isset($areas['default'])) {
+                $def = $areas['default'];
+                unset($areas['default']);
+                $areas = ['default' => $def] + $areas;
+            }
+            $customCount = max(0, count($areas) - 1);
+        ?>
+        <div class="st-cad-dept st-dept-card st-dept-expanded" data-dept-idx="<?= $i ?>">
+            <div class="st-cad-dept-head">
+                <div class="st-cad-dept-title">
+                    <span class="st-active-dot"></span>
+                    <span><?= htmlspecialchars($pd['name']) ?></span>
+                    <span class="st-area-chip">
+                        <span class="st-pre-area-count" data-dept-idx="<?= $i ?>"><?= count($areas) ?></span> team<?= count($areas) === 1 ? '' : 's' ?>
+                    </span>
+                </div>
+                <button type="button" class="st-cad-add-btn st-pre-add-area-btn" data-dept-idx="<?= $i ?>" data-dept-name="<?= htmlspecialchars($pd['name']) ?>">
+                    + Add Team
+                </button>
+            </div>
+            <div class="st-cad-areas st-pre-areas-list" data-dept-idx="<?= $i ?>">
+                <?php foreach ($areas as $areaSlug => $area): ?>
+                    <?php $renderPreDueAreaRow($i, (string) $areaSlug, $area, $activeUsers); ?>
+                <?php endforeach; ?>
+            </div>
         </div>
+        <?php endforeach; ?>
+
+        <!-- Add Team Modal (Pre-Due) -->
+        <div id="st-pre-add-area-modal" class="st-modal-backdrop" style="display:none;">
+            <div class="st-modal-wrap">
+                <div class="st-modal-card">
+                    <div class="st-modal-header">
+                        <div class="st-modal-icon"><span>👥</span></div>
+                        <div>
+                            <h4 class="st-modal-title">Add Team</h4>
+                            <p class="st-modal-subtitle">Department: <strong id="st-pre-add-area-dept-name">—</strong></p>
+                        </div>
+                        <button type="button" class="st-modal-close" id="st-pre-add-area-cancel" aria-label="Close">&times;</button>
+                    </div>
+                    <div class="st-modal-body">
+                        <div class="st-modal-field">
+                            <label class="st-modal-label">Team Name <span class="st-modal-req">*</span></label>
+                            <input type="text" id="st-pre-add-area-name" class="st-modal-input" placeholder="e.g. GST, TDS, PF, ESIC, PT" maxlength="60">
+                            <p class="st-modal-help">Use a clear short name. Allowed: letters, numbers, spaces, dashes.</p>
+                        </div>
+                        <div class="st-modal-field">
+                            <label class="st-modal-label">Copy users from</label>
+                            <select id="st-pre-add-area-copy-from" class="st-modal-input"></select>
+                            <p class="st-modal-help">You can change the users later.</p>
+                        </div>
+                    </div>
+                    <div class="st-modal-footer">
+                        <button type="button" class="st-modal-btn st-modal-btn-secondary" id="st-pre-add-area-cancel-2">Cancel</button>
+                        <button type="button" class="st-modal-btn st-modal-btn-primary" id="st-pre-add-area-confirm">Create Team</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        (function(){
+            const modal   = document.getElementById('st-pre-add-area-modal');
+            const inpName = document.getElementById('st-pre-add-area-name');
+            const selCopy = document.getElementById('st-pre-add-area-copy-from');
+            const lblDept = document.getElementById('st-pre-add-area-dept-name');
+            let currentIdx = null;
+
+            function openModal(deptIdx, deptName) {
+                currentIdx = deptIdx;
+                lblDept.textContent = deptName;
+                inpName.value = '';
+
+                selCopy.innerHTML = '';
+                const optEmpty = document.createElement('option');
+                optEmpty.value = '';
+                optEmpty.textContent = '— Empty (no users assigned) —';
+                selCopy.appendChild(optEmpty);
+
+                const deptCard = document.querySelector('.st-dept-card[data-dept-idx="' + deptIdx + '"]');
+                if (deptCard) {
+                    const rows = deptCard.querySelectorAll('.st-pre-area-row');
+                    rows.forEach(function(r){
+                        const aSlug = r.getAttribute('data-area-slug');
+                        const nameNode = r.querySelector('.st-cad-area-name > span:first-child');
+                        let aName = aSlug;
+                        if (nameNode) {
+                            aName = nameNode.textContent.replace(/^📋\s*/, '').trim();
+                        }
+                        if (!aName) aName = (aSlug === 'default') ? 'Default' : aSlug;
+                        const opt = document.createElement('option');
+                        opt.value = aSlug;
+                        opt.textContent = aName + (aSlug === 'default' ? ' (recommended)' : '');
+                        if (aSlug === 'default') opt.selected = true;
+                        selCopy.appendChild(opt);
+                    });
+                }
+                modal.style.display = 'block';
+                modal.scrollTop = 0;
+                document.body.style.overflow = 'hidden';
+                setTimeout(function(){ inpName.focus(); }, 100);
+            }
+
+            function closeModal() { modal.style.display = 'none'; document.body.style.overflow = ''; currentIdx = null; }
+
+            function slugify(s) {
+                return String(s || '')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_\-\s]/g, '')
+                    .trim()
+                    .replace(/\s+/g, '-')
+                    .replace(/-+/g, '-');
+            }
+
+            function escapeHtml(s) {
+                return String(s).replace(/[&<>"']/g, function(c){
+                    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+                });
+            }
+
+            function cloneAreaRow(deptIdx, newSlug, newName, copyFromSlug) {
+                const deptCard = document.querySelector('.st-dept-card[data-dept-idx="' + deptIdx + '"]');
+                if (!deptCard) return;
+                const areasList = deptCard.querySelector('.st-pre-areas-list');
+                let sourceRow = null;
+                if (copyFromSlug) {
+                    sourceRow = deptCard.querySelector('.st-pre-area-row[data-area-slug="' + copyFromSlug + '"]');
+                }
+                if (!sourceRow) {
+                    sourceRow = deptCard.querySelector('.st-pre-area-row[data-area-slug="default"]');
+                }
+                if (!sourceRow) return;
+
+                const clone = sourceRow.cloneNode(true);
+                clone.setAttribute('data-area-slug', newSlug);
+
+                // Switch styling from "default" to "custom"
+                clone.classList.remove('st-cad-area--default');
+                clone.classList.add('st-cad-area--custom');
+
+                // Rebuild header: find the visible header div (.st-cad-area-head)
+                const headerRow = clone.querySelector('.st-cad-area-head');
+                if (headerRow) {
+                    headerRow.innerHTML =
+                        '<div class="st-cad-area-name">' +
+                            '<span>📋 ' + escapeHtml(newName) + '</span>' +
+                            '<span class="st-tag st-tag-custom">Team</span>' +
+                        '</div>' +
+                        '<button type="button" class="st-cad-rm-btn st-pre-remove-area-btn" data-dept-idx="' + deptIdx + '" data-area-slug="' + newSlug + '">🗑️ Remove</button>';
+                }
+
+                // Update all form input names from old slug -> new slug
+                const oldSlug = copyFromSlug || 'default';
+                const inputs = clone.querySelectorAll('input[name], select[name]');
+                inputs.forEach(function(el){
+                    const oldName = el.getAttribute('name');
+                    if (!oldName) return;
+                    const newNameAttr = oldName.replace(
+                        '[areas][' + oldSlug + ']',
+                        '[areas][' + newSlug + ']'
+                    );
+                    el.setAttribute('name', newNameAttr);
+                });
+
+                // Update the hidden area name input
+                const nameInp = clone.querySelector('input[name$="[name]"]');
+                if (nameInp) nameInp.value = newName;
+
+                // If copyFrom was empty, reset selects to 0
+                if (!copyFromSlug) {
+                    clone.querySelectorAll('select').forEach(function(s){ s.value = '0'; });
+                }
+
+                // Add entry animation class BEFORE appending
+                clone.classList.add('st-team-just-added');
+                areasList.appendChild(clone);
+
+                // Update counter with pulse animation
+                const counter = document.querySelector('.st-pre-area-count[data-dept-idx="' + deptIdx + '"]');
+                if (counter) {
+                    counter.textContent = String(areasList.querySelectorAll('.st-pre-area-row').length);
+                    const chip = counter.closest('.st-area-chip, .st-esc-area-chip');
+                    if (chip) {
+                        chip.classList.add('st-chip-pulse');
+                        setTimeout(function(){ chip.classList.remove('st-chip-pulse'); }, 700);
+                    }
+                }
+
+                // Smooth scroll to the new team after the entry animation starts
+                setTimeout(function(){
+                    clone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 200);
+
+                // Remove the animation class after it finishes so re-renders don't replay
+                setTimeout(function(){
+                    clone.classList.remove('st-team-just-added');
+                }, 2800);
+
+                // Mark form as dirty
+                markPreDirty();
+            }
+
+            // ---- Unsaved-changes tracking (Pre-Due) ----
+            let preDirty = false;
+            function markPreDirty() {
+                preDirty = true;
+                const banner = document.getElementById('st-pre-unsaved-banner');
+                if (banner) banner.classList.add('show');
+                const btn = document.getElementById('st-pre-save-btn');
+                if (btn) btn.classList.add('st-save-pulse');
+            }
+            const preForm = document.getElementById('st-pre-form');
+            if (preForm) {
+                preForm.addEventListener('change', function(){ markPreDirty(); });
+                preForm.addEventListener('submit', function(){ preDirty = false; });
+            }
+            window.addEventListener('beforeunload', function(e){
+                if (preDirty) {
+                    e.preventDefault();
+                    e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+                    return e.returnValue;
+                }
+            });
+
+            document.addEventListener('click', function(e){
+                const addBtn = e.target.closest('.st-pre-add-area-btn');
+                if (addBtn) {
+                    openModal(addBtn.getAttribute('data-dept-idx'), addBtn.getAttribute('data-dept-name'));
+                    return;
+                }
+                const rmBtn = e.target.closest('.st-pre-remove-area-btn');
+                if (rmBtn) {
+                    const deptIdx  = rmBtn.getAttribute('data-dept-idx');
+                    const areaSlug = rmBtn.getAttribute('data-area-slug');
+                    if (areaSlug === 'default') return;
+                    if (!confirm('Remove this team? Saved users for this team will be deleted on Save.')) return;
+                    const row = document.querySelector('.st-dept-card[data-dept-idx="' + deptIdx + '"] .st-pre-area-row[data-area-slug="' + areaSlug + '"]');
+                    if (row) row.remove();
+                    const counter = document.querySelector('.st-pre-area-count[data-dept-idx="' + deptIdx + '"]');
+                    const remaining = document.querySelectorAll('.st-dept-card[data-dept-idx="' + deptIdx + '"] .st-pre-area-row').length;
+                    if (counter) counter.textContent = String(remaining);
+                    markPreDirty();
+                    return;
+                }
+                if (e.target.id === 'st-pre-add-area-cancel' || e.target.id === 'st-pre-add-area-cancel-2' || e.target === modal) { closeModal(); return; }
+                if (e.target.id === 'st-pre-add-area-confirm') {
+                    const name = inpName.value.trim();
+                    if (name === '') { alert('Please enter an area name.'); inpName.focus(); return; }
+                    const slug = slugify(name);
+                    if (slug === '' || slug === 'default') { alert('Please use a valid area name (e.g. "GST", "TDS").'); return; }
+
+                    const existing = document.querySelector('.st-dept-card[data-dept-idx="' + currentIdx + '"] .st-pre-area-row[data-area-slug="' + slug + '"]');
+                    if (existing) { alert('An area with this name already exists in this department.'); return; }
+
+                    const copyFrom = selCopy.value || '';
+                    cloneAreaRow(currentIdx, slug, name, copyFrom);
+                    closeModal();
+                }
+            });
+
+            document.addEventListener('keydown', function(e){
+                if (e.key === 'Escape' && modal.style.display === 'block') closeModal();
+            });
+        })();
+        </script>
         <div class="st-actions-right st-pre-actions">
             <button type="submit" class="btn btn-secondary" onclick="document.getElementById('pre_action_field').value='test';">Send Test Email</button>
             <button type="submit" class="btn btn-secondary" onclick="document.getElementById('pre_action_field').value='trigger';">Manual Trigger</button>
-            <button type="submit" class="btn btn-primary" onclick="document.getElementById('pre_action_field').value='save';">Save Configuration</button>
+            <button type="submit" class="btn btn-primary st-pre-save-btn" id="st-pre-save-btn" onclick="document.getElementById('pre_action_field').value='save';">Save Configuration</button>
         </div>
     </form>
 
