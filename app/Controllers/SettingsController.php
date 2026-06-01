@@ -938,16 +938,10 @@ class SettingsController extends BaseController
             }
 
             // ─── PRE-DUE ─────────────────────────────────────────────────
-            $preIdx = $preIdxByName[strtolower($deptName)] ?? null;
-            if ($preIdx === null) {
-                // Try common aliases
-                foreach (['Human Resources' => 'human resource', 'HR' => 'human resource'] as $a => $b) {
-                    if (isset($preIdxByName[strtolower($a)]) && strtolower($deptName) === $b) {
-                        $preIdx = $preIdxByName[strtolower($a)];
-                        break;
-                    }
-                }
-            }
+            // Robust dept-name matching: HR ↔ "Human Resource" ↔ "Human Resources"
+            // ↔ Risk ↔ "Risk Management". Tries direct match, then aliases.
+            $preIdx = $this->findPreDueDeptIndex($preIdxByName, $deptName);
+
             if ($preIdx !== null) {
                 $pdAreas = is_array($pre['depts'][$preIdx]['areas'] ?? null) ? $pre['depts'][$preIdx]['areas'] : [];
                 $pdExists = isset($pdAreas[$aSlug]);
@@ -963,17 +957,156 @@ class SettingsController extends BaseController
             }
         }
 
+        // ─── MIRROR teams between Escalation Matrix and Pre-Due Reminder ──
+        // If admin added a team to ONLY one tab (via "+ Add Team"), copy it
+        // to the other tab so both stay consistent. This ensures every team
+        // exists in both tabs — no manual duplication needed.
+        $mirrored = $this->mirrorTeamsBetweenEscAndPreDue($esc, $pre, $preIdxByName, $orgId);
+
         // Persist
         $this->setJson($orgId, self::KEYS['escalation'], $esc);
         $this->setJson($orgId, self::KEYS['pre_due'], $pre);
 
         $msg = "Sync complete. Created {$created} new team(s), updated {$updated}, skipped {$skipped}.";
+        if ($mirrored > 0) {
+            $msg .= " 🔗 Mirrored {$mirrored} existing team(s) between Escalation Matrix and Pre-Due Reminder.";
+        }
         if (!empty($skippedUnknownDept)) {
             $msg .= ' ⚠ These Authority Matrix departments are not in the standard list and were skipped: ' . implode(', ', array_keys($skippedUnknownDept)) . '. (You can add their teams manually if needed.)';
         }
         $msg .= ' 💾 A backup was created — use "Undo Last Sync" to revert if needed.';
         $_SESSION['flash_success'] = $msg;
         $this->redirect($returnTo);
+    }
+
+    /**
+     * Find Pre-Due dept index by name, with robust aliasing.
+     *
+     * Authority Matrix may have "HR" or "Human Resource" while Pre-Due has
+     * "Human Resources". This method handles all such common variations.
+     */
+    private function findPreDueDeptIndex(array $preIdxByName, string $deptName): ?int
+    {
+        $needle = strtolower(trim($deptName));
+        if ($needle === '') return null;
+
+        // 1) Direct match
+        if (isset($preIdxByName[$needle])) {
+            return (int) $preIdxByName[$needle];
+        }
+
+        // 2) Aliases — normalize common variants to a "canonical" group key
+        $canonical = static function (string $s): string {
+            $s = strtolower(trim($s));
+            if (in_array($s, ['hr', 'human resource', 'human resources'], true)) return 'hr_group';
+            if (in_array($s, ['risk', 'risk management', 'risk-management'], true)) return 'risk_group';
+            return $s;
+        };
+        $needleCanon = $canonical($needle);
+        foreach ($preIdxByName as $preName => $idx) {
+            if ($canonical($preName) === $needleCanon) {
+                return (int) $idx;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Ensure every team in Escalation Matrix also exists in Pre-Due Reminder
+     * (and vice versa). When the admin uses "+ Add Team" in one tab, this
+     * mirror step copies the team to the other tab so both stay aligned.
+     *
+     * @param array<string,mixed> $esc Escalation settings (mutated by reference)
+     * @param array<string,mixed> $pre Pre-Due settings (mutated by reference)
+     * @return int Number of teams mirrored
+     */
+    private function mirrorTeamsBetweenEscAndPreDue(array &$esc, array &$pre, array $preIdxByName, int $orgId): int
+    {
+        $mirrored = 0;
+
+        $deptSlug = static function (string $name): string {
+            $s = strtolower(trim($name));
+            $aliases = [
+                'human resource'  => 'hr',
+                'human resources' => 'hr',
+                'risk'            => 'risk',
+                'risk management' => 'risk',
+            ];
+            if (isset($aliases[$s])) return $aliases[$s];
+            $s = preg_replace('/[^a-z0-9_\-\s]/', '', $s);
+            $s = preg_replace('/\s+/', '-', (string) $s);
+            return preg_replace('/-+/', '-', (string) $s) ?: '';
+        };
+
+        // ─── Direction 1: Escalation → Pre-Due ───
+        foreach ($esc['depts'] ?? [] as $eSlug => $eDept) {
+            $eDeptName = (string) ($eDept['name'] ?? $eSlug);
+            $preIdx = $this->findPreDueDeptIndex($preIdxByName, $eDeptName);
+            if ($preIdx === null) continue;
+
+            foreach ($eDept['areas'] ?? [] as $aSlug => $area) {
+                if ($aSlug === 'default') continue;
+                $pdAreas = is_array($pre['depts'][$preIdx]['areas'] ?? null) ? $pre['depts'][$preIdx]['areas'] : [];
+                if (isset($pdAreas[$aSlug])) continue; // Already exists in pre-due
+
+                // Take the user from Level 1 of escalation as the Owner
+                $level1ToUid = 0;
+                if (!empty($area['levels'][0]['to'])) {
+                    $level1ToUid = (int) $area['levels'][0]['to'];
+                }
+                $pdAreas[$aSlug] = [
+                    'name'     => (string) ($area['name'] ?? $aSlug),
+                    'owner_id' => $level1ToUid,
+                    'mgr_id'   => 0,
+                    'head_id'  => 0,
+                ];
+                $pre['depts'][$preIdx]['areas'] = $pdAreas;
+                $mirrored++;
+            }
+        }
+
+        // ─── Direction 2: Pre-Due → Escalation ───
+        foreach ($pre['depts'] ?? [] as $pdDept) {
+            $pdDeptName = (string) ($pdDept['name'] ?? '');
+            if ($pdDeptName === '') continue;
+            $dSlug = $deptSlug($pdDeptName);
+            if ($dSlug === '' || !isset($esc['depts'][$dSlug])) continue;
+
+            foreach ($pdDept['areas'] ?? [] as $aSlug => $area) {
+                if ($aSlug === 'default') continue;
+                $escAreas = $esc['depts'][$dSlug]['areas'] ?? [];
+                if (isset($escAreas[$aSlug])) continue; // Already exists
+
+                // Use Pre-Due users as escalation levels (Owner = Lvl 1+, Mgr = Lvl 2, Head = Lvl 3+4)
+                $ownerId = (int) ($area['owner_id'] ?? 0);
+                $mgrId   = (int) ($area['mgr_id']   ?? 0);
+                $headId  = (int) ($area['head_id']  ?? 0);
+                $fixedThresholds = [0, 3, 7, 14];
+                $tpls = ['Escalation Level 1', 'Escalation Level 2', 'Escalation Level 2', 'High Risk Escalation'];
+                $levelUsers = [
+                    $ownerId,
+                    $mgrId ?: $ownerId,
+                    $headId ?: $mgrId ?: $ownerId,
+                    $headId ?: $mgrId ?: $ownerId,
+                ];
+                $levels = [];
+                for ($i = 0; $i < 4; $i++) {
+                    $levels[] = [
+                        'd'   => $fixedThresholds[$i],
+                        'to'  => (int) $levelUsers[$i],
+                        'tpl' => $tpls[$i],
+                    ];
+                }
+                $escAreas[$aSlug] = [
+                    'name'   => (string) ($area['name'] ?? $aSlug),
+                    'levels' => $levels,
+                ];
+                $esc['depts'][$dSlug]['areas'] = $escAreas;
+                $mirrored++;
+            }
+        }
+
+        return $mirrored;
     }
 
     /**

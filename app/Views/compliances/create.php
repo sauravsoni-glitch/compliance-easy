@@ -42,7 +42,7 @@ $evTypePost = $_POST['evidence_type'] ?? '';
                     <label class="form-label">Applicable Department *</label>
                     <select name="department" id="dept-input" class="form-control" required>
                         <option value="">Select Department</option>
-                        <?php foreach (['Legal', 'Finance', 'Operations', 'Risk', 'IT', 'Compliance', 'Human Resource'] as $dept): ?>
+                        <?php foreach (['Legal', 'Finance', 'Operations', 'Risk', 'IT', 'Compliance', 'Human Resources'] as $dept): ?>
                         <option value="<?= htmlspecialchars($dept) ?>" <?= ($_POST['department'] ?? '') === $dept ? 'selected' : '' ?>><?= htmlspecialchars($dept) ?></option>
                         <?php endforeach; ?>
                     </select>
