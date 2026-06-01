@@ -5,6 +5,7 @@ return [
         '/login' => ['AuthController', 'loginPage'],
         '/logout' => ['AuthController', 'logout'],
         '/forgot-password' => ['AuthController', 'forgotPasswordPage'],
+        '/reset-password' => ['AuthController', 'resetPasswordPage'],
         '/pricing' => ['PricingController', 'index'],
         '/checkout' => ['CheckoutController', 'index'],
         '/create-account' => ['AuthController', 'createAccountPage'],
@@ -71,6 +72,7 @@ return [
     'POST' => [
         '/login' => ['AuthController', 'login'],
         '/forgot-password' => ['AuthController', 'forgotPassword'],
+        '/reset-password' => ['AuthController', 'resetPassword'],
         '/create-account' => ['AuthController', 'createAccount'],
         '/invite/accept' => ['AuthController', 'inviteAcceptCreateAccount'],
         '/invite/accept.php' => ['AuthController', 'inviteAcceptCreateAccount'],

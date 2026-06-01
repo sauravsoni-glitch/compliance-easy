@@ -193,13 +193,155 @@ class AuthController extends BaseController
     {
         Auth::init();
         $email = trim($_POST['email'] ?? '');
-        if (!$email) {
-            $_SESSION['forgot_error'] = 'Please enter your email address.';
+        if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $_SESSION['forgot_error'] = 'Please enter a valid email address.';
             $this->redirect('/forgot-password');
         }
-        // In production: send reset link via email; for now show message
-        $_SESSION['forgot_success'] = 'If an account exists with this email, you will receive a password reset link shortly.';
+
+        $this->ensurePasswordResetsTable();
+
+        // Look up active user (silent — same message returned whether email
+        // exists or not, to avoid leaking which addresses are registered).
+        $stmt = $this->db->prepare('SELECT id, full_name, email, status FROM users WHERE email = ? LIMIT 1');
+        $stmt->execute([$email]);
+        $user = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        $safeNotice = 'If an account exists with this email, a password reset link has been sent. It will expire in 60 minutes.';
+
+        if ($user && ($user['status'] ?? '') === 'active') {
+            // Invalidate any pending reset tokens for this user
+            try {
+                $this->db->prepare("UPDATE password_resets SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL")
+                    ->execute([(int) $user['id']]);
+            } catch (\Throwable $e) {
+                // Ignore; not critical
+            }
+
+            $token = bin2hex(random_bytes(32));
+            $tokenHash = hash('sha256', $token);
+            $expiresAt = date('Y-m-d H:i:s', time() + 3600); // 60 minutes
+
+            $this->db->prepare('INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (?, ?, ?)')
+                ->execute([(int) $user['id'], $tokenHash, $expiresAt]);
+
+            $baseUrl = rtrim((string) ($this->appConfig['url'] ?? ''), '/');
+            $resetLink = $baseUrl . '/reset-password?token=' . urlencode($token);
+
+            try {
+                \App\Core\Mailer::sendPasswordReset(
+                    $this->appConfig,
+                    (string) $user['email'],
+                    (string) ($user['full_name'] ?? ''),
+                    $resetLink
+                );
+            } catch (\Throwable $e) {
+                // Even if mail fails, return the generic success message so we
+                // don't leak whether email was sent. Admin can read mailer log.
+                error_log('Forgot-password mail failed: ' . $e->getMessage());
+            }
+        }
+
+        $_SESSION['forgot_success'] = $safeNotice;
         $this->redirect('/forgot-password');
+    }
+
+    public function resetPasswordPage(): void
+    {
+        $basePath = $this->appConfig['url'] ?? '';
+        $token = trim((string) ($_GET['token'] ?? ''));
+        $error = $_SESSION['reset_error'] ?? null;
+        unset($_SESSION['reset_error']);
+        $this->view('auth/reset-password', [
+            'pageTitle' => 'Reset Password',
+            'basePath'  => $basePath,
+            'token'     => $token,
+            'error'     => $error,
+        ], false);
+    }
+
+    public function resetPassword(): void
+    {
+        Auth::init();
+        $token    = trim((string) ($_POST['token'] ?? ''));
+        $password = (string) ($_POST['password'] ?? '');
+        $confirm  = (string) ($_POST['password_confirm'] ?? '');
+
+        if ($token === '') {
+            $_SESSION['reset_error'] = 'Reset token is missing.';
+            $this->redirect('/forgot-password');
+        }
+        if (strlen($password) < 8) {
+            $_SESSION['reset_error'] = 'Password must be at least 8 characters.';
+            $this->redirect('/reset-password?token=' . urlencode($token));
+        }
+        if ($password !== $confirm) {
+            $_SESSION['reset_error'] = 'Passwords do not match.';
+            $this->redirect('/reset-password?token=' . urlencode($token));
+        }
+
+        $this->ensurePasswordResetsTable();
+
+        $tokenHash = hash('sha256', $token);
+        $stmt = $this->db->prepare("
+            SELECT pr.id, pr.user_id, pr.expires_at, pr.used_at, u.email
+              FROM password_resets pr
+         LEFT JOIN users u ON u.id = pr.user_id
+             WHERE pr.token_hash = ?
+             LIMIT 1
+        ");
+        $stmt->execute([$tokenHash]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$row) {
+            $_SESSION['reset_error'] = 'Invalid or expired reset link. Please request a new one.';
+            $this->redirect('/forgot-password');
+        }
+        if (!empty($row['used_at'])) {
+            $_SESSION['reset_error'] = 'This reset link has already been used. Please request a new one.';
+            $this->redirect('/forgot-password');
+        }
+        if (strtotime((string) $row['expires_at']) <= time()) {
+            $_SESSION['reset_error'] = 'This reset link has expired. Please request a new one.';
+            $this->redirect('/forgot-password');
+        }
+
+        $hashed = password_hash($password, PASSWORD_BCRYPT);
+        $this->db->prepare('UPDATE users SET password = ? WHERE id = ?')
+            ->execute([$hashed, (int) $row['user_id']]);
+        $this->db->prepare('UPDATE password_resets SET used_at = NOW() WHERE id = ?')
+            ->execute([(int) $row['id']]);
+
+        // Invalidate any other pending tokens for the same user
+        $this->db->prepare('UPDATE password_resets SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL')
+            ->execute([(int) $row['user_id']]);
+
+        $_SESSION['login_success'] = 'Password updated. Please sign in with your new password.';
+        $this->redirect('/login');
+    }
+
+    /** Auto-migration for password_resets table. */
+    private function ensurePasswordResetsTable(): void
+    {
+        static $done = false;
+        if ($done) return;
+        try {
+            $this->db->exec("
+                CREATE TABLE IF NOT EXISTS `password_resets` (
+                  `id` int unsigned NOT NULL AUTO_INCREMENT,
+                  `user_id` int unsigned NOT NULL,
+                  `token_hash` varchar(64) NOT NULL,
+                  `expires_at` datetime NOT NULL,
+                  `used_at` datetime NULL DEFAULT NULL,
+                  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_token_hash` (`token_hash`),
+                  KEY `idx_user_id` (`user_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+            $done = true;
+        } catch (\Throwable $e) {
+            error_log('password_resets table create failed: ' . $e->getMessage());
+        }
     }
 
     public function createAccountPage(): void

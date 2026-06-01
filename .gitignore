@@ -37,3 +37,7 @@ Desktop.ini
 
 # PHP
 .phpunit.result.cache
+
+# Runtime lock files from AutoMailTrigger
+storage/automail/*.lock
+storage/logs/*

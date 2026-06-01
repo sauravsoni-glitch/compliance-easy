@@ -92,6 +92,52 @@ final class Mailer
     }
 
     /**
+     * Send a password-reset email.
+     * @return array{0:bool,1:?string} [sent, errorMessage]
+     */
+    public static function sendPasswordReset(
+        array $appConfig,
+        string $toEmail,
+        string $toName,
+        string $resetLink
+    ): array {
+        $subject = 'Reset your Easy Home Finance password';
+        $safeName  = htmlspecialchars($toName !== '' ? $toName : 'there', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $safeLink  = htmlspecialchars($resetLink, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $safeEmail = htmlspecialchars($toEmail, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        $html = '<div style="background:#f3f4f6;padding:24px 12px;font-family:Segoe UI,system-ui,Roboto,Helvetica,Arial,sans-serif;">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">'
+            . '<tr><td style="background:#dc2626;border-radius:14px 14px 0 0;padding:24px;color:#fff;">'
+            .   '<div style="font-size:22px;font-weight:800;color:#fff;text-transform:lowercase;">easy</div>'
+            .   '<div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;opacity:0.9;margin-top:8px;">Password reset request</div>'
+            .   '<h1 style="margin:8px 0 0;font-size:20px;line-height:1.3;font-weight:700;">Set a new password</h1>'
+            . '</td></tr>'
+            . '<tr><td style="background:#fff;padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 14px 14px;">'
+            .   '<p style="margin:0 0 14px;font-size:15px;color:#111827;">Hi ' . $safeName . ',</p>'
+            .   '<p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">We received a request to reset the password for <strong>' . $safeEmail . '</strong>. Click the button below to set a new password. This link expires in <strong>60 minutes</strong>.</p>'
+            .   '<div style="text-align:center;margin:20px 0;">'
+            .     '<a href="' . $safeLink . '" style="display:inline-block;padding:13px 28px;background:#dc2626;color:#fff !important;text-decoration:none;border-radius:8px;font-size:15px;font-weight:700;">Reset password</a>'
+            .   '</div>'
+            .   '<p style="margin:14px 0 0;font-size:13px;color:#6b7280;line-height:1.5;">If the button doesn\'t work, copy and paste this link into your browser:</p>'
+            .   '<p style="margin:6px 0 14px;font-size:12px;color:#374151;word-break:break-all;background:#f9fafb;padding:10px 12px;border-radius:6px;border:1px solid #e5e7eb;">' . $safeLink . '</p>'
+            .   '<p style="margin:18px 0 0;font-size:12px;color:#9ca3af;line-height:1.5;">If you didn\'t request a password reset, you can safely ignore this email — your password will not be changed.</p>'
+            . '</td></tr>'
+            . '</table>'
+            . '</div>';
+
+        $text = "PASSWORD RESET — Easy Home Finance\n"
+            . str_repeat('=', 40) . "\n\n"
+            . "Hi " . ($toName !== '' ? $toName : 'there') . ",\n\n"
+            . "We received a request to reset the password for {$toEmail}.\n"
+            . "This link expires in 60 minutes.\n\n"
+            . "RESET YOUR PASSWORD:\n{$resetLink}\n\n"
+            . "If you didn't request this, you can ignore this email.\n";
+
+        return self::sendGeneric($appConfig, $toEmail, $toName, $subject, $html, $text);
+    }
+
+    /**
      * "log" provider — writes emails to storage/logs/mailer.log instead of sending.
      * Perfect for local dev where SMTP / Mailgun aren't reachable.
      *
