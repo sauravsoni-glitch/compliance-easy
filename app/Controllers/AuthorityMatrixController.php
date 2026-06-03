@@ -337,7 +337,8 @@ class AuthorityMatrixController extends BaseController
                 $this->db->prepare('UPDATE authority_matrix SET compliance_area=?, department=?, frequency=?, maker_id=?, reviewer_id=?, approver_id=?, workflow_level=?, risk_level=?, escalation_days_before=?, status=? WHERE id=? AND organization_id=?')
                     ->execute([$area, $dept, $freq, $makerId, $reviewerId, $approverId, $wl, $risk, $esc, $st, $id, $orgId]);
             }
-            $_SESSION['flash_success'] = 'Authority mapping updated.';
+            $this->autoSyncEmailAutomation($orgId, $dept, $area, (int) $makerId, (int) $reviewerId, (int) $approverId);
+            $_SESSION['flash_success'] = 'Authority mapping updated. Email Automation teams synced automatically.';
             $this->redirect('/authority-matrix/view/' . $id);
         } else {
             if ($hl) {
@@ -348,8 +349,31 @@ class AuthorityMatrixController extends BaseController
                     ->execute([$orgId, $area, $dept, $freq, $makerId, $reviewerId, $approverId, $wl, $risk, $esc, $st]);
             }
             $newId = (int) $this->db->lastInsertId();
-            $_SESSION['flash_success'] = 'Authority mapping created.';
+            $this->autoSyncEmailAutomation($orgId, $dept, $area, (int) $makerId, (int) $reviewerId, (int) $approverId);
+            $_SESSION['flash_success'] = 'Authority mapping created. Email Automation teams synced automatically.';
             $this->redirect('/authority-matrix/view/' . $newId);
+        }
+    }
+
+    /**
+     * Auto-sync a single Authority Matrix row's data into Email Automation
+     * (Escalation Matrix + Pre-Due Reminder). Wrapped in try/catch so AM
+     * save never fails just because the sync had a problem.
+     */
+    private function autoSyncEmailAutomation(
+        int $orgId,
+        string $department,
+        string $area,
+        int $makerId,
+        int $reviewerId,
+        int $approverId
+    ): void {
+        try {
+            $sync = new \App\Core\AuthorityMatrixSyncService($this->db);
+            $sync->syncRow($orgId, $department, $area, $makerId, $reviewerId ?: 0, $approverId);
+        } catch (\Throwable $e) {
+            // Never let auto-sync break the AM save flow
+            error_log('Auto-sync to Email Automation failed: ' . $e->getMessage());
         }
     }
 

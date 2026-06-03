@@ -73,7 +73,7 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
     <a href="<?= $tabQs('security') ?>" class="st-main-tab <?= $activeTab === 'security' ? 'active' : '' ?>"><i class="fas fa-lock"></i> Security</a>
     <?php if ($isAdmin): ?>
     <a href="<?= $tabQs('users') ?>" class="st-main-tab <?= $activeTab === 'users' ? 'active' : '' ?>"><i class="fas fa-users"></i> User Management</a>
-    <a href="<?= $tabQs('automation', 'escalation') ?>" class="st-main-tab <?= $activeTab === 'automation' ? 'active' : '' ?>"><i class="fas fa-bolt"></i> Compliance Automation</a>
+    <a href="<?= $tabQs('automation', 'escalation') ?>" class="st-main-tab <?= $activeTab === 'automation' ? 'active' : '' ?>"><i class="fas fa-bolt"></i> Email Automation</a>
     <a href="<?= $tabQs('templates') ?>" class="st-main-tab <?= $activeTab === 'templates' ? 'active' : '' ?>"><i class="fas fa-envelope"></i> Notification Templates</a>
     <?php endif; ?>
 </nav>
@@ -268,33 +268,6 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
     <h3 class="card-title mt-3">Escalation Matrix</h3>
     <p class="text-muted text-sm">Smart engine active. Department digest uses fixed escalation slots: <strong>T+0, T+3, T+7, T+14</strong> (days <strong>after</strong> the due date — overdue only).</p>
 
-    <!-- Sync from Authority Matrix card -->
-    <div class="st-sync-card" style="background:linear-gradient(135deg,#fef9f9 0%,#fff5f5 100%);border:1.5px solid #fecaca;border-radius:12px;padding:16px 20px;margin:14px 0 18px 0;display:flex;align-items:center;gap:16px;box-shadow:0 2px 8px rgba(220,38,38,0.06);flex-wrap:wrap;">
-        <div style="width:44px;height:44px;border-radius:11px;background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 4px 10px rgba(220,38,38,0.25);">🔄</div>
-        <div style="flex:1;min-width:240px;">
-            <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:3px;">Auto-create teams from Authority Matrix</div>
-            <div style="font-size:12px;color:#64748b;line-height:1.5;">Pulls every active <strong>(Department + Compliance Area)</strong> combo and creates matching teams here with Maker/Reviewer/Approver wired in. Existing departments without matching entries are <strong>preserved</strong>. All user picks remain editable. A backup is taken before each sync so you can undo.</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/sync-teams-from-matrix" style="display:flex;gap:8px;align-items:center;" onsubmit="return confirm('This will read Authority Matrix and create teams in both Escalation Matrix and Pre-Due Reminder. A backup will be taken so you can undo. Continue?');">
-                <input type="hidden" name="return_to" value="/settings?tab=automation&sub=escalation">
-                <select name="sync_mode" style="padding:7px 10px;font-size:12px;border:1.5px solid #fecaca;border-radius:7px;background:#fff;color:#0f172a;font-weight:500;cursor:pointer;">
-                    <option value="skip_existing" selected>Skip existing teams</option>
-                    <option value="overwrite">Overwrite (refresh users)</option>
-                </select>
-                <button type="submit" style="background:#dc2626;border:1.5px solid #dc2626;color:#fff;padding:8px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(220,38,38,0.25);transition:all 0.15s;" onmouseover="this.style.background='#b91c1c';this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(220,38,38,0.35)';" onmouseout="this.style.background='#dc2626';this.style.transform='translateY(0)';this.style.boxShadow='0 2px 6px rgba(220,38,38,0.25)';">🔄 Sync Now</button>
-            </form>
-            <?php if (!empty($hasSyncBackup)): ?>
-            <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/undo-sync-teams" onsubmit="return confirm('Restore escalation & pre-due settings to the state BEFORE the last sync? This will discard any changes you saved since then.');">
-                <input type="hidden" name="return_to" value="/settings?tab=automation&sub=escalation">
-                <button type="submit" title="Restore the snapshot taken before the last sync (<?= htmlspecialchars($lastSyncBackupAt ?? '') ?>)" style="background:#fff;border:1.5px solid #9ca3af;color:#374151;padding:8px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='#dc2626';this.style.color='#dc2626';" onmouseout="this.style.borderColor='#9ca3af';this.style.color='#374151';">↺ Undo Last Sync</button>
-            </form>
-            <?php endif; ?>
-        </div>
-    </div>
-    <div class="alert alert-info text-sm mb-3" style="border-radius:8px;">
-        <strong>Why “Skipped” or no mail?</strong> Escalation runs on <strong>past due</strong> dates (calendar “today” uses your app timezone, typically IST). Items due <strong>today or later</strong> are skipped for escalation. You also need <strong>enabled</strong> templates of type <strong>Escalation</strong> under Notification Templates, the maker’s email, and working mail settings (<code>config/mail.php</code> / env).
-    </div>
     <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/escalation" id="st-esc-form">
         <input type="hidden" name="esc_action" id="esc_action_field" value="save">
         <div class="st-unsaved-banner" id="st-esc-unsaved-banner">
@@ -1312,30 +1285,6 @@ $tabQs = function (string $t, string $sub = '') use ($basePath) {
     <h3 class="card-title mt-3">Pre-Due Date Reminder &amp; Escalation</h3>
     <p class="text-muted text-sm">Smart engine active. Pre-due reminder slots are fixed to <strong>T-7, T-3, T-1</strong> with automatic short-timeline catch-up.</p>
 
-    <!-- Sync from Authority Matrix card -->
-    <div class="st-sync-card" style="background:linear-gradient(135deg,#fef9f9 0%,#fff5f5 100%);border:1.5px solid #fecaca;border-radius:12px;padding:16px 20px;margin:14px 0 18px 0;display:flex;align-items:center;gap:16px;box-shadow:0 2px 8px rgba(220,38,38,0.06);flex-wrap:wrap;">
-        <div style="width:44px;height:44px;border-radius:11px;background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 4px 10px rgba(220,38,38,0.25);">🔄</div>
-        <div style="flex:1;min-width:240px;">
-            <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:3px;">Auto-create teams from Authority Matrix</div>
-            <div style="font-size:12px;color:#64748b;line-height:1.5;">Pulls every active <strong>(Department + Compliance Area)</strong> combo and creates matching teams here with Maker/Reviewer/Approver wired in. Existing departments without matching entries are <strong>preserved</strong>. All user picks remain editable. A backup is taken before each sync so you can undo.</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/sync-teams-from-matrix" style="display:flex;gap:8px;align-items:center;" onsubmit="return confirm('This will read Authority Matrix and create teams in both Escalation Matrix and Pre-Due Reminder. A backup will be taken so you can undo. Continue?');">
-                <input type="hidden" name="return_to" value="/settings?tab=automation&sub=pre-due">
-                <select name="sync_mode" style="padding:7px 10px;font-size:12px;border:1.5px solid #fecaca;border-radius:7px;background:#fff;color:#0f172a;font-weight:500;cursor:pointer;">
-                    <option value="skip_existing" selected>Skip existing teams</option>
-                    <option value="overwrite">Overwrite (refresh users)</option>
-                </select>
-                <button type="submit" style="background:#dc2626;border:1.5px solid #dc2626;color:#fff;padding:8px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(220,38,38,0.25);transition:all 0.15s;" onmouseover="this.style.background='#b91c1c';this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(220,38,38,0.35)';" onmouseout="this.style.background='#dc2626';this.style.transform='translateY(0)';this.style.boxShadow='0 2px 6px rgba(220,38,38,0.25)';">🔄 Sync Now</button>
-            </form>
-            <?php if (!empty($hasSyncBackup)): ?>
-            <form method="post" action="<?= htmlspecialchars($basePath) ?>/settings/undo-sync-teams" onsubmit="return confirm('Restore escalation & pre-due settings to the state BEFORE the last sync? This will discard any changes you saved since then.');">
-                <input type="hidden" name="return_to" value="/settings?tab=automation&sub=pre-due">
-                <button type="submit" title="Restore the snapshot taken before the last sync (<?= htmlspecialchars($lastSyncBackupAt ?? '') ?>)" style="background:#fff;border:1.5px solid #9ca3af;color:#374151;padding:8px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='#dc2626';this.style.color='#dc2626';" onmouseout="this.style.borderColor='#9ca3af';this.style.color='#374151';">↺ Undo Last Sync</button>
-            </form>
-            <?php endif; ?>
-        </div>
-    </div>
     <div class="alert alert-info text-sm mb-3" style="border-radius:8px;">
         <strong>Why “Skipped” on manual trigger?</strong> Pre-due reminders only run for compliances that are still <strong>Pending</strong> (maker has not submitted yet). Items in <strong>Submitted</strong> or <strong>Under review</strong> are skipped — the maker already progressed the workflow. Past-due dates (already overdue for pre-due), missing notification templates, or users without email can also increase skips.
     </div>

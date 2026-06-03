@@ -305,12 +305,37 @@ $evTypePost = $_POST['evidence_type'] ?? '';
             && (document.querySelector('input[name="workflow_type"]').remove());
     }
 
+    // Lock/unlock a user-pick select (Owner/Reviewer/Approver) so admins can't
+    // override what Authority Matrix mapped. We still need the value to POST,
+    // so add a hidden input mirroring the select's value when locked.
+    function lockUserSelect(selectEl, lock, hiddenId) {
+        if (!selectEl) return;
+        // Always remove the previous hidden input first
+        var existing = document.getElementById(hiddenId);
+        if (existing) existing.remove();
+        selectEl.disabled = !!lock;
+        if (lock && selectEl.value) {
+            var h = document.createElement('input');
+            h.type = 'hidden';
+            h.name = selectEl.name;
+            h.id   = hiddenId;
+            h.value = selectEl.value;
+            selectEl.parentNode.appendChild(h);
+        }
+        // Subtle visual cue
+        selectEl.style.cursor = lock ? 'not-allowed' : '';
+        selectEl.style.background = lock ? '#f9fafb' : '';
+    }
+
     function applyMatrix(data) {
         if (!data.found) {
-            // unlock everything
+            // unlock everything — matrix has no entry for this dept/area
             wf.disabled = false;
             hint.style.display = 'none';
             toggleWorkflow(false);
+            lockUserSelect(ownerSel, false, 'owner-hidden');
+            lockUserSelect(revSel,   false, 'reviewer-hidden');
+            lockUserSelect(appSel,   false, 'approver-hidden');
             return;
         }
         if (areaSel && Array.isArray(data.compliance_areas) && data.compliance_areas.length) {
@@ -333,11 +358,17 @@ $evTypePost = $_POST['evidence_type'] ?? '';
         if (data.reviewer_id && revSel) revSel.value = String(data.reviewer_id);
         if (data.approver_id && appSel) appSel.value = String(data.approver_id);
 
+        // Lock the user pickers — Authority Matrix is the source of truth.
+        // Admin must edit AM to change users for this dept+area.
+        lockUserSelect(ownerSel, !!data.maker_id,    'owner-hidden');
+        lockUserSelect(revSel,   !!data.reviewer_id, 'reviewer-hidden');
+        lockUserSelect(appSel,   !!data.approver_id, 'approver-hidden');
+
         // show hint
         if (data.matched_by === 'department_area') {
-            hint.textContent = '⚡ Authority Matrix applied by Department + Compliance Area: workflow and maker/reviewer/approver are auto-assigned.';
+            hint.textContent = '🔒 Owner, Reviewer & Approver are locked — auto-assigned from Authority Matrix (Department + Compliance Area). Edit there to change.';
         } else {
-            hint.textContent = '⚡ Authority Matrix applied by Department. Select Compliance Area to refine workflow/users for that area.';
+            hint.textContent = '🔒 Owner, Reviewer & Approver are locked — auto-assigned from Authority Matrix (Department). Select a Compliance Area to refine.';
         }
         hint.style.display = 'block';
     }
