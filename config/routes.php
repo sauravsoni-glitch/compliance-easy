@@ -6,6 +6,7 @@ return [
         '/logout' => ['AuthController', 'logout'],
         '/forgot-password' => ['AuthController', 'forgotPasswordPage'],
         '/reset-password' => ['AuthController', 'resetPasswordPage'],
+        '/cron/run-automations' => ['CronController', 'runAutomations'],
         '/pricing' => ['PricingController', 'index'],
         '/checkout' => ['CheckoutController', 'index'],
         '/create-account' => ['AuthController', 'createAccountPage'],

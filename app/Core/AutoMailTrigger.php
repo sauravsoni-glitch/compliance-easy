@@ -62,30 +62,36 @@ final class AutoMailTrigger
 
             foreach ($orgIds as $orgId) {
                 // ---- Pre-Due Reminders ----
+                // Lock is only created AFTER the engine reports it actually ran
+                // (engine returns processed > 0 OR sent > 0). If the engine
+                // returns early (because daily_time hasn't arrived yet), no
+                // lock is set — so a later visit (after the time) can fire it.
                 $preLock = $lockDir . DIRECTORY_SEPARATOR . "pre_{$orgId}_{$today}.lock";
                 if (!is_file($preLock)) {
-                    if (self::acquireLock($preLock)) {
-                        $ranAny = true;
-                        try {
-                            $engine = new SmartComplianceAutomationEngine($db, $appConfig);
-                            $engine->runPreDueForOrganization($orgId, false);
-                        } catch (Throwable $e) {
-                            self::log('pre-due failed for org ' . $orgId . ': ' . $e->getMessage());
+                    try {
+                        $engine = new SmartComplianceAutomationEngine($db, $appConfig);
+                        $result = $engine->runPreDueForOrganization($orgId, false);
+                        if (self::engineActuallyRan($result)) {
+                            self::acquireLock($preLock);
+                            $ranAny = true;
                         }
+                    } catch (Throwable $e) {
+                        self::log('pre-due failed for org ' . $orgId . ': ' . $e->getMessage());
                     }
                 }
 
                 // ---- Escalation ----
                 $escLock = $lockDir . DIRECTORY_SEPARATOR . "esc_{$orgId}_{$today}.lock";
                 if (!is_file($escLock)) {
-                    if (self::acquireLock($escLock)) {
-                        $ranAny = true;
-                        try {
-                            $engine = new SmartComplianceAutomationEngine($db, $appConfig);
-                            $engine->runEscalationForOrganization($orgId, false);
-                        } catch (Throwable $e) {
-                            self::log('escalation failed for org ' . $orgId . ': ' . $e->getMessage());
+                    try {
+                        $engine = new SmartComplianceAutomationEngine($db, $appConfig);
+                        $result = $engine->runEscalationForOrganization($orgId, false);
+                        if (self::engineActuallyRan($result)) {
+                            self::acquireLock($escLock);
+                            $ranAny = true;
                         }
+                    } catch (Throwable $e) {
+                        self::log('escalation failed for org ' . $orgId . ': ' . $e->getMessage());
                     }
                 }
             }
@@ -104,6 +110,21 @@ final class AutoMailTrigger
     {
         $root = defined('ROOT_PATH') ? constant('ROOT_PATH') : dirname(__DIR__, 2);
         return rtrim((string) $root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . self::LOCK_DIR_NAME;
+    }
+
+    /**
+     * Decide if the engine actually ran (vs. returned early because
+     * daily_time hasn't arrived yet). The engine's early return is:
+     *   ['processed' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0]
+     * If anything other than all-zeroes, it ran — set the lock.
+     */
+    private static function engineActuallyRan(array $r): bool
+    {
+        $p = (int) ($r['processed'] ?? 0);
+        $s = (int) ($r['sent']      ?? 0);
+        $f = (int) ($r['failed']    ?? 0);
+        $k = (int) ($r['skipped']   ?? 0);
+        return ($p + $s + $f + $k) > 0;
     }
 
     /** Atomically create the lock file. Returns true if THIS request grabbed it. */
