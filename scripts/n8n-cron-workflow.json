@@ -1,0 +1,117 @@
+{
+  "name": "Easy Home Finance — Daily Mail Engine Cron",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 11 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 11 AM IST Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Fires every day at 11:00 AM. Make sure n8n's timezone is set to Asia/Kolkata in your n8n instance settings (or in this node)."
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR-PRODUCTION-DOMAIN/cron/run-automations",
+        "options": {
+          "timeout": 120000
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "REPLACE_WITH_YOUR_CRON_SECRET_KEY"
+            }
+          ]
+        }
+      },
+      "id": "fire-cron",
+      "name": "Fire Mail Engine",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "notes": "Calls the /cron/run-automations endpoint. Replace YOUR-PRODUCTION-DOMAIN and the key. The endpoint returns JSON with sent/failed counts."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ok-check",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "success-check",
+      "name": "OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "content": "✅ Daily mail run finished\n• Pre-Due sent: {{ $json.totals.pre_sent }}\n• Escalation sent: {{ $json.totals.esc_sent }}\n• Failed: {{ $json.totals.pre_failed + $json.totals.esc_failed }}",
+        "additionalFields": {}
+      },
+      "id": "log-success",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "content": "❌ Daily mail run FAILED — investigate the response and check Mailgun/SMTP credentials on production.",
+        "additionalFields": {}
+      },
+      "id": "log-failure",
+      "name": "Log Failure",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [960, 400]
+    }
+  ],
+  "connections": {
+    "Daily 11 AM IST Trigger": {
+      "main": [[{ "node": "Fire Mail Engine", "type": "main", "index": 0 }]]
+    },
+    "Fire Mail Engine": {
+      "main": [[{ "node": "OK?", "type": "main", "index": 0 }]]
+    },
+    "OK?": {
+      "main": [
+        [{ "node": "Log Success", "type": "main", "index": 0 }],
+        [{ "node": "Log Failure", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}
