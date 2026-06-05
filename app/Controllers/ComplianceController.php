@@ -682,9 +682,27 @@ class ComplianceController extends BaseController
 
     private function getAuthorityOptions(): array
     {
-        // Ensure IRDAI exists (idempotent)
-        $exists = $this->db->query("SELECT COUNT(*) FROM authorities WHERE name = 'IRDAI'")->fetchColumn();
-        if (!$exists) { $this->db->exec("INSERT INTO authorities (name) VALUES ('IRDAI')"); }
+        // Auto-seed standard authorities if missing (idempotent — safe to run
+        // on any environment; existing rows are never duplicated or modified).
+        $standard = [
+            'RBI', 'NHB', 'SEBI', 'IRDAI',
+            'GST', 'TDS', 'Income Tax', 'PF', 'ESIC', 'PT',
+            'Internal Policy',
+        ];
+        try {
+            $existingStmt = $this->db->query('SELECT name FROM authorities');
+            $existing = array_map(static function ($r) { return strtolower(trim((string) $r)); },
+                $existingStmt->fetchAll(\PDO::FETCH_COLUMN));
+            $existingSet = array_fill_keys($existing, true);
+            $ins = $this->db->prepare('INSERT INTO authorities (name) VALUES (?)');
+            foreach ($standard as $name) {
+                if (!isset($existingSet[strtolower($name)])) {
+                    try { $ins->execute([$name]); } catch (\Throwable $e) { /* ignore dupes */ }
+                }
+            }
+        } catch (\Throwable $e) {
+            // If something fails, fall through to read what's there — never break the form
+        }
         $stmt = $this->db->query('SELECT id, name FROM authorities ORDER BY name');
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
